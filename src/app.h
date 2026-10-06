@@ -37,7 +37,7 @@ struct Clipboard {
 // Physical key -> semitone offset from the current octave, or -1.
 int scancodeToNote(SDL_Scancode sc);
 
-enum class FileDialogMode { None, Open, Save, ExportWav };
+enum class FileDialogMode { None, Open, Save, ExportWav, LoadSample };
 enum class PendingAction { None, New, Open, Demo, Quit };
 
 class App {
@@ -48,6 +48,7 @@ class App {
   void openAudio();
   void queueKey(const KeyEvent& ev) { keys_.push_back(ev); }
   void requestQuit();
+  void loadSettings();
   // Builds the whole UI. Call between ImGui::NewFrame and ImGui::Render
   // while holding engine().mutex.
   void frame();
@@ -85,6 +86,10 @@ class App {
 
   // Windows.
   bool showPattern_ = true, showOrders_ = true, showInstruments_ = true, showInsEditor_ = true;
+  bool showSamples_ = true;
+  bool showScroller_ = false;
+  int curSample_ = 0;
+  int loadSampleIntoIns_ = -1;  // instrument that receives the next loaded WAV
   bool showSong_ = true, showScope_ = true, showEffects_ = false, showKeys_ = false, showAbout_ = false;
   bool layoutDone_ = false;
   bool patternFocused_ = false;
@@ -142,12 +147,17 @@ class App {
   void instrumentsWindow();
   void instrumentEditor();
   bool macroEditor(Instrument& ins, int type);
+  bool fmEditor(Instrument& ins);
+  bool sampleInsEditor(Instrument& ins);
+  void samplesWindow();
   bool wavetableEditor(Instrument& ins);
 
   // ui_windows.cpp
   void ordersWindow();
   void songWindow();
   void scopeWindow();
+  void scrollerWindow();
+  void saveSettings();
   void effectsHelp();
   void keysHelp();
   void aboutWindow();

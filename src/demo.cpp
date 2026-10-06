@@ -34,11 +34,11 @@ void loadDemoSong(Song& s) {
   s.reset(8);
   s.name = "Keygen Groove";
   s.author = "DATRACKARXD";
-  s.speed = 6;
+  s.speeds = {6};
   s.tickRate = 60;
   s.patternLength = 64;
 
-  const char* names[8] = {"Lead", "Arp", "Bass", "Drums", "Hats", "Echo", "Free 1", "Free 2"};
+  const char* names[8] = {"Lead", "Arp", "Bass", "Drums", "Hats", "Echo", "Pad", "FM Bass"};
   for (int i = 0; i < 8; i++) s.channels[i].name = names[i];
   s.channels[0].effectCols = 2;
   s.channels[5].effectCols = 2;
@@ -106,7 +106,21 @@ void loadDemoSong(Song& s) {
     i.macros[MACRO_VOL] = mac({4, 7, 10, 12, 12, 11, 10, 9, 8, 6, 4, 2, 0}, -1, 4);
     s.instruments.push_back(i);
   }
-  const int LEAD = 0, ARP = 1, BASS = 2, KICK = 3, SNARE = 4, HAT = 5;
+  {
+    Instrument i;
+    i.name = "FM slap bass";
+    i.type = INS_FM;
+    i.fm.alg = 0;
+    i.fm.fb = 6;
+    const int ops[4][9] = {{0, 3, 30, 31, 14, 6, 0, 8, 0}, {1, 3, 28, 31, 12, 7, 0, 8, 0}, {1, 3, 24, 31, 8, 5, 0, 8, 0}, {1, 3, 0, 31, 6, 2, 2, 9, 0}};
+    for (int o = 0; o < 4; o++) {
+      FMOperator& op = i.fm.ops[o];
+      op.mult = ops[o][0], op.dt = ops[o][1], op.tl = ops[o][2], op.ar = ops[o][3], op.dr = ops[o][4];
+      op.sl = ops[o][5], op.d2r = ops[o][6], op.rr = ops[o][7], op.ksr = ops[o][8];
+    }
+    s.instruments.push_back(i);
+  }
+  const int LEAD = 0, ARP = 1, BASS = 2, KICK = 3, SNARE = 4, HAT = 5, FMBASS = 7;
 
   // Chord progression: Am - F - C - G, 16 rows each.
   const int roots[4] = {n(A, 2), n(F, 2), n(C, 3), n(G, 2)};
@@ -117,6 +131,9 @@ void loadDemoSong(Song& s) {
     int base = chord * 16;
     for (int r = 0; r < 16; r += 4) put(s, 1, 0, base + r, arpNotes[chord], ARP, -1, 0x00, arpFx[chord]);
     for (int r = 0; r < 16; r += 2) put(s, 2, 0, base + r, roots[chord] + ((r / 2) % 2 ? 12 : 0), BASS);
+    // FM bass: syncopated pattern an octave up, used in the last order.
+    static const int fmRows[] = {0, 3, 6, 8, 11, 14};
+    for (int r : fmRows) put(s, 7, 1, base + r, roots[chord] + 12 + (r == 11 ? 12 : 0), FMBASS, 0x70);
     // Drums: kick on 0, 8, 10 and snare on 4, 12.
     put(s, 3, 0, base + 0, n(C, 3), KICK);
     put(s, 3, 0, base + 4, n(C, 6), SNARE);
@@ -176,5 +193,5 @@ void loadDemoSong(Song& s) {
   //            lead arp bass drm hat echo pad
   s.orders.push_back({0, 0, 0, 0, 0, 0, 0, 0});
   s.orders.push_back({1, 0, 0, 0, 1, 1, 0, 0});
-  s.orders.push_back({2, 0, 0, 0, 1, 2, 1, 0});
+  s.orders.push_back({2, 0, 0, 0, 1, 2, 1, 1});
 }

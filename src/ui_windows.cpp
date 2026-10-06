@@ -2,9 +2,14 @@
 #include <imgui.h>
 
 #include <algorithm>
+#include <cfloat>
+#include <cmath>
 #include <cstdio>
+#include <cstdlib>
+#include <sstream>
 
 #include "app.h"
+#include "theme.h"
 
 void App::ordersWindow() {
   if (!ImGui::Begin("Orders", &showOrders_)) {
@@ -167,10 +172,30 @@ void App::songWindow() {
     song_.tickRate = std::clamp(song_.tickRate, 1.0f, 1000.0f);
     changed = true;
   }
-  ImGui::SetNextItemWidth(120);
-  if (ImGui::InputInt("Speed (ticks/row)", &song_.speed)) {
-    song_.speed = std::clamp(song_.speed, 1, 255);
-    changed = true;
+  // Speed: one value, or several cycled row by row ("6 5" = swing).
+  {
+    static char speedBuf[64];
+    static bool editingSpeed = false;
+    if (!editingSpeed) {
+      std::string t;
+      for (int v : song_.speeds) t += std::to_string(v) + " ";
+      if (!t.empty()) t.pop_back();
+      std::snprintf(speedBuf, sizeof(speedBuf), "%s", t.c_str());
+    }
+    ImGui::SetNextItemWidth(120);
+    ImGui::InputText("Speed (ticks/row)", speedBuf, sizeof(speedBuf));
+    editingSpeed = ImGui::IsItemActive();
+    if (ImGui::IsItemHovered()) ImGui::SetTooltip("Ticks per row. Several values (e.g. \"6 5\") alternate row by row for swing.");
+    if (ImGui::IsItemDeactivatedAfterEdit()) {
+      std::vector<int> sp;
+      std::istringstream ss(speedBuf);
+      int v;
+      while (ss >> v && (int)sp.size() < MAX_GROOVE) sp.push_back(std::clamp(v, 1, 255));
+      if (!sp.empty()) {
+        song_.speeds = sp;
+        changed = true;
+      }
+    }
   }
   ImGui::SetNextItemWidth(120);
   if (ImGui::InputInt("Pattern length", &song_.patternLength)) {
@@ -187,7 +212,10 @@ void App::songWindow() {
     song_.highlight2 = std::clamp(song_.highlight2, 0, MAX_ROWS);
     changed = true;
   }
-  float bpm = song_.tickRate * 60.0f / (std::max(song_.speed, 1) * std::max(song_.highlight1, 1));
+  float avgSpeed = 0;
+  for (int v : song_.speeds) avgSpeed += v;
+  avgSpeed = song_.speeds.empty() ? 6 : avgSpeed / song_.speeds.size();
+  float bpm = song_.tickRate * 60.0f / (std::max(avgSpeed, 1.0f) * std::max(song_.highlight1, 1));
   ImGui::TextDisabled("= %.1f BPM (one beat = Highlight 1 rows)", bpm);
 
   ImGui::Separator();
@@ -200,10 +228,11 @@ void App::songWindow() {
     redo_.clear();
     changed = true;
   }
-  if (ImGui::BeginTable("chans", 3, ImGuiTableFlags_SizingStretchProp | ImGuiTableFlags_RowBg)) {
+  if (ImGui::BeginTable("chans", 4, ImGuiTableFlags_SizingStretchProp | ImGuiTableFlags_RowBg)) {
     ImGui::TableSetupColumn("#", ImGuiTableColumnFlags_WidthFixed);
     ImGui::TableSetupColumn("Name");
     ImGui::TableSetupColumn("FX cols", ImGuiTableColumnFlags_WidthFixed, 90);
+    ImGui::TableSetupColumn("Mix", ImGuiTableColumnFlags_WidthFixed, 70);
     ImGui::TableHeadersRow();
     for (int c = 0; c < song_.channelCount(); c++) {
       ChannelInfo& info = song_.channels[c];
@@ -224,6 +253,9 @@ void App::songWindow() {
         info.effectCols = std::clamp(info.effectCols, 1, MAX_EFFECTS);
         changed = true;
       }
+      ImGui::TableNextColumn();
+      ImGui::SetNextItemWidth(-1);
+      changed |= ImGui::SliderFloat("##mix", &info.mix, 0.0f, 2.0f, "%.2f");
       ImGui::PopID();
     }
     ImGui::EndTable();
@@ -243,30 +275,130 @@ void App::scopeWindow() {
   ImVec2 avail = ImGui::GetContentRegionAvail();
   int nch = song_.channelCount();
   int boxes = nch + 1;
-  float w = avail.x / boxes, h = std::max(avail.y, 20.0f);
+  // Grid layout: as many columns as fit at 90 px or more.
+  int cols = std::clamp((int)(avail.x / 90.0f), 1, boxes);
+  int gridRows = (boxes + cols - 1) / cols;
+  float w = avail.x / cols, h = std::max(avail.y / gridRows, 16.0f);
   const int samples = 512;
   int start = (engine_->scopePos() - samples + SCOPE_LEN) % SCOPE_LEN;
 
-  auto drawScope = [&](int i, const std::array<float, SCOPE_LEN>& data, ImU32 color, const char* label, float scale) {
-    ImVec2 a(pos.x + i * w + 2, pos.y), b(pos.x + (i + 1) * w - 2, pos.y + h);
-    dl->AddRectFilled(a, b, IM_COL32(15, 15, 22, 255), 3);
+  auto drawScope = [&](int i, const std::array<float, SCOPE_LEN>& data, ImU32 color, const char* label) {
+    float x0 = pos.x + (i % cols) * w, y0 = pos.y + (i / cols) * h;
+    ImVec2 a(x0 + 2, y0 + 1), b(x0 + w - 2, y0 + h - 1);
+    dl->AddRectFilled(a, b, theme().scopeBg, 3);
     float mid = (a.y + b.y) / 2;
     ImVec2 pts[128];
-    int np = 128;
+    const int np = 128;
     for (int k = 0; k < np; k++) {
-      float v = data[(start + k * samples / np) % SCOPE_LEN] * scale;
-      pts[k] = ImVec2(a.x + (b.x - a.x) * k / (np - 1), mid - std::clamp(v, -1.0f, 1.0f) * (h / 2 - 2));
+      float v = data[(start + k * samples / np) % SCOPE_LEN];
+      pts[k] = ImVec2(a.x + (b.x - a.x) * k / (np - 1), mid - std::clamp(v, -1.0f, 1.0f) * ((b.y - a.y) / 2 - 1));
     }
+    dl->PushClipRect(a, b, true);
     dl->AddPolyline(pts, np, color, 0, 1.5f);
     dl->AddText(ImVec2(a.x + 3, a.y + 1), IM_COL32(150, 150, 170, 255), label);
+    dl->PopClipRect();
   };
-  for (int c = 0; c < nch; c++) {
-    bool muted = song_.channels[c].muted;
-    drawScope(c, engine_->channel(c).scope, muted ? IM_COL32(110, 60, 60, 255) : IM_COL32(110, 230, 140, 255),
-              song_.channels[c].name.c_str(), 1.0f);
-  }
-  drawScope(nch, engine_->masterScope(), IM_COL32(120, 190, 255, 255), "Master", 1.0f);
+  for (int c = 0; c < nch; c++)
+    drawScope(c, engine_->channel(c).scope, song_.channels[c].muted ? theme().scopeMuted : theme().scope, song_.channels[c].name.c_str());
+  drawScope(nch, engine_->masterScope(), theme().scopeMaster, "Master");
   ImGui::Dummy(avail);
+  ImGui::End();
+}
+
+// Keygen-style intro screen: starfield, copper bars, logo and sine scroller.
+void App::scrollerWindow() {
+  if (!ImGui::Begin("Keygen", &showScroller_)) {
+    ImGui::End();
+    return;
+  }
+  ImDrawList* dl = ImGui::GetWindowDrawList();
+  ImVec2 p0 = ImGui::GetCursorScreenPos();
+  ImVec2 size = ImGui::GetContentRegionAvail();
+  size.x = std::max(size.x, 50.0f);
+  size.y = std::max(size.y, 50.0f);
+  ImVec2 p1(p0.x + size.x, p0.y + size.y);
+  float t = (float)ImGui::GetTime();
+  float dt = std::min(ImGui::GetIO().DeltaTime, 0.1f);
+  dl->PushClipRect(p0, p1, true);
+  dl->AddRectFilled(p0, p1, IM_COL32(0, 0, 0, 255));
+
+  // Music level drives the bars and the stars.
+  float peak = 0;
+  for (float v : engine_->masterScope()) peak = std::max(peak, std::abs(v));
+
+  // Starfield.
+  struct Star {
+    float x, y, z;
+  };
+  static std::vector<Star> stars;
+  if (stars.empty()) {
+    for (int i = 0; i < 220; i++) stars.push_back({(std::rand() % 2000 - 1000) / 1000.0f, (std::rand() % 2000 - 1000) / 1000.0f, (std::rand() % 1000 + 1) / 1000.0f});
+  }
+  ImVec2 c((p0.x + p1.x) / 2, (p0.y + p1.y) / 2);
+  for (Star& s : stars) {
+    s.z -= dt * (0.25f + peak * 0.8f);
+    if (s.z <= 0.02f) {
+      s = {(std::rand() % 2000 - 1000) / 1000.0f, (std::rand() % 2000 - 1000) / 1000.0f, 1.0f};
+    }
+    float sx = c.x + s.x / s.z * size.x * 0.5f, sy = c.y + s.y / s.z * size.y * 0.5f;
+    int b = (int)(255 * (1.0f - s.z));
+    float r = 1.0f + (1.0f - s.z) * 1.5f;
+    dl->AddRectFilled(ImVec2(sx - r / 2, sy - r / 2), ImVec2(sx + r / 2, sy + r / 2), IM_COL32(b, b, b, 255));
+  }
+
+  // Copper bars.
+  static const ImU32 barCols[3][2] = {{IM_COL32(255, 0, 200, 0), IM_COL32(255, 0, 200, 200)},
+                                      {IM_COL32(0, 255, 240, 0), IM_COL32(0, 255, 240, 200)},
+                                      {IM_COL32(120, 255, 60, 0), IM_COL32(120, 255, 60, 200)}};
+  for (int i = 0; i < 3; i++) {
+    float y = c.y + std::sin(t * 1.3f + i * 2.1f) * size.y * 0.3f;
+    float hh = 6 + peak * 14;
+    dl->AddRectFilledMultiColor(ImVec2(p0.x, y - hh), ImVec2(p1.x, y), barCols[i][0], barCols[i][0], barCols[i][1], barCols[i][1]);
+    dl->AddRectFilledMultiColor(ImVec2(p0.x, y), ImVec2(p1.x, y + hh), barCols[i][1], barCols[i][1], barCols[i][0], barCols[i][0]);
+  }
+
+  ImFont* font = ImGui::GetFont();
+  auto hue = [](float h, int alpha) {
+    float r, g, b;
+    ImGui::ColorConvertHSVtoRGB(h - std::floor(h), 0.9f, 1.0f, r, g, b);
+    return IM_COL32((int)(r * 255), (int)(g * 255), (int)(b * 255), alpha);
+  };
+
+  // Logo.
+  const char* logo = "DATRACKARXD";
+  float logoSize = std::clamp(size.y * 0.22f, 16.0f, 64.0f);
+  float lw = font->CalcTextSizeA(logoSize, FLT_MAX, 0, logo).x;
+  float lx = c.x - lw / 2, ly = p0.y + size.y * 0.12f;
+  for (const char* ch = logo; *ch; ch++) {
+    int i = (int)(ch - logo);
+    float oy = std::sin(t * 4 + i * 0.6f) * logoSize * 0.12f;
+    dl->AddText(font, logoSize, ImVec2(lx + 3, ly + oy + 3), IM_COL32(0, 0, 0, 200), ch, ch + 1);
+    dl->AddText(font, logoSize, ImVec2(lx, ly + oy), hue(t * 0.2f + i * 0.07f, 255), ch, ch + 1);
+    lx += font->CalcTextSizeA(logoSize, FLT_MAX, 0, ch, ch + 1).x;
+  }
+
+  // Sine scroller.
+  std::string text = "      *** DATRACKARXD ***   NOW PLAYING: " + song_.name;
+  if (!song_.author.empty()) text += "  BY " + song_.author;
+  text += "   ***   " + std::to_string(song_.channelCount()) + " CHANNELS OF PURE CHIP POWER   ***   " +
+          std::to_string(song_.instruments.size()) + " INSTRUMENTS   ***   PRESS ENTER TO PLAY   ***   "
+          "GREETINGS TO ALL TRACKER MUSICIANS, DEMOSCENERS AND FURNACE USERS   ***   ";
+  for (char& ch : text) ch = (char)std::toupper((unsigned char)ch);
+  float fs = std::clamp(size.y * 0.16f, 14.0f, 48.0f);
+  float charW = font->CalcTextSizeA(fs, FLT_MAX, 0, "W").x;
+  float total = text.size() * charW;
+  float offset = std::fmod(t * 140.0f, total);
+  float baseY = p0.y + size.y * 0.72f;
+  for (size_t i = 0; i < text.size() * 2; i++) {
+    float x = p0.x + i * charW - offset;
+    if (x < p0.x - charW) continue;
+    if (x > p1.x) break;
+    const char* ch = &text[i % text.size()];
+    float y = baseY + std::sin(t * 3.0f + x * 0.015f) * size.y * 0.1f;
+    dl->AddText(font, fs, ImVec2(x, y), hue(x * 0.002f + t * 0.3f, 255), ch, ch + 1);
+  }
+  dl->PopClipRect();
+  ImGui::Dummy(size);
   ImGui::End();
 }
 
@@ -281,15 +413,28 @@ void App::effectsHelp() {
       {"02xx", "Pitch slide down"},
       {"03xx", "Portamento to the note in this row (speed xx)"},
       {"04xy", "Vibrato: speed x, depth y"},
+      {"05xy", "Volume slide (like 0A) while the vibrato continues"},
+      {"06xy", "Volume slide (like 0A) while the portamento continues"},
+      {"07xy", "Tremolo: speed x, depth y"},
       {"08xy", "Panning: left volume x, right volume y (0-F)"},
       {"0Axy", "Volume slide: up x or down y per tick"},
       {"0Bxx", "Jump to order xx"},
+      {"0Cxx", "Retrigger the note every xx ticks"},
       {"0Dxx", "Go to row xx of the next order"},
       {"0Fxx", "Set speed (ticks per row)"},
-      {"10xx", "Set waveform (0 pulse..5 wavetable)"},
-      {"12xx", "Set duty (0-3)"},
+      {"10xx", "Set waveform (0 pulse..5 wavetable; wavetable index on wavetable channels)"},
+      {"12xx", "Set duty (0-3). Noise: 1 = metallic, 3 = periodic"},
+      {"80xx", "Panning: 00 left, 80 center, FF right"},
+      {"90xx-92xx", "Sample offset (byte 0, 1, 2 of the position)"},
+      {"C0xx-C3xx", "Set tick rate in Hz (C0-C3 hold the high bits)"},
+      {"E1xy / E2xy", "Slide up / down y semitones at speed x"},
+      {"E6xx", "Pattern loop: E600 marks the start, E6xx repeats xx times"},
       {"ECxx", "Cut the note after xx ticks"},
       {"EDxx", "Delay the row by xx ticks"},
+      {"EExx", "Pattern delay: repeat the row xx times"},
+      {"F0xx", "Set tempo in BPM (tick rate = xx * 2 / 5)"},
+      {"F1xx / F2xx", "Fine pitch slide up / down, once"},
+      {"F3xx / F4xx", "Fine volume up / down by xx, once"},
   };
   if (ImGui::BeginTable("fx", 2, ImGuiTableFlags_RowBg | ImGuiTableFlags_SizingStretchProp)) {
     for (auto& r : rows) {
@@ -329,7 +474,7 @@ void App::keysHelp() {
       {"Delete", "Clear"},
       {"Insert / Backspace", "Insert row / delete row"},
       {"Numpad / *", "Octave down / up"},
-      {"Ctrl+N / O / S", "New / open / save"},
+      {"Ctrl+N / O / S", "New / open or import / save"},
       {"Click channel name", "Mute (right-click: solo)"},
   };
   if (ImGui::BeginTable("keys", 2, ImGuiTableFlags_RowBg | ImGuiTableFlags_SizingStretchProp)) {
@@ -349,8 +494,8 @@ void App::aboutWindow() {
   ImGui::SetNextWindowSize(ImVec2(380, 0), ImGuiCond_Appearing);
   if (ImGui::Begin("About", &showAbout_, ImGuiWindowFlags_NoDocking)) {
     ImGui::Text("DATRACKARXD");
-    ImGui::TextWrapped("A small chiptune tracker in the spirit of Furnace. Pulse, triangle, saw, noise, sine and wavetable "
-                       "channels with Furnace-style macros.");
+    ImGui::TextWrapped("A small tracker in the spirit of Furnace: chip waves (pulse, triangle, saw, noise, sine, "
+                       "wavetable), 4-operator FM and samples, with Furnace-style macros. Imports FUR, MOD, XM, IT and S3M.");
   }
   ImGui::End();
 }

@@ -5,6 +5,7 @@
 #include <cstdio>
 
 #include "app.h"
+#include "theme.h"
 
 namespace {
 
@@ -61,15 +62,6 @@ void hex2(char* buf, int v) {
     std::snprintf(buf, 3, "%02X", v & 0xff);
 }
 
-const ImU32 COL_NOTE = IM_COL32(225, 228, 240, 255);
-const ImU32 COL_OFF = IM_COL32(160, 160, 175, 255);
-const ImU32 COL_INS = IM_COL32(120, 225, 140, 255);
-const ImU32 COL_VOL = IM_COL32(120, 180, 255, 255);
-const ImU32 COL_FXCMD = IM_COL32(255, 160, 80, 255);
-const ImU32 COL_FXVAL = IM_COL32(255, 215, 140, 255);
-const ImU32 COL_EMPTY = IM_COL32(85, 85, 100, 255);
-const ImU32 COL_ROWNUM = IM_COL32(140, 140, 160, 255);
-const ImU32 COL_ROWNUM_HI = IM_COL32(230, 230, 120, 255);
 
 }  // namespace
 
@@ -539,6 +531,7 @@ void App::patternWindow() {
   ImGui::TextDisabled("Order %02X / pattern %02X", curOrder_, song_.orders[curOrder_][curCh_]);
 
   ImGuiIO& io = ImGui::GetIO();
+  const Theme& T = theme();
   ImDrawList* dl = ImGui::GetWindowDrawList();
   float cw = ImGui::CalcTextSize("0").x;
   float rh = ImGui::GetTextLineHeight() + 2.0f;
@@ -584,7 +577,7 @@ void App::patternWindow() {
   }
 
   dl->PushClipRect(origin, ImVec2(origin.x + avail.x, origin.y + avail.y), true);
-  dl->AddRectFilled(origin, ImVec2(origin.x + avail.x, origin.y + avail.y), IM_COL32(18, 18, 26, 255));
+  dl->AddRectFilled(origin, ImVec2(origin.x + avail.x, origin.y + avail.y), T.patBg);
 
   // Channel headers: click to mute, right-click to solo.
   for (size_t i = 0; i < chIdx.size(); i++) {
@@ -592,7 +585,7 @@ void App::patternWindow() {
     ChannelInfo& info = song_.channels[c];
     ImVec2 a(chX[i], origin.y), b(chX[i] + chWidth(c) - chPad * 0.5f, origin.y + headerH - 2);
     bool hov = hovered && io.MousePos.x >= a.x && io.MousePos.x < b.x && io.MousePos.y >= a.y && io.MousePos.y < b.y;
-    dl->AddRectFilled(a, b, info.muted ? IM_COL32(70, 30, 30, 255) : hov ? IM_COL32(60, 60, 90, 255) : IM_COL32(40, 40, 60, 255), 3);
+    dl->AddRectFilled(a, b, info.muted ? T.headerMuted : hov ? T.headerHover : T.header, 3);
     // Level meter from the scope buffer.
     const ChannelState& st = engine_->channel(c);
     float peak = 0;
@@ -600,7 +593,7 @@ void App::patternWindow() {
     dl->AddRectFilled(ImVec2(a.x, b.y - 3), ImVec2(a.x + (b.x - a.x) * std::min(peak * 1.5f, 1.0f), b.y), IM_COL32(100, 220, 120, 200));
     std::string label = info.muted ? info.name + " (M)" : info.name;
     dl->PushClipRect(a, b, true);
-    dl->AddText(ImVec2(a.x + 4, a.y + 2), info.muted ? IM_COL32(200, 120, 120, 255) : IM_COL32(230, 230, 240, 255), label.c_str());
+    dl->AddText(ImVec2(a.x + 4, a.y + 2), info.muted ? IM_COL32(200, 120, 120, 255) : T.headerText, label.c_str());
     dl->PopClipRect();
     if (hov && ImGui::IsMouseClicked(ImGuiMouseButton_Left)) info.muted = !info.muted;
     if (hov && ImGui::IsMouseClicked(ImGuiMouseButton_Right)) {
@@ -624,16 +617,16 @@ void App::patternWindow() {
     ImVec2 ra(origin.x, y), rb(rightEdge, y + rh);
 
     if (song_.highlight2 > 0 && row % song_.highlight2 == 0)
-      dl->AddRectFilled(ra, rb, IM_COL32(45, 45, 72, 255));
+      dl->AddRectFilled(ra, rb, T.rowHi2);
     else if (song_.highlight1 > 0 && row % song_.highlight1 == 0)
-      dl->AddRectFilled(ra, rb, IM_COL32(32, 32, 48, 255));
-    if (playing && playOrder == curOrder_ && playRow == row) dl->AddRectFilled(ra, rb, IM_COL32(40, 110, 50, 110));
-    if (row == curRow_) dl->AddRectFilled(ra, rb, editMode_ ? IM_COL32(120, 40, 50, 120) : IM_COL32(40, 70, 130, 120));
+      dl->AddRectFilled(ra, rb, T.rowHi1);
+    if (playing && playOrder == curOrder_ && playRow == row) dl->AddRectFilled(ra, rb, T.playRow);
+    if (row == curRow_) dl->AddRectFilled(ra, rb, editMode_ ? T.editRow : T.cursorRow);
 
     char buf[16];
     std::snprintf(buf, sizeof(buf), "%02X", row);
     bool hiRow = song_.highlight1 > 0 && row % song_.highlight1 == 0;
-    dl->AddText(ImVec2(origin.x + cw * 0.5f, y + 1), hiRow ? COL_ROWNUM_HI : COL_ROWNUM, buf);
+    dl->AddText(ImVec2(origin.x + cw * 0.5f, y + 1), hiRow ? T.rowNumHi : T.rowNum, buf);
 
     for (size_t i = 0; i < chIdx.size(); i++) {
       int c = chIdx[i];
@@ -650,27 +643,27 @@ void App::patternWindow() {
         auto fieldX0 = [&](int f) { return f == 0 ? 0 : f == 1 ? 4 : f == 2 ? 7 : 10 + 5 * (f - 3); };
         auto fieldX1 = [&](int f) { return f == 0 ? 3 : f == 1 ? 6 : f == 2 ? 9 : 14 + 5 * (f - 3); };
         if (f0 <= f1)
-          dl->AddRectFilled(ImVec2(x + fieldX0(f0) * cw - 1, y), ImVec2(x + fieldX1(f1) * cw + 1, y + rh), IM_COL32(90, 120, 210, 100));
+          dl->AddRectFilled(ImVec2(x + fieldX0(f0) * cw - 1, y), ImVec2(x + fieldX1(f1) * cw + 1, y + rh), T.selection);
       }
 
       std::string nn = cl.note == NOTE_EMPTY ? "..." : noteName(cl.note);
-      dl->AddText(ImVec2(x, y + 1), cl.note == NOTE_EMPTY ? COL_EMPTY : cl.note == NOTE_OFF ? COL_OFF : COL_NOTE, nn.c_str());
+      dl->AddText(ImVec2(x, y + 1), cl.note == NOTE_EMPTY ? T.empty : cl.note == NOTE_OFF ? T.noteOff : T.note, nn.c_str());
       hex2(buf, cl.ins);
-      dl->AddText(ImVec2(x + 4 * cw, y + 1), cl.ins < 0 ? COL_EMPTY : COL_INS, buf);
+      dl->AddText(ImVec2(x + 4 * cw, y + 1), cl.ins < 0 ? T.empty : T.ins, buf);
       hex2(buf, cl.vol);
-      dl->AddText(ImVec2(x + 7 * cw, y + 1), cl.vol < 0 ? COL_EMPTY : COL_VOL, buf);
+      dl->AddText(ImVec2(x + 7 * cw, y + 1), cl.vol < 0 ? T.empty : T.vol, buf);
       for (int e = 0; e < info.effectCols; e++) {
         hex2(buf, cl.fx[e].cmd);
-        dl->AddText(ImVec2(x + (10 + 5 * e) * cw, y + 1), cl.fx[e].cmd < 0 ? COL_EMPTY : COL_FXCMD, buf);
+        dl->AddText(ImVec2(x + (10 + 5 * e) * cw, y + 1), cl.fx[e].cmd < 0 ? T.empty : T.fxCmd, buf);
         hex2(buf, cl.fx[e].val);
-        dl->AddText(ImVec2(x + (12 + 5 * e) * cw, y + 1), cl.fx[e].val < 0 ? COL_EMPTY : COL_FXVAL, buf);
+        dl->AddText(ImVec2(x + (12 + 5 * e) * cw, y + 1), cl.fx[e].val < 0 ? T.empty : T.fxVal, buf);
       }
       if (c == curCh_ && row == curRow_) {
         float cx = x + subColChar(curCol_) * cw;
-        dl->AddRect(ImVec2(cx - 1, y), ImVec2(cx + subColWidth(curCol_) * cw + 1, y + rh), IM_COL32(230, 230, 255, 230), 0, 0, 1.5f);
+        dl->AddRect(ImVec2(cx - 1, y), ImVec2(cx + subColWidth(curCol_) * cw + 1, y + rh), T.cursorBox, 0, 0, 1.5f);
       }
       // Channel separator.
-      dl->AddLine(ImVec2(x + chWidth(c) - chPad * 0.5f, y), ImVec2(x + chWidth(c) - chPad * 0.5f, y + rh), IM_COL32(60, 60, 80, 255));
+      dl->AddLine(ImVec2(x + chWidth(c) - chPad * 0.5f, y), ImVec2(x + chWidth(c) - chPad * 0.5f, y + rh), T.separator);
     }
   }
   dl->PopClipRect();

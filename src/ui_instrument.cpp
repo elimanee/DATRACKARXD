@@ -23,7 +23,7 @@ std::string macroToText(const Macro& m) {
   return s;
 }
 
-void textToMacro(const std::string& text, Macro& m, int type) {
+void textToMacro(const std::string& text, Macro& m, int lo, int hi) {
   std::istringstream ss(text);
   std::string tok;
   m.values.clear();
@@ -35,7 +35,7 @@ void textToMacro(const std::string& text, Macro& m, int type) {
       if (!m.values.empty()) m.release = (int)m.values.size() - 1;
     } else {
       try {
-        m.values.push_back(std::clamp(std::stoi(tok), MACRO_MIN[type], MACRO_MAX[type]));
+        m.values.push_back(std::clamp(std::stoi(tok), lo, hi));
       } catch (...) {
       }
     }
@@ -143,7 +143,9 @@ void App::instrumentsWindow() {
   ImGui::BeginChild("list");
   for (int i = 0; i < (int)song_.instruments.size(); i++) {
     char buf[128];
-    std::snprintf(buf, sizeof(buf), "%02X  %-6s %s", i, WAVE_NAMES[song_.instruments[i].wave], song_.instruments[i].name.c_str());
+    const Instrument& in = song_.instruments[i];
+    const char* kind = in.type == INS_FM ? "FM" : in.type == INS_SAMPLE ? "Sample" : WAVE_NAMES[std::clamp(in.wave, 0, WAVE_COUNT - 1)];
+    std::snprintf(buf, sizeof(buf), "%02X  %-9s %s", i, kind, in.name.c_str());
     if (ImGui::Selectable(buf, i == curIns_, ImGuiSelectableFlags_AllowDoubleClick)) {
       curIns_ = i;
       if (ImGui::IsMouseDoubleClicked(0)) {
@@ -196,7 +198,9 @@ bool App::macroEditor(Instrument& ins, int type) {
   ImGui::InputTextWithHint("##seq", "values, e.g. 15 12 10 | 8 6 / 3 0", bufs[type], sizeof(bufs[type]));
   editing[type] = ImGui::IsItemActive();
   if (ImGui::IsItemDeactivatedAfterEdit()) {
-    textToMacro(bufs[type], m, type);
+    int lo, hi;
+    ins.macroRange(type, lo, hi);
+    textToMacro(bufs[type], m, lo, hi);
     changed = true;
   }
   if (ImGui::IsItemHovered())
@@ -243,8 +247,17 @@ bool App::macroEditor(Instrument& ins, int type) {
 
   static const ImU32 colors[MACRO_COUNT] = {IM_COL32(120, 225, 140, 255), IM_COL32(255, 160, 80, 255), IM_COL32(200, 140, 255, 255),
                                             IM_COL32(120, 200, 255, 255), IM_COL32(255, 220, 120, 255)};
+  int lo, hi;
+  ins.macroRange(type, lo, hi);
+  if (type == MACRO_WAVE) hi = std::max(WAVE_COUNT - 1, std::min(hi, (int)song_.wavetables.size() - 1));
+  if (type == MACRO_ARP) {
+    // Show the fixed-note range only when the macro uses it.
+    bool fixed = false;
+    for (int v : m.values) fixed |= v >= ARP_FIXED;
+    if (!fixed) hi = 60;
+  }
   ImGui::PushID(type);
-  if (barGraph("##graph", m.values, MACRO_MIN[type], MACRO_MAX[type], 140, colors[type], playing)) changed = true;
+  if (barGraph("##graph", m.values, lo, hi, 140, colors[type], playing)) changed = true;
   ImGui::PopID();
 
   // Loop / release markers under the graph.
@@ -262,12 +275,172 @@ bool App::macroEditor(Instrument& ins, int type) {
   }
 
   switch (type) {
-    case MACRO_VOL: ImGui::TextDisabled("Volume 0-15 per tick, multiplied with the channel volume."); break;
-    case MACRO_ARP: ImGui::TextDisabled("Semitone offset per tick (relative to the note)."); break;
-    case MACRO_DUTY: ImGui::TextDisabled("Pulse duty: 0=12.5%% 1=25%% 2=50%% 3=75%%. Noise: odd = metallic."); break;
-    case MACRO_WAVE: ImGui::TextDisabled("0 pulse, 1 triangle, 2 saw, 3 noise, 4 sine, 5 wavetable."); break;
+    case MACRO_VOL: ImGui::TextDisabled("Volume 0-%d per tick, multiplied with the channel volume.", hi); break;
+    case MACRO_ARP: ImGui::TextDisabled("Semitone offset per tick. %d+n plays the fixed note n.", ARP_FIXED); break;
+    case MACRO_DUTY: ImGui::TextDisabled("Pulse duty: 0=12.5%% 1=25%% 2=50%% 3=75%%. Noise: 1 = metallic, 3 = periodic."); break;
+    case MACRO_WAVE:
+      ImGui::TextDisabled("0 pulse, 1 triangle, 2 saw, 3 noise, 4 sine, 5 wavetable.");
+      ImGui::TextDisabled("On a wavetable channel: index of a song wavetable.");
+      break;
     case MACRO_PITCH: ImGui::TextDisabled("Pitch change per tick in 1/32 semitone (adds up)."); break;
   }
+  return changed;
+}
+
+namespace {
+
+const char* const ALG_DIAGRAMS[8] = {
+    "1 > 2 > 3 > 4",     "(1 + 2) > 3 > 4",   "(1 + (2 > 3)) > 4", "((1 > 2) + 3) > 4",
+    "(1 > 2) + (3 > 4)", "1 > (2 + 3 + 4)",   "(1 > 2) + 3 + 4",   "1 + 2 + 3 + 4",
+};
+const bool ALG_CARRIERS[8][4] = {
+    {0, 0, 0, 1}, {0, 0, 0, 1}, {0, 0, 0, 1}, {0, 0, 0, 1}, {0, 1, 0, 1}, {0, 1, 1, 1}, {0, 1, 1, 1}, {1, 1, 1, 1},
+};
+
+struct FMPreset {
+  const char* name;
+  int alg, fb;
+  int op[4][9];  // mult dt tl ar dr sl d2r rr ksr
+};
+const FMPreset FM_PRESETS[] = {
+    {"E.Piano", 4, 5, {{1, 3, 35, 31, 10, 3, 2, 6, 1}, {1, 3, 0, 31, 8, 5, 3, 7, 1}, {14, 3, 45, 31, 12, 4, 4, 6, 1}, {1, 3, 0, 31, 6, 6, 2, 7, 1}}},
+    {"Slap bass", 0, 6, {{0, 3, 30, 31, 14, 6, 0, 8, 0}, {1, 3, 28, 31, 12, 7, 0, 8, 0}, {1, 3, 24, 31, 8, 5, 0, 8, 0}, {1, 3, 0, 31, 6, 2, 2, 9, 0}}},
+    {"Brass", 2, 4, {{1, 3, 28, 18, 4, 2, 0, 7, 0}, {1, 3, 38, 20, 4, 3, 0, 7, 0}, {1, 4, 30, 18, 4, 2, 0, 7, 0}, {1, 3, 0, 20, 3, 1, 0, 8, 0}}},
+    {"Lead", 4, 6, {{2, 3, 26, 31, 4, 2, 0, 8, 0}, {1, 3, 0, 31, 2, 1, 0, 8, 0}, {1, 4, 22, 31, 5, 2, 0, 8, 0}, {1, 2, 4, 31, 2, 1, 0, 8, 0}}},
+    {"Bell", 4, 0, {{7, 3, 30, 31, 8, 4, 4, 5, 2}, {1, 3, 0, 31, 6, 6, 3, 5, 2}, {3, 2, 32, 31, 8, 4, 4, 5, 2}, {1, 4, 6, 31, 6, 6, 3, 5, 2}}},
+};
+
+}  // namespace
+
+bool App::fmEditor(Instrument& ins) {
+  bool changed = false;
+  FMParams& fm = ins.fm;
+  float w = std::min(ImGui::GetContentRegionAvail().x * 0.35f, 160.0f);
+  ImGui::SetNextItemWidth(w);
+  changed |= ImGui::SliderInt("Algorithm", &fm.alg, 0, 7);
+  ImGui::SameLine();
+  ImGui::TextColored(ImVec4(0.6f, 0.9f, 1, 1), "%s", ALG_DIAGRAMS[std::clamp(fm.alg, 0, 7)]);
+  ImGui::SetNextItemWidth(w);
+  changed |= ImGui::SliderInt("Feedback", &fm.fb, 0, 7);
+  ImGui::SameLine();
+  ImGui::TextDisabled("Presets:");
+  for (const FMPreset& p : FM_PRESETS) {
+    ImGui::SameLine();
+    if (ImGui::SmallButton(p.name)) {
+      fm.alg = p.alg;
+      fm.fb = p.fb;
+      for (int o = 0; o < 4; o++) {
+        FMOperator& op = fm.ops[o];
+        const int* v = p.op[o];
+        op = FMOperator();
+        op.mult = v[0], op.dt = v[1], op.tl = v[2], op.ar = v[3], op.dr = v[4], op.sl = v[5], op.d2r = v[6], op.rr = v[7], op.ksr = v[8];
+      }
+      changed = true;
+    }
+  }
+
+  struct Param {
+    const char* name;
+    int FMOperator::*field;
+    int max;
+    const char* help;
+  };
+  static const Param params[] = {
+      {"MULT", &FMOperator::mult, 15, "Frequency multiplier (0 = x0.5)"},
+      {"DT", &FMOperator::dt, 7, "Detune (3 = none)"},
+      {"TL", &FMOperator::tl, 127, "Total level: attenuation, higher = quieter"},
+      {"AR", &FMOperator::ar, 31, "Attack rate"},
+      {"DR", &FMOperator::dr, 31, "Decay rate"},
+      {"SL", &FMOperator::sl, 15, "Sustain level (attenuation after decay)"},
+      {"D2R", &FMOperator::d2r, 31, "Sustain rate (second decay)"},
+      {"RR", &FMOperator::rr, 15, "Release rate"},
+      {"KSR", &FMOperator::ksr, 3, "Key scaling: faster envelopes for high notes"},
+  };
+  if (ImGui::BeginTable("ops", 5, ImGuiTableFlags_BordersInnerV | ImGuiTableFlags_SizingStretchSame)) {
+    ImGui::TableSetupColumn("", ImGuiTableColumnFlags_WidthFixed, 40);
+    for (int o = 0; o < 4; o++) ImGui::TableSetupColumn("");
+    ImGui::TableNextRow();
+    ImGui::TableNextColumn();
+    for (int o = 0; o < 4; o++) {
+      ImGui::TableNextColumn();
+      ImGui::PushID(o);
+      bool carrier = ALG_CARRIERS[std::clamp(fm.alg, 0, 7)][o];
+      changed |= ImGui::Checkbox("##en", &fm.ops[o].enabled);
+      ImGui::SameLine();
+      ImGui::TextColored(carrier ? ImVec4(1, 0.8f, 0.3f, 1) : ImVec4(0.6f, 0.8f, 1, 1), "OP%d %s", o + 1, carrier ? "out" : "mod");
+      ImGui::PopID();
+    }
+    for (const Param& p : params) {
+      ImGui::TableNextRow();
+      ImGui::TableNextColumn();
+      ImGui::TextUnformatted(p.name);
+      if (ImGui::IsItemHovered()) ImGui::SetTooltip("%s", p.help);
+      for (int o = 0; o < 4; o++) {
+        ImGui::TableNextColumn();
+        ImGui::PushID(o * 100 + (int)(&p - params));
+        ImGui::SetNextItemWidth(-1);
+        changed |= ImGui::SliderInt("##v", &(fm.ops[o].*p.field), 0, p.max);
+        ImGui::PopID();
+      }
+    }
+    ImGui::EndTable();
+  }
+  ImGui::TextDisabled("Orange = carriers (heard), blue = modulators. Lower TL on a modulator = brighter.");
+  return changed;
+}
+
+bool App::sampleInsEditor(Instrument& ins) {
+  bool changed = false;
+  char label[160];
+  auto smpLabel = [&](int i) {
+    if (i < 0 || i >= (int)song_.samples.size())
+      std::snprintf(label, sizeof(label), "(none)");
+    else
+      std::snprintf(label, sizeof(label), "%02X: %s", i, song_.samples[i].name.c_str());
+    return label;
+  };
+  ImGui::SetNextItemWidth(std::min(ImGui::GetContentRegionAvail().x - 90.0f, 300.0f));
+  if (ImGui::BeginCombo("Sample", smpLabel(ins.sample))) {
+    if (ImGui::Selectable("(none)", ins.sample < 0)) {
+      ins.sample = -1;
+      changed = true;
+    }
+    for (int i = 0; i < (int)song_.samples.size(); i++)
+      if (ImGui::Selectable(smpLabel(i), i == ins.sample)) {
+        ins.sample = i;
+        curSample_ = i;
+        changed = true;
+      }
+    ImGui::EndCombo();
+  }
+  if (ImGui::Button("Load WAV...")) {
+    loadSampleIntoIns_ = curIns_;
+    openFileDialog(FileDialogMode::LoadSample);
+  }
+  ImGui::SameLine();
+  if (ImGui::Button("Edit sample")) {
+    showSamples_ = true;
+    if (ins.sample >= 0) curSample_ = ins.sample;
+    ImGui::SetWindowFocus("Samples");
+  }
+  float fade = ins.fadeout * 1000;
+  ImGui::SetNextItemWidth(160);
+  if (ImGui::SliderFloat("Fadeout", &fade, 0, 100, "%.1f")) {
+    ins.fadeout = fade / 1000;
+    changed = true;
+  }
+  if (ImGui::IsItemHovered()) ImGui::SetTooltip("Volume lost per tick after note off (0 = cut at note off unless the volume macro has a release)");
+  if (!ins.sampleMap.empty()) {
+    int used = 0;
+    for (int v : ins.sampleMap) used += v >= 0;
+    ImGui::TextDisabled("Multi-sample map: %d notes mapped", used);
+    ImGui::SameLine();
+    if (ImGui::SmallButton("Remove map")) {
+      ins.sampleMap.clear();
+      changed = true;
+    }
+  }
+  ImGui::TextDisabled("The sample plays at its own rate on C-5.");
   return changed;
 }
 
@@ -297,21 +470,41 @@ void App::instrumentEditor() {
 
   float w = std::min(ImGui::GetContentRegionAvail().x - 90.0f, 260.0f);
   ImGui::SetNextItemWidth(w);
-  changed |= ImGui::Combo("Waveform", &ins.wave, WAVE_NAMES, WAVE_COUNT);
-  static const char* dutyNames[4] = {"12.5%", "25%", "50%", "75%"};
-  ImGui::SetNextItemWidth(w);
-  changed |= ImGui::SliderInt("Duty", &ins.duty, 0, 3, dutyNames[std::clamp(ins.duty, 0, 3)]);
-  ImGui::SetNextItemWidth(w);
-  changed |= ImGui::SliderInt("Volume", &ins.volume, 0, 15);
-  ImGui::TextDisabled("Play it with the keyboard: Z S X D C... / Q 2 W 3 E...");
+  changed |= ImGui::Combo("Type", &ins.type, INS_TYPE_NAMES, INS_TYPE_COUNT);
 
-  bool usesTable = ins.wave == WAVE_TABLE;
-  for (int v : ins.macros[MACRO_WAVE].values) usesTable |= v == WAVE_TABLE;
-  if (usesTable) changed |= wavetableEditor(ins);
+  if (ins.type == INS_STANDARD) {
+    ImGui::SetNextItemWidth(w);
+    changed |= ImGui::Combo("Waveform", &ins.wave, WAVE_NAMES, WAVE_COUNT);
+    static const char* dutyNames[4] = {"12.5%", "25%", "50%", "75%"};
+    ImGui::SetNextItemWidth(w);
+    changed |= ImGui::SliderInt("Duty", &ins.duty, 0, 3, dutyNames[std::clamp(ins.duty, 0, 3)]);
+    ImGui::SetNextItemWidth(w);
+    changed |= ImGui::SliderInt("Volume", &ins.volume, 0, 15);
+    bool usesTable = ins.wave == WAVE_TABLE;
+    for (int v : ins.macros[MACRO_WAVE].values) usesTable |= v == WAVE_TABLE;
+    if (usesTable) {
+      if (ins.songWave >= 0) {
+        ImGui::TextDisabled("Uses song wavetable %d.", ins.songWave);
+        ImGui::SameLine();
+        if (ImGui::SmallButton("Use own table")) {
+          ins.songWave = -1;
+          changed = true;
+        }
+      } else {
+        changed |= wavetableEditor(ins);
+      }
+    }
+  } else if (ins.type == INS_FM) {
+    changed |= fmEditor(ins);
+  } else {
+    changed |= sampleInsEditor(ins);
+  }
+  ImGui::TextDisabled("Play it with the keyboard: Z S X D C... / Q 2 W 3 E...");
 
   ImGui::Separator();
   if (ImGui::BeginTabBar("macros")) {
     for (int t = 0; t < MACRO_COUNT; t++) {
+      if (ins.type != INS_STANDARD && (t == MACRO_DUTY || t == MACRO_WAVE) && ins.macros[t].values.empty()) continue;
       std::string label = MACRO_NAMES[t];
       if (!ins.macros[t].values.empty()) label += " *";
       label += "###mac" + std::to_string(t);
@@ -321,6 +514,110 @@ void App::instrumentEditor() {
       }
     }
     ImGui::EndTabBar();
+  }
+  if (changed) dirty_ = true;
+  ImGui::End();
+}
+
+// ---------------------------------------------------------------------------
+// Samples window
+// ---------------------------------------------------------------------------
+
+void App::samplesWindow() {
+  if (!ImGui::Begin("Samples", &showSamples_)) {
+    ImGui::End();
+    return;
+  }
+  bool changed = false;
+  if (ImGui::Button("Load WAV...")) {
+    loadSampleIntoIns_ = -1;
+    openFileDialog(FileDialogMode::LoadSample);
+  }
+  ImGui::SameLine();
+  int n = (int)song_.samples.size();
+  if (ImGui::Button("Delete") && curSample_ >= 0 && curSample_ < n) {
+    int del = curSample_;
+    song_.samples.erase(song_.samples.begin() + del);
+    for (Instrument& ins : song_.instruments) {
+      if (ins.sample == del) ins.sample = -1;
+      else if (ins.sample > del) ins.sample--;
+      for (auto& m : ins.sampleMap) {
+        if (m == del) m = -1;
+        else if (m > del) m--;
+      }
+    }
+    engine_->reset();
+    curSample_ = std::min(del, (int)song_.samples.size() - 1);
+    changed = true;
+  }
+  ImGui::SameLine();
+  if (ImGui::Button("Make instrument") && curSample_ >= 0 && curSample_ < n && (int)song_.instruments.size() < MAX_INSTRUMENTS) {
+    Instrument ins;
+    ins.type = INS_SAMPLE;
+    ins.sample = curSample_;
+    ins.name = song_.samples[curSample_].name;
+    song_.instruments.push_back(ins);
+    curIns_ = (int)song_.instruments.size() - 1;
+    changed = true;
+  }
+
+  ImGui::BeginChild("smplist", ImVec2(0, 120), ImGuiChildFlags_Borders | ImGuiChildFlags_ResizeY);
+  for (int i = 0; i < (int)song_.samples.size(); i++) {
+    char buf[160];
+    std::snprintf(buf, sizeof(buf), "%02X  %s  (%zu)", i, song_.samples[i].name.c_str(), song_.samples[i].data.size());
+    if (ImGui::Selectable(buf, i == curSample_)) curSample_ = i;
+  }
+  if (song_.samples.empty()) ImGui::TextDisabled("No samples. Load a WAV file, or import a MOD/XM/IT/S3M.");
+  ImGui::EndChild();
+
+  if (curSample_ >= 0 && curSample_ < (int)song_.samples.size()) {
+    Sample& smp = song_.samples[curSample_];
+    char name[128];
+    std::snprintf(name, sizeof(name), "%s", smp.name.c_str());
+    if (ImGui::InputText("Name", name, sizeof(name))) {
+      smp.name = name;
+      changed = true;
+    }
+    int len = (int)smp.data.size();
+    ImGui::SetNextItemWidth(120);
+    changed |= ImGui::InputInt("Rate at C-5 (Hz)", &smp.rate, 100, 1000);
+    smp.rate = std::clamp(smp.rate, 1, 1000000);
+    ImGui::SetNextItemWidth(160);
+    changed |= ImGui::SliderInt("Volume", &smp.volume, 0, 64);
+    ImGui::SetNextItemWidth(160);
+    changed |= ImGui::Combo("Loop", &smp.loopMode, LOOP_NAMES, 4);
+    if (smp.loopMode) {
+      ImGui::SetNextItemWidth(160);
+      changed |= ImGui::SliderInt("Loop start", &smp.loopStart, 0, std::max(0, len - 1));
+      ImGui::SetNextItemWidth(160);
+      changed |= ImGui::SliderInt("Loop end", &smp.loopEnd, 0, len);
+      smp.loopStart = std::clamp(smp.loopStart, 0, len);
+      smp.loopEnd = std::clamp(smp.loopEnd, smp.loopStart, len);
+    }
+    ImGui::TextDisabled("%d frames, %.2f s", len, len / (float)std::max(smp.rate, 1));
+
+    // Waveform view with the loop region.
+    ImVec2 pos = ImGui::GetCursorScreenPos();
+    ImVec2 size(std::max(ImGui::GetContentRegionAvail().x, 100.0f), std::max(ImGui::GetContentRegionAvail().y, 60.0f));
+    ImGui::Dummy(size);
+    ImDrawList* dl = ImGui::GetWindowDrawList();
+    dl->AddRectFilled(pos, ImVec2(pos.x + size.x, pos.y + size.y), IM_COL32(15, 15, 22, 255));
+    float mid = pos.y + size.y / 2;
+    if (len > 0) {
+      if (smp.loopMode && smp.loopEnd > smp.loopStart)
+        dl->AddRectFilled(ImVec2(pos.x + smp.loopStart * size.x / len, pos.y), ImVec2(pos.x + smp.loopEnd * size.x / len, pos.y + size.y),
+                          IM_COL32(60, 90, 160, 70));
+      int cols = (int)size.x;
+      for (int x = 0; x < cols; x++) {
+        size_t a = (size_t)x * len / cols, b = std::max(a + 1, (size_t)(x + 1) * len / cols);
+        float lo = 0, hi = 0;
+        for (size_t k = a; k < b && k < (size_t)len; k++) {
+          lo = std::min(lo, smp.data[k]);
+          hi = std::max(hi, smp.data[k]);
+        }
+        dl->AddLine(ImVec2(pos.x + x, mid - hi * size.y / 2), ImVec2(pos.x + x, mid - lo * size.y / 2 + 1), IM_COL32(110, 230, 140, 255));
+      }
+    }
   }
   if (changed) dirty_ = true;
   ImGui::End();

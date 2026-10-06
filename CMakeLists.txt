@@ -51,10 +51,15 @@ add_executable(datrackarxd
   src/song.cpp
   src/engine.cpp
   src/demo.cpp
+  src/import.cpp
+  src/import_tracker.cpp
+  src/import_fur.cpp
+  src/inflate.cpp
   src/app.cpp
   src/ui_pattern.cpp
   src/ui_instrument.cpp
-  src/ui_windows.cpp)
+  src/ui_windows.cpp
+  src/theme.cpp)
 target_link_libraries(datrackarxd PRIVATE imgui)
 if(TARGET SDL2::SDL2main)
   target_link_libraries(datrackarxd PRIVATE SDL2::SDL2main)

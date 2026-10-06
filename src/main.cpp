@@ -10,12 +10,15 @@
 
 #include "app.h"
 #include "demo.h"
+#include "import.h"
 
 static int usage() {
   std::printf(
       "usage:\n"
       "  datrackarxd [song.dtk]                      open the tracker\n"
-      "  datrackarxd --export song.dtk out.wav [n]   render n loops to WAV\n"
+      "  datrackarxd --export song out.wav [n]       render n loops to WAV (dtk/fur/mod/xm/it/s3m)\n"
+      "  datrackarxd --convert module out.dtk        import a module and save it as .dtk\n"
+      "  datrackarxd --export-stems song prefix      one WAV per channel (prefix_01.wav...)\n"
       "  datrackarxd --export-demo out.wav           render the demo song\n"
       "  datrackarxd --save-demo out.dtk             write the demo song file\n");
   return 1;
@@ -25,8 +28,16 @@ static int commandLine(int argc, char** argv) {
   std::string cmd = argv[1];
   std::string err;
   Song song;
+  if (cmd == "--convert" && argc >= 4) {
+    if (!loadAnySong(argv[2], song, err) || !song.save(argv[3], err)) {
+      std::fprintf(stderr, "%s\n", err.c_str());
+      return 1;
+    }
+    std::printf("wrote %s\n", argv[3]);
+    return 0;
+  }
   if (cmd == "--export" && argc >= 4) {
-    if (!song.load(argv[2], err)) {
+    if (!loadAnySong(argv[2], song, err)) {
       std::fprintf(stderr, "%s\n", err.c_str());
       return 1;
     }
@@ -36,6 +47,25 @@ static int commandLine(int argc, char** argv) {
       return 1;
     }
     std::printf("wrote %s\n", argv[3]);
+    return 0;
+  }
+  if (cmd == "--export-stems" && argc >= 4) {
+    if (!loadAnySong(argv[2], song, err)) {
+      std::fprintf(stderr, "%s\n", err.c_str());
+      return 1;
+    }
+    for (int c = 0; c < song.channelCount(); c++) {
+      Song solo = song;
+      for (int o = 0; o < solo.channelCount(); o++) solo.channels[o].muted = o != c;
+      char name[32];
+      std::snprintf(name, sizeof(name), "_%02d.wav", c + 1);
+      std::string out = std::string(argv[3]) + name;
+      if (!exportWav(solo, out, 44100, 1, err)) {
+        std::fprintf(stderr, "%s\n", err.c_str());
+        return 1;
+      }
+      std::printf("wrote %s (%s)\n", out.c_str(), song.channels[c].name.c_str());
+    }
     return 0;
   }
   if (cmd == "--export-demo" && argc >= 3) {
@@ -85,20 +115,11 @@ int main(int argc, char** argv) {
   ImGuiIO& io = ImGui::GetIO();
   io.ConfigFlags |= ImGuiConfigFlags_DockingEnable;
   io.IniFilename = "datrackarxd.ini";
-  ImGui::StyleColorsDark();
-  ImGuiStyle& style = ImGui::GetStyle();
-  style.WindowRounding = 4;
-  style.FrameRounding = 3;
-  style.Colors[ImGuiCol_WindowBg] = ImVec4(0.09f, 0.09f, 0.13f, 1);
-  style.Colors[ImGuiCol_TitleBgActive] = ImVec4(0.22f, 0.20f, 0.45f, 1);
-  style.Colors[ImGuiCol_Tab] = ImVec4(0.16f, 0.15f, 0.30f, 1);
-  style.Colors[ImGuiCol_TabSelected] = ImVec4(0.32f, 0.28f, 0.62f, 1);
-  style.Colors[ImGuiCol_Header] = ImVec4(0.30f, 0.27f, 0.55f, 0.6f);
-
   ImGui_ImplSDL2_InitForSDLRenderer(window, renderer);
   ImGui_ImplSDLRenderer2_Init(renderer);
 
   App app;
+  app.loadSettings();
   if (argc >= 2) app.loadFile(argv[1]);
   app.openAudio();
 

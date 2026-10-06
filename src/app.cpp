@@ -6,8 +6,11 @@
 #include <algorithm>
 #include <cstring>
 #include <filesystem>
+#include <fstream>
 
 #include "demo.h"
+#include "import.h"
+#include "theme.h"
 
 namespace fs = std::filesystem;
 
@@ -26,6 +29,37 @@ App::App() {
 
 App::~App() {
   if (audioDev_) SDL_CloseAudioDevice(audioDev_);
+  saveSettings();
+}
+
+// Small key=value settings file next to the ImGui layout file.
+static const char* SETTINGS_FILE = "datrackarxd.cfg";
+
+void App::loadSettings() {
+  std::ifstream f(SETTINGS_FILE);
+  std::string line;
+  int th = 0;
+  while (std::getline(f, line)) {
+    size_t eq = line.find('=');
+    if (eq == std::string::npos) continue;
+    std::string k = line.substr(0, eq), v = line.substr(eq + 1);
+    try {
+      if (k == "theme") th = std::stoi(v);
+      if (k == "scroller") showScroller_ = std::stoi(v) != 0;
+      if (k == "octave") octave_ = std::clamp(std::stoi(v), 0, 8);
+      if (k == "dir" && fs::is_directory(v)) dialogDir_ = v;
+    } catch (...) {
+    }
+  }
+  setTheme(th);
+}
+
+void App::saveSettings() {
+  std::ofstream f(SETTINGS_FILE);
+  f << "theme=" << themeIndex() << "\n";
+  f << "scroller=" << (showScroller_ ? 1 : 0) << "\n";
+  f << "octave=" << octave_ << "\n";
+  f << "dir=" << dialogDir_ << "\n";
 }
 
 void App::openAudio() {
@@ -70,12 +104,13 @@ void App::afterSongReplaced() {
 
 bool App::loadFile(const std::string& path) {
   std::string err;
-  if (!song_.load(path, err)) {
+  if (!loadAnySong(path, song_, err)) {
     setStatus("Load failed: " + err);
     return false;
   }
   afterSongReplaced();
-  filePath_ = path;
+  // Imported modules get saved as a new .dtk file.
+  filePath_ = fs::path(path).extension() == ".dtk" ? path : "";
   dialogDir_ = fs::path(path).parent_path().string();
   if (dialogDir_.empty()) dialogDir_ = ".";
   setStatus("Loaded " + path);
@@ -178,9 +213,10 @@ void App::openFileDialog(FileDialogMode mode) {
 }
 
 void App::fileDialog() {
-  const char* title = dialogMode_ == FileDialogMode::Open   ? "Open song###filedlg"
-                      : dialogMode_ == FileDialogMode::Save ? "Save song###filedlg"
-                                                            : "Export WAV###filedlg";
+  const char* title = dialogMode_ == FileDialogMode::Open        ? "Open song / import module###filedlg"
+                      : dialogMode_ == FileDialogMode::Save      ? "Save song###filedlg"
+                      : dialogMode_ == FileDialogMode::LoadSample ? "Load WAV sample###filedlg"
+                                                                 : "Export WAV###filedlg";
   if (dialogOpenRequest_) {
     ImGui::OpenPopup("###filedlg");
     dialogOpenRequest_ = false;
@@ -188,14 +224,32 @@ void App::fileDialog() {
   ImGui::SetNextWindowSize(ImVec2(560, 420), ImGuiCond_Appearing);
   if (!ImGui::BeginPopupModal(title, nullptr)) return;
 
-  std::string ext = dialogMode_ == FileDialogMode::ExportWav ? ".wav" : ".dtk";
+  std::vector<std::string> exts;
+  if (dialogMode_ == FileDialogMode::Open) exts = supportedSongExtensions();
+  else if (dialogMode_ == FileDialogMode::Save) exts = {".dtk"};
+  else exts = {".wav"};
+  const std::string& ext = exts[0];
+  auto matches = [&](const fs::path& p) {
+    std::string e = p.extension().string();
+    std::transform(e.begin(), e.end(), e.begin(), ::tolower);
+    // Amiga-style names like "mod.songname" count too.
+    std::string stem = p.filename().string().substr(0, 4);
+    std::transform(stem.begin(), stem.end(), stem.begin(), ::tolower);
+    for (const auto& x : exts)
+      if (e == x || stem == x.substr(1) + ".") return true;
+    return false;
+  };
   ImGui::TextUnformatted(dialogDir_.c_str());
   if (ImGui::Button("Up")) {
     fs::path p = fs::path(dialogDir_).parent_path();
     if (!p.empty()) dialogDir_ = p.string();
   }
   ImGui::SameLine();
-  ImGui::TextDisabled("(showing folders and *%s files)", ext.c_str());
+  {
+    std::string list;
+    for (const auto& x : exts) list += " *" + x;
+    ImGui::TextDisabled("(folders and%s)", list.c_str());
+  }
 
   bool accept = false;
   ImGui::BeginChild("files", ImVec2(0, -ImGui::GetFrameHeightWithSpacing() * 2.2f), ImGuiChildFlags_Borders);
@@ -205,7 +259,7 @@ void App::fileDialog() {
     std::error_code ec2;
     if (it->is_directory(ec2))
       dirs.push_back(*it);
-    else if (it->path().extension() == ext)
+    else if (matches(it->path()))
       files.push_back(*it);
   }
   auto byName = [](const fs::directory_entry& a, const fs::directory_entry& b) { return a.path().filename() < b.path().filename(); };
@@ -236,19 +290,35 @@ void App::fileDialog() {
     ImGui::InputInt("loops", &exportLoops_);
     exportLoops_ = std::clamp(exportLoops_, 1, 16);
   }
-  if (ImGui::Button(dialogMode_ == FileDialogMode::Open ? "Open" : "Save", ImVec2(100, 0))) accept = true;
+  bool opening = dialogMode_ == FileDialogMode::Open || dialogMode_ == FileDialogMode::LoadSample;
+  if (ImGui::Button(opening ? "Open" : "Save", ImVec2(100, 0))) accept = true;
   ImGui::SameLine();
   bool cancel = ImGui::Button("Cancel", ImVec2(100, 0)) || ImGui::IsKeyPressed(ImGuiKey_Escape);
 
   if (accept && dialogName_[0]) {
     fs::path p = fs::path(dialogName_);
     if (p.is_relative()) p = fs::path(dialogDir_) / p;
-    if (dialogMode_ != FileDialogMode::Open && p.extension() != ext) p += ext;
+    if (!opening && p.extension() != ext) p += ext;
     std::string path = p.string();
     std::string err;
     if (dialogMode_ == FileDialogMode::Open) {
       engine_->stop();
       if (loadFile(path)) cancel = true;
+    } else if (dialogMode_ == FileDialogMode::LoadSample) {
+      Sample smp;
+      if ((int)song_.samples.size() >= MAX_SAMPLES) {
+        setStatus("Too many samples");
+      } else if (loadWavSample(path, smp, err)) {
+        song_.samples.push_back(std::move(smp));
+        curSample_ = (int)song_.samples.size() - 1;
+        if (loadSampleIntoIns_ >= 0 && loadSampleIntoIns_ < (int)song_.instruments.size())
+          song_.instruments[loadSampleIntoIns_].sample = curSample_;
+        dirty_ = true;
+        setStatus("Loaded sample " + path);
+        cancel = true;
+      } else {
+        setStatus("Sample load failed: " + err);
+      }
     } else if (dialogMode_ == FileDialogMode::Save) {
       filePath_ = path;
       saveSong(false);
@@ -274,7 +344,7 @@ void App::menuBar() {
   if (!ImGui::BeginMainMenuBar()) return;
   if (ImGui::BeginMenu("File")) {
     if (ImGui::MenuItem("New", "Ctrl+N")) askAction(PendingAction::New);
-    if (ImGui::MenuItem("Open...", "Ctrl+O")) askAction(PendingAction::Open);
+    if (ImGui::MenuItem("Open / import...", "Ctrl+O")) askAction(PendingAction::Open);
     if (ImGui::MenuItem("Save", "Ctrl+S")) saveSong(false);
     if (ImGui::MenuItem("Save as...", "Ctrl+Shift+S")) saveSong(true);
     ImGui::Separator();
@@ -304,8 +374,18 @@ void App::menuBar() {
     ImGui::MenuItem("Instruments", nullptr, &showInstruments_);
     ImGui::MenuItem("Instrument editor", nullptr, &showInsEditor_);
     ImGui::MenuItem("Song", nullptr, &showSong_);
+    ImGui::MenuItem("Samples", nullptr, &showSamples_);
     ImGui::MenuItem("Oscilloscope", nullptr, &showScope_);
+    ImGui::MenuItem("Keygen scroller", nullptr, &showScroller_);
     ImGui::Separator();
+    if (ImGui::BeginMenu("Theme")) {
+      for (int i = 0; i < THEME_COUNT; i++)
+        if (ImGui::MenuItem(THEMES[i].name, nullptr, themeIndex() == i)) {
+          setTheme(i);
+          if (i == 1) showScroller_ = true;  // the keygen look comes with its scroller
+        }
+      ImGui::EndMenu();
+    }
     if (ImGui::MenuItem("Reset layout")) layoutDone_ = false;
     ImGui::EndMenu();
   }
@@ -354,7 +434,9 @@ void App::defaultLayout(unsigned int dockId) {
   ImGui::DockBuilderDockWindow("Song", leftBottom);
   ImGui::DockBuilderDockWindow("Instruments", right);
   ImGui::DockBuilderDockWindow("Instrument editor", rightBottom);
+  ImGui::DockBuilderDockWindow("Samples", rightBottom);
   ImGui::DockBuilderDockWindow("Oscilloscope", bottom);
+  ImGui::DockBuilderDockWindow("Keygen", bottom);
   ImGui::DockBuilderDockWindow("Effects", rightBottom);
   ImGui::DockBuilderDockWindow("Keyboard", rightBottom);
   ImGui::DockBuilderFinish(dockId);
@@ -432,7 +514,9 @@ void App::frame() {
   if (showInstruments_) instrumentsWindow();
   if (showInsEditor_) instrumentEditor();
   if (showSong_) songWindow();
+  if (showSamples_) samplesWindow();
   if (showScope_) scopeWindow();
+  if (showScroller_) scrollerWindow();
   if (showEffects_) effectsHelp();
   if (showKeys_) keysHelp();
   if (showAbout_) aboutWindow();
