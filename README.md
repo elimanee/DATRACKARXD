@@ -22,6 +22,19 @@ synthèse FM 4 opérateurs, samples, et import de modules Furnace, MOD, XM, IT e
 - Sauvegarde dans un format texte `.dtk`, export WAV (mix complet ou une piste par canal)
 - Une démo keygen intégrée qui se charge au démarrage
 
+## Télécharger
+
+Les versions compilées pour Windows, Linux et macOS sont sur la page
+[Releases](https://github.com/elimanee/DATRACKARXD/releases). Il suffit de décompresser l'archive et
+de lancer `datrackarxd` (ou `datrackarxd.exe`) : rien d'autre à installer.
+
+- **macOS** : l'application n'est pas signée. Au premier lancement, clic droit > Ouvrir, ou
+  `xattr -d com.apple.quarantine datrackarxd` dans un terminal.
+- **Windows** : SmartScreen peut avertir pour la même raison ; « Informations complémentaires » > « Exécuter quand même ».
+
+Pour publier une nouvelle version : pousser un tag `vX.Y.Z`. GitHub Actions compile les trois
+systèmes et crée la release avec les archives.
+
 ## Compiler
 
 Il faut CMake ≥ 3.16 et un compilateur C++17. ImGui est téléchargé automatiquement ; SDL2 aussi s'il

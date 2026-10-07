@@ -3,6 +3,7 @@
 #include <imgui.h>
 #include <imgui_internal.h>
 
+#include <cctype>
 #include <algorithm>
 #include <cstring>
 #include <filesystem>
