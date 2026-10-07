@@ -32,8 +32,12 @@ de lancer `datrackarxd` (ou `datrackarxd.exe`) : rien d'autre à installer.
   `xattr -d com.apple.quarantine datrackarxd` dans un terminal.
 - **Windows** : SmartScreen peut avertir pour la même raison ; « Informations complémentaires » > « Exécuter quand même ».
 
-Pour publier une nouvelle version : pousser un tag `vX.Y.Z`. GitHub Actions compile les trois
-systèmes et crée la release avec les archives.
+Pour publier une nouvelle version, mettre à jour `VERSION` dans `CMakeLists.txt`, puis au choix :
+- dans l'onglet **Actions** de GitHub, ouvrir le workflow « Build », cliquer sur « Run workflow » et
+  taper la version (par exemple `v0.2.0`) ;
+- ou pousser un tag `vX.Y.Z`.
+
+GitHub Actions compile les trois systèmes, crée le tag si besoin et publie la release avec les archives.
 
 ## Compiler
 
