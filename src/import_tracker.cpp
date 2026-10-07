@@ -1,4 +1,5 @@
 // Importers for the sample trackers: MOD, S3M, XM and IT.
+#include <cctype>
 #include <algorithm>
 #include <cmath>
 #include <cstring>

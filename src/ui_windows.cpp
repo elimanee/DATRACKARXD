@@ -1,6 +1,7 @@
 // Orders, song settings, oscilloscope and help windows.
 #include <imgui.h>
 
+#include <cctype>
 #include <algorithm>
 #include <cfloat>
 #include <cmath>
@@ -493,7 +494,7 @@ void App::keysHelp() {
 void App::aboutWindow() {
   ImGui::SetNextWindowSize(ImVec2(380, 0), ImGuiCond_Appearing);
   if (ImGui::Begin("About", &showAbout_, ImGuiWindowFlags_NoDocking)) {
-    ImGui::Text("DATRACKARXD");
+    ImGui::Text("DATRACKARXD %s", DATRACKARXD_VERSION);
     ImGui::TextWrapped("A small tracker in the spirit of Furnace: chip waves (pulse, triangle, saw, noise, sine, "
                        "wavetable), 4-operator FM and samples, with Furnace-style macros. Imports FUR, MOD, XM, IT and S3M.");
   }

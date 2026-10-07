@@ -1,6 +1,7 @@
 // Format detection and the effect translation shared by the tracker importers.
 #include "import.h"
 
+#include <cctype>
 #include <algorithm>
 #include <cmath>
 #include <cstring>

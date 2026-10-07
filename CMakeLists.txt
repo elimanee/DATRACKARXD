@@ -1,5 +1,5 @@
 cmake_minimum_required(VERSION 3.16)
-project(DATRACKARXD LANGUAGES CXX C)
+project(DATRACKARXD VERSION 0.1.0 LANGUAGES CXX C)
 
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
@@ -61,6 +61,7 @@ add_executable(datrackarxd
   src/ui_windows.cpp
   src/theme.cpp)
 target_link_libraries(datrackarxd PRIVATE imgui)
+target_compile_definitions(datrackarxd PRIVATE DATRACKARXD_VERSION="${PROJECT_VERSION}")
 if(TARGET SDL2::SDL2main)
   target_link_libraries(datrackarxd PRIVATE SDL2::SDL2main)
 endif()

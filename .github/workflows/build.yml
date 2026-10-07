@@ -1,0 +1,94 @@
+name: Build
+
+# Builds DATRACKARXD for Linux, Windows and macOS on every pull request.
+# Pushing a tag like v0.1.0 also publishes a GitHub release with the binaries.
+on:
+  push:
+    branches: [main]
+    tags: ['v*']
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: ubuntu-22.04
+            name: linux-x64
+          - os: windows-latest
+            name: windows-x64
+          - os: macos-14
+            name: macos-arm64
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Linux build dependencies
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libx11-dev libxext-dev libxrandr-dev libxcursor-dev libxi-dev \
+            libxss-dev libxinerama-dev libxkbcommon-dev libwayland-dev libasound2-dev libpulse-dev \
+            libgl1-mesa-dev
+
+      # SDL2 is always built from source and linked statically, so the
+      # binaries run without installing anything.
+      - name: Configure
+        run: cmake -S . -B build -DCMAKE_BUILD_TYPE=Release -DCMAKE_DISABLE_FIND_PACKAGE_SDL2=ON
+
+      - name: Build
+        run: cmake --build build --config Release --parallel
+
+      - name: Smoke test
+        shell: bash
+        run: |
+          exe=build/datrackarxd
+          [ -f build/Release/datrackarxd.exe ] && exe=build/Release/datrackarxd.exe
+          "$exe" --version
+          "$exe" --export-demo demo.wav
+          "$exe" --convert songs/demo.dtk check.dtk
+          test -s demo.wav
+          cp "$exe" .
+
+      - name: Package
+        shell: bash
+        run: |
+          dir=datrackarxd-${{ github.ref_type == 'tag' && github.ref_name || 'dev' }}-${{ matrix.name }}
+          mkdir -p "$dir/songs"
+          cp README.md "$dir/"
+          cp songs/*.dtk "$dir/songs/"
+          if [ "${{ runner.os }}" = "Windows" ]; then
+            cp datrackarxd.exe "$dir/"
+            7z a "$dir.zip" "$dir" > /dev/null
+          else
+            cp datrackarxd "$dir/"
+            tar czf "$dir.tar.gz" "$dir"
+          fi
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: datrackarxd-${{ matrix.name }}
+          path: |
+            datrackarxd-*.zip
+            datrackarxd-*.tar.gz
+
+  release:
+    needs: build
+    if: github.ref_type == 'tag' && startsWith(github.ref_name, 'v')
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          path: dist
+          merge-multiple: true
+
+      - uses: softprops/action-gh-release@v2
+        with:
+          name: DATRACKARXD ${{ github.ref_name }}
+          generate_release_notes: true
+          files: dist/*

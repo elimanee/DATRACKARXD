@@ -14,6 +14,7 @@
 
 static int usage() {
   std::printf(
+      "DATRACKARXD " DATRACKARXD_VERSION "\n"
       "usage:\n"
       "  datrackarxd [song.dtk]                      open the tracker\n"
       "  datrackarxd --export song out.wav [n]       render n loops to WAV (dtk/fur/mod/xm/it/s3m)\n"
@@ -26,6 +27,10 @@ static int usage() {
 
 static int commandLine(int argc, char** argv) {
   std::string cmd = argv[1];
+  if (cmd == "--version") {
+    std::printf("DATRACKARXD %s\n", DATRACKARXD_VERSION);
+    return 0;
+  }
   std::string err;
   Song song;
   if (cmd == "--convert" && argc >= 4) {
