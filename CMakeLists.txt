@@ -1,5 +1,5 @@
 cmake_minimum_required(VERSION 3.16)
-project(DATRACKARXD VERSION 0.1.0 LANGUAGES CXX C)
+project(DATRACKARXD VERSION 0.2.0 LANGUAGES CXX C)
 
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
@@ -57,6 +57,7 @@ add_executable(datrackarxd
   src/inflate.cpp
   src/app.cpp
   src/ui_pattern.cpp
+  src/ui_pianoroll.cpp
   src/ui_instrument.cpp
   src/ui_windows.cpp
   src/theme.cpp)

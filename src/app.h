@@ -3,6 +3,7 @@
 #include <SDL.h>
 
 #include <map>
+#include <set>
 #include <memory>
 #include <string>
 #include <vector>
@@ -36,6 +37,13 @@ struct Clipboard {
 
 // Physical key -> semitone offset from the current octave, or -1.
 int scancodeToNote(SDL_Scancode sc);
+
+// A note as the piano roll sees it: a start row and a length in rows.
+struct PRNote {
+  int start, len, note, ins, vol;
+};
+
+enum class PRDrag { None, Move, Resize, Select, Erase, Velocity, Key };
 
 enum class FileDialogMode { None, Open, Save, ExportWav, LoadSample };
 enum class PendingAction { None, New, Open, Demo, Quit };
@@ -94,6 +102,24 @@ class App {
   bool layoutDone_ = false;
   bool patternFocused_ = false;
 
+  // Piano roll.
+  bool showPianoRoll_ = true;
+  unsigned int patternDockId_ = 0;  // dock node of the Pattern window (last frame)
+  float prZoomX_ = 16, prZoomY_ = 11;  // pixels per row / per semitone
+  float prScrollX_ = 0;                // first visible row
+  float prTop_ = -1;                   // pitch at the top edge (-1 = not placed yet)
+  bool prGhosts_ = true;
+  int prLength_ = 4;                   // length of new notes, in rows
+  std::set<int> prSel_;                // selected notes, by start row
+  int prViewCh_ = -1, prViewOrder_ = -1;
+  PRDrag prDrag_ = PRDrag::None;
+  std::vector<PRNote> prOrig_;         // notes when the drag started
+  std::vector<bool> prOrigSel_;
+  int prGrab_ = -1;                    // index in prOrig_ of the note under the mouse
+  float prMx0_ = 0, prMy0_ = 0;
+  bool prUndone_ = false;              // undo snapshot taken for this drag
+  int prPreview_ = -1;                 // note being previewed
+
   // Order editor selection.
   int ordCh_ = 0;
 
@@ -142,6 +168,9 @@ class App {
   void clearSelection();
   void transpose(int semitones);
   void startSelection();
+
+  // ui_pianoroll.cpp
+  void pianoRollWindow();
 
   // ui_instrument.cpp
   void instrumentsWindow();
