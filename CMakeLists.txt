@@ -57,6 +57,7 @@ add_executable(datrackarxd
   src/inflate.cpp
   src/app.cpp
   src/ui_pattern.cpp
+  src/ui_pianoroll.cpp
   src/ui_instrument.cpp
   src/ui_windows.cpp
   src/theme.cpp)

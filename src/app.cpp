@@ -371,6 +371,7 @@ void App::menuBar() {
   }
   if (ImGui::BeginMenu("View")) {
     ImGui::MenuItem("Pattern", nullptr, &showPattern_);
+    ImGui::MenuItem("Piano roll", nullptr, &showPianoRoll_);
     ImGui::MenuItem("Orders", nullptr, &showOrders_);
     ImGui::MenuItem("Instruments", nullptr, &showInstruments_);
     ImGui::MenuItem("Instrument editor", nullptr, &showInsEditor_);
@@ -431,6 +432,7 @@ void App::defaultLayout(unsigned int dockId) {
   ImGuiID leftBottom = ImGui::DockBuilderSplitNode(left, ImGuiDir_Down, 0.45f, nullptr, &left);
   ImGuiID rightBottom = ImGui::DockBuilderSplitNode(right, ImGuiDir_Down, 0.70f, nullptr, &right);
   ImGui::DockBuilderDockWindow("Pattern", center);
+  ImGui::DockBuilderDockWindow("Piano roll", center);
   ImGui::DockBuilderDockWindow("Orders", left);
   ImGui::DockBuilderDockWindow("Song", leftBottom);
   ImGui::DockBuilderDockWindow("Instruments", right);
@@ -510,6 +512,7 @@ void App::frame() {
     layoutDone_ = true;
   }
 
+  if (showPianoRoll_) pianoRollWindow();
   if (showPattern_) patternWindow();
   if (showOrders_) ordersWindow();
   if (showInstruments_) instrumentsWindow();

@@ -492,7 +492,9 @@ void App::patternKey(const KeyEvent& ev) {
 // ---------------------------------------------------------------------------
 
 void App::patternWindow() {
-  if (!ImGui::Begin("Pattern", &showPattern_)) {
+  bool open = ImGui::Begin("Pattern", &showPattern_);
+  patternDockId_ = ImGui::GetWindowDockID();
+  if (!open) {
     patternFocused_ = false;
     ImGui::End();
     return;

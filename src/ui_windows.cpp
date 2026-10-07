@@ -477,6 +477,11 @@ void App::keysHelp() {
       {"Numpad / *", "Octave down / up"},
       {"Ctrl+N / O / S", "New / open or import / save"},
       {"Click channel name", "Mute (right-click: solo)"},
+      {"Piano roll: click / drag", "Add a note / move it, drag its right edge to resize"},
+      {"Piano roll: right-click", "Delete notes (drag to erase several)"},
+      {"Piano roll: Ctrl+drag", "Select a box (Shift adds), Ctrl+A selects all"},
+      {"Piano roll: arrows", "Move selection (Up/Down: semitone, Shift: octave)"},
+      {"Piano roll: wheel", "Scroll; Shift: horizontal, Ctrl: zoom time, Alt: zoom pitch"},
   };
   if (ImGui::BeginTable("keys", 2, ImGuiTableFlags_RowBg | ImGuiTableFlags_SizingStretchProp)) {
     for (auto& r : rows) {

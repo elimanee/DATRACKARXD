@@ -121,6 +121,28 @@ Hors de l'éditeur de patterns, les touches de notes jouent l'instrument courant
 
 Colonne volume : `00`-`7F`. Un effet à `00` arrête l'arpège, les glissements ou le vibrato.
 
+## Piano roll
+
+L'onglet **Piano roll** (à côté de Pattern) montre le pattern du canal courant sous forme de notes,
+comme dans FL Studio :
+
+| Action | Effet |
+|---|---|
+| Clic dans la grille | Ajoute une note (longueur « Length », instrument courant), qu'on peut glisser tout de suite |
+| Glisser une note | La déplacer (temps et hauteur) |
+| Glisser le bord droit | Changer sa durée |
+| Clic droit (ou glisser) | Effacer |
+| Ctrl + glisser | Sélection rectangulaire (Shift pour ajouter), Ctrl+A tout sélectionner |
+| Flèches | Déplacer la sélection (Haut/Bas : demi-ton, Shift : octave), Suppr pour effacer |
+| Molette | Défiler ; Shift : horizontal, Ctrl : zoom temps, Alt : zoom hauteur |
+| Clavier à gauche | Écouter une note |
+| Règle en haut | Placer le curseur (et la lecture) |
+| Ligne « Vol » en bas | Dessiner la vélocité (colonne volume) |
+
+Les notes grisées sont celles des autres canaux (case « Ghosts »). Un canal de tracker ne joue qu'une
+note à la fois : si deux notes se chevauchent, la première s'arrête où la suivante commence. Pour
+un accord, utiliser un canal par note. Tout est annulable avec Ctrl+Z.
+
 ## Import de modules
 
 Fichier > Open / import (Ctrl+O) ouvre aussi les `.fur`, `.mod`, `.xm`, `.it` et `.s3m`. Le morceau
