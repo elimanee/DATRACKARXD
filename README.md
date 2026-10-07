@@ -71,7 +71,7 @@ datrackarxd --save-demo demo.dtk           # écrire la démo dans un fichier
 | `Q 2 W 3 E R 5 T 6 Y 7 U I` | Notes, octave + 1 |
 | `1` ou `²`/`` ` `` | Note off |
 | `0-9 A-F` | Valeurs hexa (instrument, volume, effets) |
-| `Espace` | Mode édition on/off |
+| `Espace` | Mode Record (édition) on/off |
 | `Entrée` / `Shift+Entrée` | Play/stop depuis le début de l'order / depuis le curseur |
 | `F5` / `F6` / `F8` | Jouer le morceau / jouer depuis le curseur / stop |
 | Flèches, `PgUp/PgDn`, `Home/End` | Déplacement |

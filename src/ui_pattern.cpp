@@ -528,7 +528,7 @@ void App::patternWindow() {
     ImGui::EndCombo();
   }
   ImGui::SameLine();
-  ImGui::Checkbox("Edit", &editMode_);
+  ImGui::Checkbox("Record", &editMode_);
   ImGui::SameLine();
   ImGui::TextDisabled("Order %02X / pattern %02X", curOrder_, song_.orders[curOrder_][curCh_]);
 
