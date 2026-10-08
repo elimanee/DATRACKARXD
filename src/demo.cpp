@@ -42,6 +42,13 @@ void loadDemoSong(Song& s) {
   for (int i = 0; i < 8; i++) s.channels[i].name = names[i];
   s.channels[0].effectCols = 2;
   s.channels[5].effectCols = 2;
+  // A little room around the lead, the arp and the pad.
+  s.fx.reverb = true;
+  s.fx.roomSize = 0.6f;
+  s.fx.reverbLevel = 0.3f;
+  s.channels[0].reverbSend = 0.25f;
+  s.channels[1].reverbSend = 0.2f;
+  s.channels[6].reverbSend = 0.5f;
 
   s.instruments.clear();
   {

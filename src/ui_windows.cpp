@@ -525,7 +525,9 @@ void App::aboutWindow() {
   if (ImGui::Begin("About", &showAbout_, ImGuiWindowFlags_NoDocking)) {
     ImGui::Text("DATRACKARXD %s", DATRACKARXD_VERSION);
     ImGui::TextWrapped("A small tracker in the spirit of Furnace: chip waves (pulse, triangle, saw, noise, sine, "
-                       "wavetable), 4-operator FM and samples, with Furnace-style macros. Imports FUR, MOD, XM, IT and S3M.");
+                       "wavetable), 4-operator FM, SID-style filter, ring mod and sync, and samples, with Furnace-style "
+                       "macros, master effects and MIDI input. Imports FUR, DMF, FTM, MOD, XM, IT, S3M and MIDI; exports "
+                       "WAV, OGG, MIDI and standalone keygen players.");
   }
   ImGui::End();
 }
