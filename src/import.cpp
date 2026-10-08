@@ -41,7 +41,7 @@ std::string ByteReader::cstr() {
   return s;
 }
 
-std::vector<std::string> supportedSongExtensions() { return {".dtk", ".fur", ".mod", ".xm", ".it", ".s3m", ".mid"}; }
+std::vector<std::string> supportedSongExtensions() { return {".dtk", ".fur", ".dmf", ".ftm", ".dnm", ".0cc", ".mod", ".xm", ".it", ".s3m", ".mid"}; }
 
 bool loadAnySong(const std::string& path, Song& song, std::string& err) {
   std::ifstream f(path, std::ios::binary);
@@ -62,11 +62,20 @@ bool loadAnySong(const std::string& path, Song& song, std::string& err) {
   std::string base = path.substr(slash == std::string::npos ? 0 : slash + 1);
   std::transform(base.begin(), base.end(), base.begin(), ::tolower);
 
+  // Furnace and DefleMask files are usually zlib-compressed.
+  if (d.size() > 2 && d[0] == 0x78 && ((d[0] << 8) | d[1]) % 31 == 0) {
+    std::vector<uint8_t> out;
+    if (zlibInflate(d.data(), d.size(), out)) d.swap(out);
+  }
   Song s;
   bool ok;
   if (has(0, "DATRACKARXD")) {
     ok = s.load(path, err);
-  } else if (has(0, "-Furnace module-") || (d.size() > 2 && d[0] == 0x78 && ((d[0] << 8) | d[1]) % 31 == 0)) {
+  } else if (has(0, ".DelekDefleMask.")) {
+    ok = importDMF(d, s, err);
+  } else if (has(0, "FamiTracker Module") || has(0, "Dn-FamiTracker Module") || has(0, "0CC-FamiTracker Module")) {
+    ok = importFTM(d, s, err);
+  } else if (has(0, "-Furnace module-")) {
     ok = importFUR(d, s, err);
   } else if (has(0, "MThd")) {
     ok = importMIDI(d, s, err);

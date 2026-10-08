@@ -20,6 +20,8 @@ bool importS3M(const std::vector<uint8_t>& data, Song& song, std::string& err);
 bool importXM(const std::vector<uint8_t>& data, Song& song, std::string& err);
 bool importIT(const std::vector<uint8_t>& data, Song& song, std::string& err);
 bool importFUR(const std::vector<uint8_t>& data, Song& song, std::string& err);
+bool importDMF(const std::vector<uint8_t>& data, Song& song, std::string& err);
+bool importFTM(const std::vector<uint8_t>& data, Song& song, std::string& err);
 
 // Instrument presets. A .dti file is a .dtk song holding one instrument with
 // the samples and wavetables it uses. Loading also takes Furnace .fui files

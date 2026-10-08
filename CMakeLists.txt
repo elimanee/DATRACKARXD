@@ -123,6 +123,8 @@ add_executable(datrackarxd
   src/import.cpp
   src/import_tracker.cpp
   src/import_fur.cpp
+  src/import_dmf.cpp
+  src/import_ftm.cpp
   src/inflate.cpp
   src/midi.cpp
   src/midifile.cpp
