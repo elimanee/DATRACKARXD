@@ -285,6 +285,12 @@ void Engine::triggerNote(int c, int note, int offset) {
   s.tremPos = 0;
   s.pitchMacroAcc = 0;
   s.dutyOverride = -1;
+  s.cutoffOverride = -1;
+  if (ins && ins->pulseWidth >= 0) {
+    s.pwPos = ins->pulseWidth;
+    s.pwDir = 1;
+  }
+  if (ins && ins->filter.on && !s.filterOn) s.filter.clear();
   s.waveOverride = -1;
   s.fade = 1;
   s.lfsr = 1;
@@ -358,6 +364,18 @@ void Engine::stepMacros(int c) {
         ms.finished = true;
       }
     }
+  }
+  // Pulse width sweep (PWM), bouncing between the ends.
+  if (ins && ins->pulseWidth >= 0 && ins->pwmSweep) {
+    s.pwPos += s.pwDir * ins->pwmSweep;
+    if (s.pwPos > 248) {
+      s.pwPos = 496 - s.pwPos;
+      s.pwDir = -s.pwDir;
+    } else if (s.pwPos < 8) {
+      s.pwPos = 16 - s.pwPos;
+      s.pwDir = -s.pwDir;
+    }
+    s.pwPos = std::clamp(s.pwPos, 8, 248);
   }
   // The pitch macro is cumulative; a finished one stops adding.
   if (s.macros[MACRO_PITCH].finished) s.macros[MACRO_PITCH].hasValue = false;
@@ -463,7 +481,8 @@ void Engine::processCell(int c, const Cell& cell, bool fromDelay) {
         if (val > 0) speeds_ = {val};
         break;
       case 0x10: s.waveOverride = val; break;
-      case 0x12: s.dutyOverride = val & 3; break;
+      case 0x12: s.dutyOverride = val; break;  // fine pulse width instruments use all of xx
+      case 0x13: s.cutoffOverride = val; break;
       case 0xE6:
         if (!playing_ || fromDelay) break;
         if (val == 0) {
@@ -662,9 +681,30 @@ void Engine::updateChannel(int c) {
   }
 
   s.duty = ins ? ins->duty : 2;
-  if (s.dutyOverride >= 0) s.duty = s.dutyOverride;
+  if (s.dutyOverride >= 0) s.duty = s.dutyOverride & 3;
   if (s.macros[MACRO_DUTY].hasValue) s.duty = s.macros[MACRO_DUTY].value & 3;
   if (c < song_.channelCount() && song_.channels[c].fixedDuty >= 0) s.duty = song_.channels[c].fixedDuty;
+
+  // Fine pulse width, filter, ring mod and sync (SID style).
+  s.pw = -1;
+  if (ins && ins->pulseWidth >= 0) {
+    int w = s.pwPos;
+    if (s.dutyOverride >= 0) w = s.dutyOverride;
+    if (s.macros[MACRO_DUTY].hasValue) w = s.macros[MACRO_DUTY].value;
+    s.pw = std::clamp(w, 1, 255) / 256.0f;
+  }
+  s.ring = ins && ins->ringMod;
+  s.sync = ins && ins->sync;
+  s.filterOn = ins && ins->filter.on;
+  if (s.filterOn) {
+    int cut = ins->filter.cutoff;
+    if (s.cutoffOverride >= 0) cut = s.cutoffOverride;
+    if (s.macros[MACRO_CUTOFF].hasValue) cut = s.macros[MACRO_CUTOFF].value;
+    float hz = 30.0f * std::pow(2.0f, std::clamp(cut, 0, 255) / 255.0f * 9.2f);
+    s.filterMode = ins->filter.mode;
+    // Q from 0.707 to 2.5, a little past the SID's own range.
+    s.filter.set(hz, 0.707f + ins->filter.resonance * (1.8f / 15.0f), (float)sampleRate_);
+  }
 
   int vol = s.vol;
   if (s.tremDepth && s.tremSpeed) vol += (int)std::lround(std::sin(s.tremPos * 2.0 * PI / 64.0) * s.tremDepth * 8);
@@ -719,7 +759,7 @@ float Engine::oscillate(ChannelState& s) {
   float out = 0;
   switch (s.wave) {
     case WAVE_PULSE: {
-      double d = DUTY_TABLE[s.duty & 3];
+      double d = s.pw >= 0 ? s.pw : DUTY_TABLE[s.duty & 3];
       out = s.phase < d ? 1.0f : -1.0f;
       out += polyBlep(s.phase, dt);
       out -= polyBlep(std::fmod(s.phase + 1.0 - d, 1.0), dt);
@@ -772,7 +812,8 @@ float Engine::oscillate(ChannelState& s) {
       break;
   }
   s.phase += dt;
-  if (s.phase >= 1.0) s.phase -= std::floor(s.phase);
+  s.wrapped = s.phase >= 1.0;
+  if (s.wrapped) s.phase -= std::floor(s.phase);
   return out;
 }
 
@@ -840,8 +881,9 @@ void Engine::render(float* out, int frames) {
   delayWasOn_ = fx.delay;
   filterWasOn_ = fx.filter;
   if (fx.filter) {
-    filterL_.set(fx.cutoff, fx.resonance, (float)sampleRate_);
-    filterR_.set(fx.cutoff, fx.resonance, (float)sampleRate_);
+    float q = 0.707f + fx.resonance * 9.3f;
+    filterL_.set(fx.cutoff, q, (float)sampleRate_);
+    filterR_.set(fx.cutoff, q, (float)sampleRate_);
   }
 
   for (int i = 0; i < frames; i++) {
@@ -862,9 +904,19 @@ void Engine::render(float* out, int frames) {
         } else if (s.type == INS_FM) {
           const Instrument* ins = instrument(c);
           if (ins) v = playFM(s, *ins) * s.gain;
+        } else if (s.ring || s.sync) {
+          // The previous channel (the last one for channel 1) is the modulator.
+          const ChannelState& m = ch_[c > 0 ? c - 1 : nch - 1];
+          if (s.sync && m.wrapped) s.phase = 0;
+          v = oscillate(s);
+          if (s.ring) v *= m.phase < 0.5 ? 1.0f : -1.0f;
+          v *= s.gain;
         } else {
           v = oscillate(s) * s.gain;
         }
+        if (s.filterOn) v = s.filter.process(v, s.filterMode);
+      } else {
+        s.wrapped = false;
       }
       v *= song_.channels[c].mix;
       s.scope[scopePos_] = v;

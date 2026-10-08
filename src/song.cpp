@@ -7,7 +7,7 @@
 #include <sstream>
 
 const char* const WAVE_NAMES[WAVE_COUNT] = {"Pulse", "Triangle", "Saw", "Noise", "Sine", "Wavetable"};
-const char* const MACRO_NAMES[MACRO_COUNT] = {"Volume", "Arpeggio", "Duty", "Waveform", "Pitch"};
+const char* const MACRO_NAMES[MACRO_COUNT] = {"Volume", "Arpeggio", "Duty", "Waveform", "Pitch", "Cutoff"};
 const char* const INS_TYPE_NAMES[INS_TYPE_COUNT] = {"Chip", "FM", "Sample"};
 const char* const LOOP_NAMES[4] = {"No loop", "Forward", "Ping-pong", "Backward"};
 
@@ -37,7 +37,8 @@ void Instrument::macroRange(int macro, int& lo, int& hi) const {
       hi = type == INS_FM ? 127 : type == INS_SAMPLE ? 64 : 15;
       break;
     case MACRO_ARP: lo = -60; hi = ARP_FIXED + NOTE_COUNT - 1; break;
-    case MACRO_DUTY: lo = 0; hi = 3; break;
+    case MACRO_DUTY: lo = 0; hi = pulseWidth >= 0 ? 255 : 3; break;
+    case MACRO_CUTOFF: lo = 0; hi = 255; break;
     case MACRO_WAVE: lo = 0; hi = 255; break;
     default: lo = -128; hi = 127; break;
   }
@@ -225,6 +226,9 @@ bool Song::save(const std::string& path, std::string& err) const {
     f << "ins.wave " << ins.wave << '\n';
     f << "ins.duty " << ins.duty << '\n';
     f << "ins.volume " << ins.volume << '\n';
+    if (!ins.sidDefault())
+      f << "ins.sid " << ins.filter.on << ' ' << ins.filter.mode << ' ' << ins.filter.cutoff << ' ' << ins.filter.resonance << ' '
+        << ins.ringMod << ' ' << ins.sync << ' ' << ins.pulseWidth << ' ' << ins.pwmSweep << '\n';
     f << "ins.wavetable";
     for (int v : ins.wavetable) f << ' ' << v;
     f << '\n';
@@ -441,6 +445,18 @@ bool Song::load(const std::string& path, std::string& err) {
       } else if (key == "ins.volume") {
         ss >> curIns->volume;
         curIns->volume = clampVal(curIns->volume, 0, 15);
+      } else if (key == "ins.sid") {
+        int on = 0, ring = 0, sync = 0;
+        InsFilter& fl = curIns->filter;
+        ss >> on >> fl.mode >> fl.cutoff >> fl.resonance >> ring >> sync >> curIns->pulseWidth >> curIns->pwmSweep;
+        fl.on = on != 0;
+        fl.mode = clampVal(fl.mode, 0, 2);
+        fl.cutoff = clampVal(fl.cutoff, 0, 255);
+        fl.resonance = clampVal(fl.resonance, 0, 15);
+        curIns->ringMod = ring != 0;
+        curIns->sync = sync != 0;
+        curIns->pulseWidth = curIns->pulseWidth < 0 ? -1 : clampVal(curIns->pulseWidth, 1, 255);
+        curIns->pwmSweep = clampVal(curIns->pwmSweep, -64, 64);
       } else if (key == "ins.wavetable") {
         for (int& v : curIns->wavetable) {
           ss >> v;

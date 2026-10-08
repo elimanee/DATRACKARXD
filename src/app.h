@@ -212,6 +212,7 @@ class App {
   bool sampleInsEditor(Instrument& ins);
   void samplesWindow();
   bool wavetableEditor(Instrument& ins);
+  bool sidEditor(Instrument& ins);
 
   // ui_windows.cpp
   void ordersWindow();

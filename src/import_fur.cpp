@@ -196,11 +196,14 @@ struct FurIns {
     int mult = 1, dt = 3, tl = 0, ar = 31, dr = 0, sl = 0, d2r = 0, rr = 15, rs = 0, ksr = 0, egt = 0;
     bool enabled = true;
   } ops[4];
-  FurMacro macros[5];  // vol, arp, duty, wave, pitch
+  FurMacro macros[6];  // vol, arp, duty, wave, pitch, cutoff (Furnace's ALG macro)
   bool hasGB = false;
   int gbVol = 15, gbDir = 0, gbLen = 0, gbSoft = 0;
   bool hasC64 = false;
   int c64Wave = 4, c64A = 0, c64D = 0, c64S = 15, c64R = 0, c64Duty = 2048;
+  int c64Cut = 1024, c64Res = 0;
+  bool c64Ring = false, c64Sync = false, c64ToFilter = false, c64Lp = true, c64Bp = false, c64Hp = false;
+  bool c64DutyAbs = true, c64FilterAbs = true;
   int initSample = -1;
   bool useSample = false, useWave = false;
   std::vector<std::pair<int, int>> sampleMap;  // our note -> sample
@@ -307,7 +310,7 @@ void parseINS2(ByteReader& r, size_t end, FurIns& ins, int songVersion) {
         int mlen = r.u8(), mloop = r.u8(), mrel = r.u8(), mmode = r.u8(), mtype = r.u8(), mdelay = r.u8(), mspeed = r.u8();
         r.seek(start + std::max(hdrLen, 8));
         FurMacro tmp;
-        FurMacro& m = mc < 5 ? ins.macros[mc] : tmp;
+        FurMacro& m = mc < 5 ? ins.macros[mc] : mc == 8 ? ins.macros[5] : tmp;
         readMacroData(r, m, mlen, mtype >> 6);
         m.loop = mloop == 255 || mloop >= mlen ? -1 : mloop;
         m.release = mrel == 255 || mrel >= mlen ? -1 : mrel;
@@ -327,9 +330,20 @@ void parseINS2(ByteReader& r, size_t end, FurIns& ins, int songVersion) {
     } else if (code == "64") {
       ins.hasC64 = true;
       int f1 = r.u8();
-      r.u8();
+      int f2 = r.u8();
       int ad = r.u8(), sr = r.u8();
       ins.c64Duty = r.u16() & 4095;
+      int cr = r.u16();
+      ins.c64Cut = cr & 2047;
+      ins.c64Res = cr >> 12;
+      ins.c64DutyAbs = f1 & 0x80;
+      ins.c64ToFilter = f1 & 0x10;
+      ins.c64Sync = f2 & 0x80;
+      ins.c64Ring = f2 & 0x40;
+      ins.c64FilterAbs = f2 & 0x10;
+      ins.c64Bp = f2 & 4;
+      ins.c64Hp = f2 & 2;
+      ins.c64Lp = f2 & 1;
       ins.c64Wave = f1 & 15;
       ins.c64A = ad >> 4;
       ins.c64D = ad & 15;
@@ -412,8 +426,20 @@ void parseINST(ByteReader& r, FurIns& ins, int songVersion) {
   ins.c64D = r.u8();
   ins.c64S = r.u8();
   ins.c64R = r.u8();
-  ins.c64Duty = r.u16();
-  r.skip(14);
+  ins.c64Duty = r.u16() & 4095;
+  ins.c64Ring = r.u8();
+  ins.c64Sync = r.u8();
+  ins.c64ToFilter = r.u8();
+  r.u8();  // init filter
+  r.u8();  // volume is cutoff
+  ins.c64Res = r.u8() & 15;
+  ins.c64Lp = r.u8();
+  ins.c64Bp = r.u8();
+  ins.c64Hp = r.u8();
+  r.u8();  // ch3 off
+  ins.c64Cut = r.u16() & 2047;
+  ins.c64DutyAbs = r.u8();
+  ins.c64FilterAbs = r.u8();
   ins.hasC64 = ins.type == 3;
   // Amiga
   ins.initSample = r.s16();
@@ -440,9 +466,17 @@ void parseINST(ByteReader& r, FurIns& ins, int songVersion) {
     for (int& v : ins.macros[1].values) v |= 1 << 30;
 }
 
+// SID cutoff register (0-2047, about 30 Hz to 12 kHz, roughly linear) to
+// our exponential 0-255 cutoff.
+int sidCutoff(int reg) {
+  double hz = 30.0 + reg * 5.85;
+  return std::clamp((int)std::lround(std::log2(hz / 30.0) / 9.2 * 255.0), 0, 255);
+}
+
 Macro convertMacro(const FurMacro& fm, int which, const FurIns& ins, int ourType) {
   Macro m;
   if (fm.values.empty() || fm.type != 0) return m;
+  int acc = which == MACRO_CUTOFF ? ins.c64Cut : ins.c64Duty;  // for relative SID macros
   int typeMax = typeVolMax(ins.type);
   for (int v : fm.values) {
     switch (which) {
@@ -456,7 +490,11 @@ Macro convertMacro(const FurMacro& fm, int which, const FurIns& ins, int ourType
         else v = std::clamp(v, -60, 60);
         break;
       case MACRO_DUTY:
-        if (ins.type == 3) v = v < 768 ? 0 : v < 1536 ? 1 : v < 2560 ? 2 : 3;
+        if (ins.type == 3) {
+          // SID pulse width (12 bits) to our fine width; relative macros add up.
+          if (!ins.c64DutyAbs) v = acc = std::clamp(acc - v, 0, 4095);
+          v = std::clamp((v & 4095) / 16, 1, 255);
+        }
         else if (ins.type == 0) v = (v & 1) ? 0 : 3;  // SN noise: white or periodic
         else if (ins.type == 12) v = std::clamp(v, 0, 7) / 2;
         else v &= 3;
@@ -466,6 +504,10 @@ Macro convertMacro(const FurMacro& fm, int which, const FurIns& ins, int ourType
         else v = std::clamp(v, 0, 255);
         break;
       case MACRO_PITCH: v = std::clamp(v / 4, -128, 127); break;
+      case MACRO_CUTOFF:
+        if (!ins.c64FilterAbs) v = acc = std::clamp(acc + v, 0, 2047);
+        v = sidCutoff(std::clamp(v, 0, 2047));
+        break;
     }
     m.values.push_back(v);
   }
@@ -592,6 +634,7 @@ Instrument convertInstrument(const FurIns& f, float tickRate, bool haveWaves) {
   for (int m = 0; m < MACRO_COUNT; m++) {
     if (ins.type == INS_FM && (m == MACRO_DUTY || m == MACRO_WAVE)) continue;
     if (m == MACRO_DUTY && (f.type == 6 || f.type == 7 || f.type == 9 || f.type == 5)) continue;
+    if (m == MACRO_CUTOFF && !(f.hasC64 || f.type == 3)) continue;
     if (m == MACRO_WAVE && !isWaveType(f.type) && f.type != 3 && !(f.type == 4 && f.useWave)) continue;
     ins.macros[m] = convertMacro(f.macros[m], m, f, ins.type);
   }
@@ -609,6 +652,13 @@ Instrument convertInstrument(const FurIns& f, float tickRate, bool haveWaves) {
       ins.wave = (w & 8) ? WAVE_NOISE : (w & 4) ? WAVE_PULSE : (w & 2) ? WAVE_SAW : WAVE_TRIANGLE;
       int d = f.c64Duty;
       ins.duty = d < 768 ? 0 : d < 1536 ? 1 : d < 2560 ? 2 : 3;
+      ins.pulseWidth = std::clamp(d / 16, 1, 255);
+      ins.ringMod = f.c64Ring;
+      ins.sync = f.c64Sync;
+      ins.filter.on = f.c64ToFilter;
+      ins.filter.mode = f.c64Lp ? 0 : f.c64Bp ? 1 : f.c64Hp ? 2 : 0;
+      ins.filter.cutoff = sidCutoff(f.c64Cut);
+      ins.filter.resonance = f.c64Res & 15;
       if (ins.macros[MACRO_VOL].values.empty()) {
         // SID ADSR as a volume macro.
         static const int atk[16] = {2, 8, 16, 24, 38, 56, 68, 80, 100, 250, 500, 800, 1000, 3000, 5000, 8000};

@@ -79,6 +79,14 @@ struct ChannelState {
   bool smpPlaying = false;
   double smpStep = 0;
 
+  // SID-style extras.
+  SVFilter filter;
+  bool filterOn = false, ring = false, sync = false, wrapped = false;
+  int filterMode = 0;
+  int cutoffOverride = -1;  // 13xx
+  float pw = -1;            // fine pulse width (0..1), -1 = duty steps
+  int pwPos = 128, pwDir = 1;
+
   // FM.
   FMOpState fm[4];
   float fbHist[2] = {0, 0};

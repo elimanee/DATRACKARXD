@@ -58,7 +58,7 @@ struct Pattern {
   bool isEmpty() const;
 };
 
-enum MacroType : int { MACRO_VOL = 0, MACRO_ARP, MACRO_DUTY, MACRO_WAVE, MACRO_PITCH, MACRO_COUNT };
+enum MacroType : int { MACRO_VOL = 0, MACRO_ARP, MACRO_DUTY, MACRO_WAVE, MACRO_PITCH, MACRO_CUTOFF, MACRO_COUNT };
 extern const char* const MACRO_NAMES[MACRO_COUNT];
 
 struct Macro {
@@ -103,6 +103,14 @@ struct Wavetable {
   std::vector<float> data;  // -1..1, any length
 };
 
+// SID-style resonant filter on the instrument's output (any instrument type).
+struct InsFilter {
+  bool on = false;
+  int mode = 0;        // 0 low-pass, 1 band-pass, 2 high-pass
+  int cutoff = 128;    // 0..255, exponential from ~30 Hz to ~18 kHz
+  int resonance = 8;   // 0..15
+};
+
 struct Instrument {
   std::string name = "Instrument";
   int type = INS_STANDARD;
@@ -116,6 +124,15 @@ struct Instrument {
   int sample = -1;                // default sample (sample instruments)
   std::vector<int16_t> sampleMap;  // empty, or NOTE_COUNT sample indexes (-1 = default)
   float fadeout = 0;               // volume lost per tick after note off (0 = none)
+  InsFilter filter;
+  bool ringMod = false;  // multiply by the previous channel's square (SID ring mod)
+  bool sync = false;     // restart the waveform with the previous channel (hard sync)
+  int pulseWidth = -1;   // 1..255 fine pulse width (duty macro and 12xx too); -1 = 4 duty steps
+  int pwmSweep = 0;      // pulse width change per tick, bouncing between the ends
+  bool sidDefault() const {
+    return !filter.on && !ringMod && !sync && pulseWidth < 0 && pwmSweep == 0 && filter.cutoff == 128 && filter.resonance == 8 &&
+           filter.mode == 0;
+  }
   Instrument();
   void macroRange(int macro, int& lo, int& hi) const;
 };

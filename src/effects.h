@@ -7,8 +7,8 @@
 // gives low-, band- and high-pass outputs at once.
 class SVFilter {
  public:
-  // cutoff in Hz, resonance 0..1 (1 = close to self-oscillation).
-  void set(float cutoff, float resonance, float sampleRate);
+  // cutoff in Hz, q = resonance (0.707 = flat, higher = sharper peak).
+  void set(float cutoff, float q, float sampleRate);
   // type: 0 low-pass, 1 band-pass, 2 high-pass.
   float process(float x, int type);
   void clear() { ic1_ = ic2_ = 0; }
@@ -16,7 +16,7 @@ class SVFilter {
  private:
   float a1_ = 1, a2_ = 0, a3_ = 0, k_ = 2;
   float ic1_ = 0, ic2_ = 0;
-  float lastCutoff_ = -1, lastRes_ = -1;
+  float lastCutoff_ = -1, lastQ_ = -1;
 };
 
 class Reverb {

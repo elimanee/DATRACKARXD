@@ -3,13 +3,13 @@
 #include <algorithm>
 #include <cmath>
 
-void SVFilter::set(float cutoff, float resonance, float sampleRate) {
-  if (cutoff == lastCutoff_ && resonance == lastRes_) return;
+void SVFilter::set(float cutoff, float q, float sampleRate) {
+  if (cutoff == lastCutoff_ && q == lastQ_) return;
   lastCutoff_ = cutoff;
-  lastRes_ = resonance;
+  lastQ_ = q;
   float fc = std::clamp(cutoff, 10.0f, sampleRate * 0.45f);
   float g = std::tan(3.14159265f * fc / sampleRate);
-  k_ = 2.0f - 1.96f * std::clamp(resonance, 0.0f, 1.0f);
+  k_ = 1.0f / std::clamp(q, 0.5f, 20.0f);
   a1_ = 1.0f / (1.0f + g * (g + k_));
   a2_ = g * a1_;
   a3_ = g * a2_;

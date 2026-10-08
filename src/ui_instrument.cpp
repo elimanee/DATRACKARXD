@@ -247,7 +247,7 @@ bool App::macroEditor(Instrument& ins, int type) {
   if (st.ins == curIns_ && st.active && st.macros[type].hasValue) playing = std::max(0, st.macros[type].pos - 1);
 
   static const ImU32 colors[MACRO_COUNT] = {IM_COL32(120, 225, 140, 255), IM_COL32(255, 160, 80, 255), IM_COL32(200, 140, 255, 255),
-                                            IM_COL32(120, 200, 255, 255), IM_COL32(255, 220, 120, 255)};
+                                            IM_COL32(120, 200, 255, 255), IM_COL32(255, 220, 120, 255), IM_COL32(255, 120, 170, 255)};
   int lo, hi;
   ins.macroRange(type, lo, hi);
   if (type == MACRO_WAVE) hi = std::max(WAVE_COUNT - 1, std::min(hi, (int)song_.wavetables.size() - 1));
@@ -278,7 +278,11 @@ bool App::macroEditor(Instrument& ins, int type) {
   switch (type) {
     case MACRO_VOL: ImGui::TextDisabled("Volume 0-%d per tick, multiplied with the channel volume.", hi); break;
     case MACRO_ARP: ImGui::TextDisabled("Semitone offset per tick. %d+n plays the fixed note n.", ARP_FIXED); break;
-    case MACRO_DUTY: ImGui::TextDisabled("Pulse duty: 0=12.5%% 1=25%% 2=50%% 3=75%%. Noise: 1 = metallic, 3 = periodic."); break;
+    case MACRO_DUTY:
+      if (ins.pulseWidth >= 0) ImGui::TextDisabled("Fine pulse width 1-255 (128 = square).");
+      else ImGui::TextDisabled("Pulse duty: 0=12.5%% 1=25%% 2=50%% 3=75%%. Noise: 1 = metallic, 3 = periodic.");
+      break;
+    case MACRO_CUTOFF: ImGui::TextDisabled("Filter cutoff 0-255 per tick (needs the filter on)."); break;
     case MACRO_WAVE:
       ImGui::TextDisabled("0 pulse, 1 triangle, 2 saw, 3 noise, 4 sine, 5 wavetable.");
       ImGui::TextDisabled("On a wavetable channel: index of a song wavetable.");
@@ -445,6 +449,57 @@ bool App::sampleInsEditor(Instrument& ins) {
   return changed;
 }
 
+// SID-style options: the resonant filter (any instrument), and for chip
+// instruments ring modulation, hard sync and a fine pulse width with PWM.
+bool App::sidEditor(Instrument& ins) {
+  bool changed = false;
+  if (!ImGui::CollapsingHeader("SID: filter, ring mod, sync, PWM", ins.sidDefault() ? 0 : ImGuiTreeNodeFlags_DefaultOpen)) return false;
+  float w = std::min(ImGui::GetContentRegionAvail().x - 110.0f, 240.0f);
+  changed |= ImGui::Checkbox("Filter", &ins.filter.on);
+  ImGui::BeginDisabled(!ins.filter.on);
+  ImGui::SameLine();
+  ImGui::SetNextItemWidth(w * 0.6f);
+  changed |= ImGui::Combo("##fmode", &ins.filter.mode, "Low-pass\0Band-pass\0High-pass\0");
+  float hz = 30.0f * std::pow(2.0f, ins.filter.cutoff / 255.0f * 9.2f);
+  char fmt[32];
+  std::snprintf(fmt, sizeof(fmt), "%%d (%.0f Hz)", hz);
+  ImGui::SetNextItemWidth(w);
+  changed |= ImGui::SliderInt("Cutoff", &ins.filter.cutoff, 0, 255, fmt);
+  ImGui::SetNextItemWidth(w);
+  changed |= ImGui::SliderInt("Resonance", &ins.filter.resonance, 0, 15);
+  ImGui::EndDisabled();
+  if (ins.filter.on) ImGui::TextDisabled("The Cutoff macro and 13xx move the cutoff.");
+
+  if (ins.type == INS_STANDARD) {
+    changed |= ImGui::Checkbox("Ring mod", &ins.ringMod);
+    ImGui::SameLine();
+    changed |= ImGui::Checkbox("Sync", &ins.sync);
+    ImGui::SameLine();
+    ImGui::TextDisabled("(?)");
+    if (ImGui::IsItemHovered())
+      ImGui::SetTooltip("Both use the previous channel (channel 1 uses the last one).\n"
+                        "Ring mod: multiplies by its square wave (bell sounds, best on triangle).\n"
+                        "Sync: restarts this waveform with it (play a higher note here).");
+    bool fine = ins.pulseWidth >= 0;
+    if (ImGui::Checkbox("Fine pulse width", &fine)) {
+      static const int steps[4] = {32, 64, 128, 192};
+      // Convert the duty macro between the 4 steps and 1..255.
+      for (int& v : ins.macros[MACRO_DUTY].values) v = fine ? steps[v & 3] : std::clamp((v + 16) / 64, 0, 3);
+      ins.pulseWidth = fine ? steps[std::clamp(ins.duty, 0, 3)] : -1;
+      if (!fine) ins.pwmSweep = 0;
+      changed = true;
+    }
+    if (fine) {
+      ImGui::SetNextItemWidth(w);
+      changed |= ImGui::SliderInt("Pulse width", &ins.pulseWidth, 1, 255);
+      ImGui::SetNextItemWidth(w);
+      changed |= ImGui::SliderInt("PWM sweep", &ins.pwmSweep, -16, 16);
+      if (ImGui::IsItemHovered()) ImGui::SetTooltip("Pulse width change per tick, bouncing between thin and wide.");
+    }
+  }
+  return changed;
+}
+
 void App::instrumentEditor() {
   if (!ImGui::Begin("Instrument editor", &showInsEditor_)) {
     ImGui::End();
@@ -477,8 +532,10 @@ void App::instrumentEditor() {
     ImGui::SetNextItemWidth(w);
     changed |= ImGui::Combo("Waveform", &ins.wave, WAVE_NAMES, WAVE_COUNT);
     static const char* dutyNames[4] = {"12.5%", "25%", "50%", "75%"};
+    ImGui::BeginDisabled(ins.pulseWidth >= 0 && ins.wave == WAVE_PULSE);  // the fine width wins
     ImGui::SetNextItemWidth(w);
     changed |= ImGui::SliderInt("Duty", &ins.duty, 0, 3, dutyNames[std::clamp(ins.duty, 0, 3)]);
+    ImGui::EndDisabled();
     ImGui::SetNextItemWidth(w);
     changed |= ImGui::SliderInt("Volume", &ins.volume, 0, 15);
     bool usesTable = ins.wave == WAVE_TABLE;
@@ -500,12 +557,14 @@ void App::instrumentEditor() {
   } else {
     changed |= sampleInsEditor(ins);
   }
+  changed |= sidEditor(ins);
   ImGui::TextDisabled("Play it with the keyboard: Z S X D C... / Q 2 W 3 E...");
 
   ImGui::Separator();
   if (ImGui::BeginTabBar("macros")) {
     for (int t = 0; t < MACRO_COUNT; t++) {
       if (ins.type != INS_STANDARD && (t == MACRO_DUTY || t == MACRO_WAVE) && ins.macros[t].values.empty()) continue;
+      if (t == MACRO_CUTOFF && !ins.filter.on && ins.macros[t].values.empty()) continue;
       std::string label = MACRO_NAMES[t];
       if (!ins.macros[t].values.empty()) label += " *";
       label += "###mac" + std::to_string(t);
