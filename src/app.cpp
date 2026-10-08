@@ -23,6 +23,7 @@ static void audioCallback(void* user, Uint8* stream, int len) {
 
 App::App() {
   loadDemoSong(song_);
+  metaShadow_ = metaSnapshot();
   engine_ = std::make_unique<Engine>(song_, 44100);
   std::error_code ec;
   dialogDir_ = fs::current_path(ec).string();
@@ -98,8 +99,7 @@ void App::afterSongReplaced() {
   curOrder_ = curRow_ = curCh_ = curCol_ = 0;
   curIns_ = 0;
   hasSel_ = false;
-  undo_.clear();
-  redo_.clear();
+  resetUndo();
   dirty_ = false;
 }
 
@@ -310,6 +310,7 @@ void App::fileDialog() {
       if ((int)song_.samples.size() >= MAX_SAMPLES) {
         setStatus("Too many samples");
       } else if (loadWavSample(path, smp, err)) {
+        pushFullUndo();
         song_.samples.push_back(std::move(smp));
         curSample_ = (int)song_.samples.size() - 1;
         if (loadSampleIntoIns_ >= 0 && loadSampleIntoIns_ < (int)song_.instruments.size())
@@ -528,4 +529,6 @@ void App::frame() {
   fileDialog();
   confirmPopup();
   handleKeys();
+  // A settings edit becomes one undo step once the mouse/text gesture ends.
+  if (shadowStale_ || (metaTouched_ && !ImGui::IsAnyItemActive())) commitMetaEdit();
 }

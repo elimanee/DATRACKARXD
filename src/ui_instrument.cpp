@@ -115,6 +115,7 @@ void App::instrumentsWindow() {
     song_.instruments.push_back(ins);
     curIns_ = n;
     dirty_ = true;
+    metaTouched_ = true;
   }
   ImGui::SameLine();
   if (ImGui::Button("Duplicate") && n < MAX_INSTRUMENTS && curIns_ < n) {
@@ -123,9 +124,11 @@ void App::instrumentsWindow() {
     song_.instruments.push_back(copy);
     curIns_ = n;
     dirty_ = true;
+    metaTouched_ = true;
   }
   ImGui::SameLine();
   if (ImGui::Button("Delete") && n > 1 && curIns_ < n) {
+    pushFullUndo();  // instrument numbers in the patterns change too
     int del = curIns_;
     song_.instruments.erase(song_.instruments.begin() + del);
     // Fix instrument numbers in the patterns.
@@ -136,8 +139,6 @@ void App::instrumentsWindow() {
           else if (c.ins > del) c.ins--;
         }
     curIns_ = std::min(del, (int)song_.instruments.size() - 1);
-    undo_.clear();
-    redo_.clear();
     dirty_ = true;
   }
   ImGui::BeginChild("list");
@@ -515,7 +516,10 @@ void App::instrumentEditor() {
     }
     ImGui::EndTabBar();
   }
-  if (changed) dirty_ = true;
+  if (changed) {
+    dirty_ = true;
+    metaTouched_ = true;
+  }
   ImGui::End();
 }
 
@@ -536,6 +540,7 @@ void App::samplesWindow() {
   ImGui::SameLine();
   int n = (int)song_.samples.size();
   if (ImGui::Button("Delete") && curSample_ >= 0 && curSample_ < n) {
+    pushFullUndo();
     int del = curSample_;
     song_.samples.erase(song_.samples.begin() + del);
     for (Instrument& ins : song_.instruments) {
@@ -619,6 +624,9 @@ void App::samplesWindow() {
       }
     }
   }
-  if (changed) dirty_ = true;
+  if (changed) {
+    dirty_ = true;
+    metaTouched_ = true;
+  }
   ImGui::End();
 }

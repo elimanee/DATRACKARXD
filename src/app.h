@@ -19,14 +19,18 @@ struct KeyEvent {
   bool repeat;
 };
 
-// A snapshot of some patterns, taken before an edit.
+// One undo step: either some patterns (note editing), the song without its
+// pattern and sample data (instrument, order and setting edits), or the
+// whole song (structural changes like the channel count).
 struct UndoStep {
+  enum Kind { Patterns, Meta, Full } kind = Patterns;
   struct Entry {
     int ch, pat;
     std::vector<Cell> rows;
   };
   std::vector<Entry> entries;
-  int order, row, ch, col;
+  int order = 0, row = 0, ch = 0, col = 0;
+  std::shared_ptr<Song> song;
 };
 
 // Copied block of cells: [channel][row], with the column range it covers.
@@ -85,6 +89,9 @@ class App {
   Clipboard clipboard_;
 
   std::vector<UndoStep> undo_, redo_;
+  Song metaShadow_;            // song settings as of the last undo step
+  bool metaTouched_ = false;   // settings edited since metaShadow_
+  bool shadowStale_ = false;   // a full snapshot was just taken
   std::vector<KeyEvent> keys_;
   std::map<SDL_Scancode, int> jamming_;  // held key -> channel
 
@@ -159,6 +166,12 @@ class App {
   void setCursorFromPlayback();
   Cell* cursorCell(bool create);
   void pushUndo(int ch0, int ch1);
+  void pushFullUndo();
+  void commitMetaEdit();
+  void resetUndo();
+  Song metaSnapshot();
+  void restoreMeta(const Song& m);
+  void trimUndo();
   void applyUndo(std::vector<UndoStep>& from, std::vector<UndoStep>& to);
   void enterNote(int note);
   void enterHex(int digit);

@@ -50,6 +50,7 @@ void App::ordersWindow() {
   if (ImGui::IsItemHovered()) ImGui::SetTooltip("Duplicate this order (same patterns)");
   ImGui::SameLine();
   if (ImGui::Button("Clone") && numOrders < MAX_ORDERS) {
+    pushFullUndo();
     // Copy the patterns into new unused slots.
     std::array<uint8_t, MAX_CHANNELS> row = song_.orders[curOrder_];
     for (int c = 0; c < nch; c++) {
@@ -147,7 +148,10 @@ void App::ordersWindow() {
     }
     ImGui::EndTable();
   }
-  if (changed) dirty_ = true;
+  if (changed) {
+    dirty_ = true;
+    metaTouched_ = true;
+  }
   ImGui::End();
 }
 
@@ -222,11 +226,10 @@ void App::songWindow() {
   ImGui::Separator();
   int nch = song_.channelCount();
   ImGui::SetNextItemWidth(120);
-  if (ImGui::InputInt("Channels", &nch)) {
+  if (ImGui::InputInt("Channels", &nch) && nch != song_.channelCount()) {
+    pushFullUndo();
     engine_->stop();
     song_.setChannelCount(nch);
-    undo_.clear();
-    redo_.clear();
     changed = true;
   }
   if (ImGui::BeginTable("chans", 4, ImGuiTableFlags_SizingStretchProp | ImGuiTableFlags_RowBg)) {
@@ -262,7 +265,10 @@ void App::songWindow() {
     ImGui::EndTable();
   }
   if (!audioStatus_.empty()) ImGui::TextDisabled("%s", audioStatus_.c_str());
-  if (changed) dirty_ = true;
+  if (changed) {
+    dirty_ = true;
+    metaTouched_ = true;
+  }
   ImGui::End();
 }
 
