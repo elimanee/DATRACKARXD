@@ -83,6 +83,7 @@ add_executable(datrackarxd
   src/import_fur.cpp
   src/inflate.cpp
   src/midi.cpp
+  src/midifile.cpp
   src/app.cpp
   src/ui_pattern.cpp
   src/ui_pianoroll.cpp

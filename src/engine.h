@@ -56,6 +56,7 @@ struct ChannelState {
   MacroState macros[MACRO_COUNT];
   int pitchMacroAcc = 0;
   bool justTriggered = false;  // macros already stepped this tick
+  uint32_t triggers = 0;       // counts note starts (for MIDI export)
 
   // Values computed each tick and consumed by the oscillators.
   double freq = 0;
@@ -111,7 +112,9 @@ class Engine {
   // vol: 00..7F for the channel volume, -1 to keep it.
   void noteOn(int ch, int note, int ins, int vol = -1);
   void noteOff(int ch);
-  void resetPan(int ch);  // back to the channel's default panning
+  void resetPan(int ch);
+  // Runs one tick without rendering audio (MIDI export).
+  void tick() { doTick(); }  // back to the channel's default panning
 
   // Renders interleaved stereo float frames.
   void render(float* out, int frames);

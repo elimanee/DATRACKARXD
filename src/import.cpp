@@ -1,6 +1,8 @@
 // Format detection and the effect translation shared by the tracker importers.
 #include "import.h"
 
+#include "midifile.h"
+
 #include <cctype>
 #include <algorithm>
 #include <cmath>
@@ -39,7 +41,7 @@ std::string ByteReader::cstr() {
   return s;
 }
 
-std::vector<std::string> supportedSongExtensions() { return {".dtk", ".fur", ".mod", ".xm", ".it", ".s3m"}; }
+std::vector<std::string> supportedSongExtensions() { return {".dtk", ".fur", ".mod", ".xm", ".it", ".s3m", ".mid"}; }
 
 bool loadAnySong(const std::string& path, Song& song, std::string& err) {
   std::ifstream f(path, std::ios::binary);
@@ -66,6 +68,8 @@ bool loadAnySong(const std::string& path, Song& song, std::string& err) {
     ok = s.load(path, err);
   } else if (has(0, "-Furnace module-") || (d.size() > 2 && d[0] == 0x78 && ((d[0] << 8) | d[1]) % 31 == 0)) {
     ok = importFUR(d, s, err);
+  } else if (has(0, "MThd")) {
+    ok = importMIDI(d, s, err);
   } else if (has(0, "IMPM")) {
     ok = importIT(d, s, err);
   } else if (has(0, "Extended Module:")) {

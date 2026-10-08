@@ -298,6 +298,7 @@ void Engine::triggerNote(int c, int note, int offset) {
   for (auto& m : s.macros) m = MacroState();
   stepMacros(c);
   s.justTriggered = true;
+  s.triggers++;
 
   if (s.type == INS_SAMPLE) {
     int idx = ins->sample;

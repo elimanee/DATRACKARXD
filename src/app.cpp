@@ -11,6 +11,7 @@
 
 #include "demo.h"
 #include "import.h"
+#include "midifile.h"
 #include "theme.h"
 
 namespace fs = std::filesystem;
@@ -218,6 +219,7 @@ void App::openFileDialog(FileDialogMode mode) {
   if (mode == FileDialogMode::Open) base.clear();
   if (mode == FileDialogMode::Save) base += ".dtk";
   if (mode == FileDialogMode::ExportWav) base += ".wav";
+  if (mode == FileDialogMode::ExportMidi) base += ".mid";
   if (mode == FileDialogMode::LoadInstrument) base.clear();
   if (mode == FileDialogMode::SaveInstrument && curIns_ < (int)song_.instruments.size()) base = song_.instruments[curIns_].name + ".dti";
   std::snprintf(dialogName_, sizeof(dialogName_), "%s", base.c_str());
@@ -229,6 +231,7 @@ void App::fileDialog() {
                       : dialogMode_ == FileDialogMode::LoadSample ? "Load WAV sample###filedlg"
                       : dialogMode_ == FileDialogMode::LoadInstrument ? "Load instrument###filedlg"
                       : dialogMode_ == FileDialogMode::SaveInstrument ? "Save instrument###filedlg"
+                      : dialogMode_ == FileDialogMode::ExportMidi ? "Export MIDI###filedlg"
                                                                  : "Export WAV###filedlg";
   if (dialogOpenRequest_) {
     ImGui::OpenPopup("###filedlg");
@@ -242,6 +245,7 @@ void App::fileDialog() {
   else if (dialogMode_ == FileDialogMode::Save) exts = {".dtk"};
   else if (dialogMode_ == FileDialogMode::LoadInstrument) exts = instrumentFileExtensions();
   else if (dialogMode_ == FileDialogMode::SaveInstrument) exts = {".dti"};
+  else if (dialogMode_ == FileDialogMode::ExportMidi) exts = {".mid"};
   else exts = {".wav"};
   const std::string& ext = exts[0];
   auto matches = [&](const fs::path& p) {
@@ -299,7 +303,7 @@ void App::fileDialog() {
   ImGui::SetNextItemWidth(-200);
   if (ImGui::IsWindowAppearing()) ImGui::SetKeyboardFocusHere();
   if (ImGui::InputText("##name", dialogName_, sizeof(dialogName_), ImGuiInputTextFlags_EnterReturnsTrue)) accept = true;
-  if (dialogMode_ == FileDialogMode::ExportWav) {
+  if (dialogMode_ == FileDialogMode::ExportWav || dialogMode_ == FileDialogMode::ExportMidi) {
     ImGui::SameLine();
     ImGui::SetNextItemWidth(80);
     ImGui::InputInt("loops", &exportLoops_);
@@ -356,6 +360,12 @@ void App::fileDialog() {
       } else {
         setStatus("Instrument save failed: " + err);
       }
+    } else if (dialogMode_ == FileDialogMode::ExportMidi) {
+      if (exportMIDI(song_, path, exportLoops_, err))
+        setStatus("Exported " + path);
+      else
+        setStatus("MIDI export failed: " + err);
+      cancel = true;
     } else if (dialogMode_ == FileDialogMode::Save) {
       filePath_ = path;
       saveSong(false);
@@ -386,6 +396,7 @@ void App::menuBar() {
     if (ImGui::MenuItem("Save as...", "Ctrl+Shift+S")) saveSong(true);
     ImGui::Separator();
     if (ImGui::MenuItem("Export WAV...")) openFileDialog(FileDialogMode::ExportWav);
+    if (ImGui::MenuItem("Export MIDI...")) openFileDialog(FileDialogMode::ExportMidi);
     if (ImGui::MenuItem("Load demo song")) askAction(PendingAction::Demo);
     ImGui::Separator();
     if (ImGui::MenuItem("Quit")) requestQuit();

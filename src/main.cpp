@@ -11,6 +11,7 @@
 #include "app.h"
 #include "demo.h"
 #include "import.h"
+#include "midifile.h"
 
 static int usage() {
   std::printf(
@@ -18,7 +19,8 @@ static int usage() {
       "usage:\n"
       "  datrackarxd [song.dtk]                      open the tracker\n"
       "  datrackarxd --export song out.wav [n]       render n loops to WAV (dtk/fur/mod/xm/it/s3m)\n"
-      "  datrackarxd --convert module out.dtk        import a module and save it as .dtk\n"
+      "  datrackarxd --convert module out.dtk        import a module (or .mid) and save it as .dtk\n"
+      "  datrackarxd --export-midi song out.mid [n]  write the song as a MIDI file\n"
       "  datrackarxd --export-stems song prefix      one WAV per channel (prefix_01.wav...)\n"
       "  datrackarxd --convert-instrument in out.dti instrument preset from .fui/.wav/.dti\n"
       "  datrackarxd --export-demo out.wav           render the demo song\n"
@@ -49,6 +51,14 @@ static int commandLine(int argc, char** argv) {
     t.wavetables.clear();
     int idx = loadInstrumentFile(argv[2], t, err);
     if (idx < 0 || !saveInstrumentFile(t, idx, argv[3], err)) {
+      std::fprintf(stderr, "%s\n", err.c_str());
+      return 1;
+    }
+    std::printf("wrote %s\n", argv[3]);
+    return 0;
+  }
+  if (cmd == "--export-midi" && argc >= 4) {
+    if (!loadAnySong(argv[2], song, err) || !exportMIDI(song, argv[3], argc >= 5 ? std::atoi(argv[4]) : 1, err)) {
       std::fprintf(stderr, "%s\n", err.c_str());
       return 1;
     }
