@@ -41,6 +41,7 @@ int scancodeToNote(SDL_Scancode sc);
 // A note as the piano roll sees it: a start row and a length in rows.
 struct PRNote {
   int start, len, note, ins, vol;
+  int ch = 0;  // channel the note lives in
 };
 
 enum class PRDrag { None, Move, Resize, Select, Erase, Velocity, Key };
@@ -110,7 +111,8 @@ class App {
   float prTop_ = -1;                   // pitch at the top edge (-1 = not placed yet)
   bool prGhosts_ = true;
   int prLength_ = 4;                   // length of new notes, in rows
-  std::set<int> prSel_;                // selected notes, by start row
+  int prVoices_ = 1;                   // channels used for chords (1 = this channel only)
+  std::set<int> prSel_;                // selected notes (start * 256 + note)
   int prViewCh_ = -1, prViewOrder_ = -1;
   PRDrag prDrag_ = PRDrag::None;
   std::vector<PRNote> prOrig_;         // notes when the drag started
