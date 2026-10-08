@@ -7,6 +7,7 @@
 #include <string>
 #include <vector>
 
+#include "effects.h"
 #include "song.h"
 
 constexpr int SCOPE_LEN = 1024;
@@ -102,6 +103,7 @@ class Engine {
   // vol: 00..7F for the channel volume, -1 to keep it.
   void noteOn(int ch, int note, int ins, int vol = -1);
   void noteOff(int ch);
+  void resetPan(int ch);  // back to the channel's default panning
 
   // Renders interleaved stereo float frames.
   void render(float* out, int frames);
@@ -138,6 +140,11 @@ class Engine {
   double samplesToTick_ = 0;
 
   float dcL_ = 0, dcR_ = 0, dcPrevL_ = 0, dcPrevR_ = 0;
+  Reverb reverb_;
+  StereoDelay delay_;
+  SVFilter filterL_, filterR_;
+  bool reverbWasOn_ = false, delayWasOn_ = false, filterWasOn_ = false;
+  void clearEffects();
   std::array<float, SCOPE_LEN> master_{};
   int scopePos_ = 0;
 

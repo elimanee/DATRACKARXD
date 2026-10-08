@@ -115,6 +115,7 @@ class App {
   // Windows.
   bool showPattern_ = true, showOrders_ = true, showInstruments_ = true, showInsEditor_ = true;
   bool showSamples_ = true;
+  bool showMixer_ = true;
   bool showScroller_ = false;
   int curSample_ = 0;
   int loadSampleIntoIns_ = -1;  // instrument that receives the next loaded WAV
@@ -215,6 +216,7 @@ class App {
   // ui_windows.cpp
   void ordersWindow();
   void songWindow();
+  void mixerWindow();
   void scopeWindow();
   void scrollerWindow();
   void saveSettings();

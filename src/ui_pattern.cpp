@@ -222,6 +222,7 @@ Song App::metaSnapshot() {
   m.orders = song_.orders;
   m.instruments = song_.instruments;
   m.wavetables = song_.wavetables;
+  m.fx = song_.fx;
   m.channels.clear();
   for (auto& c : song_.channels) {
     std::vector<Pattern> pats = std::move(c.patterns);
@@ -250,6 +251,7 @@ void App::restoreMeta(const Song& m) {
   song_.orders = m.orders;
   song_.instruments = m.instruments;
   song_.wavetables = m.wavetables;
+  song_.fx = m.fx;
   for (size_t c = 0; c < m.channels.size() && c < song_.channels.size(); c++) {
     std::vector<Pattern> pats = std::move(song_.channels[c].patterns);
     song_.channels[c] = m.channels[c];

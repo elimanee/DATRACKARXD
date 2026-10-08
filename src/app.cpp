@@ -386,6 +386,7 @@ void App::menuBar() {
     ImGui::MenuItem("Instrument editor", nullptr, &showInsEditor_);
     ImGui::MenuItem("Song", nullptr, &showSong_);
     ImGui::MenuItem("Samples", nullptr, &showSamples_);
+    ImGui::MenuItem("Mixer", nullptr, &showMixer_);
     ImGui::MenuItem("Oscilloscope", nullptr, &showScope_);
     ImGui::MenuItem("Keygen scroller", nullptr, &showScroller_);
     ImGui::Separator();
@@ -572,6 +573,7 @@ void App::defaultLayout(unsigned int dockId) {
   ImGui::DockBuilderDockWindow("Samples", rightBottom);
   ImGui::DockBuilderDockWindow("Oscilloscope", bottom);
   ImGui::DockBuilderDockWindow("Keygen", bottom);
+  ImGui::DockBuilderDockWindow("Mixer", bottom);
   ImGui::DockBuilderDockWindow("Effects", rightBottom);
   ImGui::DockBuilderDockWindow("Keyboard", rightBottom);
   ImGui::DockBuilderFinish(dockId);
@@ -652,6 +654,7 @@ void App::frame() {
   if (showInsEditor_) instrumentEditor();
   if (showSong_) songWindow();
   if (showSamples_) samplesWindow();
+  if (showMixer_) mixerWindow();
   if (showScope_) scopeWindow();
   if (showScroller_) scrollerWindow();
   if (showEffects_) effectsHelp();

@@ -272,6 +272,97 @@ void App::songWindow() {
   ImGui::End();
 }
 
+// Master effects and the per-channel levels and sends.
+void App::mixerWindow() {
+  if (!ImGui::Begin("Mixer", &showMixer_)) {
+    ImGui::End();
+    return;
+  }
+  bool changed = false;
+  MasterFx& fx = song_.fx;
+  const float w = 150;
+  if (ImGui::BeginTable("master", 3, ImGuiTableFlags_SizingStretchSame | ImGuiTableFlags_BordersInnerV)) {
+    ImGui::TableNextRow();
+    ImGui::TableNextColumn();
+    changed |= ImGui::Checkbox("Reverb", &fx.reverb);
+    ImGui::BeginDisabled(!fx.reverb);
+    ImGui::SetNextItemWidth(w);
+    changed |= ImGui::SliderFloat("Room size", &fx.roomSize, 0, 1, "%.2f");
+    ImGui::SetNextItemWidth(w);
+    changed |= ImGui::SliderFloat("Damping", &fx.damping, 0, 1, "%.2f");
+    ImGui::SetNextItemWidth(w);
+    changed |= ImGui::SliderFloat("Level##rv", &fx.reverbLevel, 0, 2, "%.2f");
+    ImGui::EndDisabled();
+
+    ImGui::TableNextColumn();
+    changed |= ImGui::Checkbox("Delay", &fx.delay);
+    ImGui::SameLine();
+    changed |= ImGui::Checkbox("Ping-pong", &fx.pingPong);
+    ImGui::BeginDisabled(!fx.delay);
+    ImGui::SetNextItemWidth(w);
+    changed |= ImGui::SliderInt("Time (rows)", &fx.delayRows, 1, 16);
+    ImGui::SetNextItemWidth(w);
+    changed |= ImGui::SliderFloat("Feedback", &fx.delayFeedback, 0, 0.95f, "%.2f");
+    ImGui::SetNextItemWidth(w);
+    changed |= ImGui::SliderFloat("Level##dl", &fx.delayLevel, 0, 2, "%.2f");
+    ImGui::EndDisabled();
+
+    ImGui::TableNextColumn();
+    changed |= ImGui::Checkbox("Filter", &fx.filter);
+    ImGui::BeginDisabled(!fx.filter);
+    ImGui::SetNextItemWidth(w);
+    changed |= ImGui::Combo("Type", &fx.filterType, "Low-pass\0Band-pass\0High-pass\0");
+    ImGui::SetNextItemWidth(w);
+    changed |= ImGui::SliderFloat("Cutoff", &fx.cutoff, 20, 20000, "%.0f Hz", ImGuiSliderFlags_Logarithmic);
+    ImGui::SetNextItemWidth(w);
+    changed |= ImGui::SliderFloat("Resonance", &fx.resonance, 0, 1, "%.2f");
+    ImGui::EndDisabled();
+    ImGui::SetNextItemWidth(w);
+    changed |= ImGui::SliderFloat("Master", &fx.volume, 0, 2, "%.2f");
+    ImGui::EndTable();
+  }
+
+  ImGui::Separator();
+  if (ImGui::BeginTable("sends", 6, ImGuiTableFlags_SizingStretchSame | ImGuiTableFlags_RowBg)) {
+    ImGui::TableSetupColumn("Channel");
+    ImGui::TableSetupColumn("Mix");
+    ImGui::TableSetupColumn("Pan");
+    ImGui::TableSetupColumn("Reverb send");
+    ImGui::TableSetupColumn("Delay send");
+    ImGui::TableSetupColumn("Mute", ImGuiTableColumnFlags_WidthFixed);
+    ImGui::TableHeadersRow();
+    for (int c = 0; c < song_.channelCount(); c++) {
+      ChannelInfo& info = song_.channels[c];
+      ImGui::PushID(c);
+      ImGui::TableNextRow();
+      ImGui::TableNextColumn();
+      ImGui::Text("%d %s", c + 1, info.name.c_str());
+      ImGui::TableNextColumn();
+      ImGui::SetNextItemWidth(-1);
+      changed |= ImGui::SliderFloat("##mix", &info.mix, 0.0f, 2.0f, "%.2f");
+      ImGui::TableNextColumn();
+      ImGui::SetNextItemWidth(-1);
+      if (ImGui::SliderInt("##pan", &info.pan, 0, 255, info.pan == 128 ? "C" : info.pan < 128 ? "L%d" : "R%d")) changed = true;
+      if (ImGui::IsItemActive()) engine_->resetPan(c);  // hear it right away
+      ImGui::TableNextColumn();
+      ImGui::SetNextItemWidth(-1);
+      changed |= ImGui::SliderFloat("##rv", &info.reverbSend, 0, 1, "%.2f");
+      ImGui::TableNextColumn();
+      ImGui::SetNextItemWidth(-1);
+      changed |= ImGui::SliderFloat("##dl", &info.delaySend, 0, 1, "%.2f");
+      ImGui::TableNextColumn();
+      ImGui::Checkbox("##m", &info.muted);  // like the pattern header: not an edit
+      ImGui::PopID();
+    }
+    ImGui::EndTable();
+  }
+  if (changed) {
+    dirty_ = true;
+    metaTouched_ = true;
+  }
+  ImGui::End();
+}
+
 void App::scopeWindow() {
   if (!ImGui::Begin("Oscilloscope", &showScope_)) {
     ImGui::End();

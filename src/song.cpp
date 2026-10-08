@@ -211,7 +211,12 @@ bool Song::save(const std::string& path, std::string& err) const {
     if (ch.volSlideUnit != 512) f << "chanslide " << c << ' ' << ch.volSlideUnit << '\n';
     if (ch.fixedDuty >= 0 || ch.minNote > 0 || ch.mix != 1.0f)
       f << "chanchip " << c << ' ' << ch.fixedDuty << ' ' << ch.minNote << ' ' << ch.mix << '\n';
+    if (ch.reverbSend > 0 || ch.delaySend > 0) f << "chansend " << c << ' ' << ch.reverbSend << ' ' << ch.delaySend << '\n';
   }
+  f << "fx.reverb " << fx.reverb << ' ' << fx.roomSize << ' ' << fx.damping << ' ' << fx.reverbLevel << '\n';
+  f << "fx.delay " << fx.delay << ' ' << fx.delayRows << ' ' << fx.delayFeedback << ' ' << fx.delayLevel << ' ' << fx.pingPong << '\n';
+  f << "fx.filter " << fx.filter << ' ' << fx.filterType << ' ' << fx.cutoff << ' ' << fx.resonance << '\n';
+  f << "fx.volume " << fx.volume << '\n';
 
   for (size_t i = 0; i < instruments.size(); i++) {
     const Instrument& ins = instruments[i];
@@ -365,6 +370,39 @@ bool Song::load(const std::string& path, std::string& err) {
         s.channels[c].forceWave = clampVal(forceWave, -1, WAVE_COUNT - 1);
         s.channels[c].name = restOfLine(ss);
       }
+    } else if (key == "chansend") {
+      int c = -1;
+      float rv = 0, dl = 0;
+      ss >> c >> rv >> dl;
+      if (c >= 0 && c < s.channelCount()) {
+        s.channels[c].reverbSend = std::clamp(rv, 0.0f, 1.0f);
+        s.channels[c].delaySend = std::clamp(dl, 0.0f, 1.0f);
+      }
+    } else if (key == "fx.reverb") {
+      int on = 0;
+      ss >> on >> s.fx.roomSize >> s.fx.damping >> s.fx.reverbLevel;
+      s.fx.reverb = on != 0;
+      s.fx.roomSize = std::clamp(s.fx.roomSize, 0.0f, 1.0f);
+      s.fx.damping = std::clamp(s.fx.damping, 0.0f, 1.0f);
+      s.fx.reverbLevel = std::clamp(s.fx.reverbLevel, 0.0f, 2.0f);
+    } else if (key == "fx.delay") {
+      int on = 0, pp = 1;
+      ss >> on >> s.fx.delayRows >> s.fx.delayFeedback >> s.fx.delayLevel >> pp;
+      s.fx.delay = on != 0;
+      s.fx.pingPong = pp != 0;
+      s.fx.delayRows = clampVal(s.fx.delayRows, 1, 64);
+      s.fx.delayFeedback = std::clamp(s.fx.delayFeedback, 0.0f, 0.95f);
+      s.fx.delayLevel = std::clamp(s.fx.delayLevel, 0.0f, 2.0f);
+    } else if (key == "fx.filter") {
+      int on = 0;
+      ss >> on >> s.fx.filterType >> s.fx.cutoff >> s.fx.resonance;
+      s.fx.filter = on != 0;
+      s.fx.filterType = clampVal(s.fx.filterType, 0, 2);
+      s.fx.cutoff = std::clamp(s.fx.cutoff, 20.0f, 20000.0f);
+      s.fx.resonance = std::clamp(s.fx.resonance, 0.0f, 1.0f);
+    } else if (key == "fx.volume") {
+      ss >> s.fx.volume;
+      s.fx.volume = std::clamp(s.fx.volume, 0.0f, 4.0f);
     } else if (key == "chanslide") {
       int c = -1, unit = 512;
       ss >> c >> unit;

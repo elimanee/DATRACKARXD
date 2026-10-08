@@ -76,6 +76,7 @@ add_executable(datrackarxd
   src/main.cpp
   src/song.cpp
   src/engine.cpp
+  src/effects.cpp
   src/demo.cpp
   src/import.cpp
   src/import_tracker.cpp

@@ -74,7 +74,16 @@ void linearPan(int p, float& l, float& r) {
 
 Engine::Engine(const Song& song, int sampleRate) : song_(song), sampleRate_(sampleRate) {
   tables();
+  reverb_.init(sampleRate);
+  delay_.init(sampleRate, 4.0f);
   reset();
+}
+
+void Engine::clearEffects() {
+  reverb_.clear();
+  delay_.clear();
+  filterL_.clear();
+  filterR_.clear();
 }
 
 void Engine::resetChannel(int c) {
@@ -90,6 +99,7 @@ void Engine::reset() {
   speeds_ = song_.speeds;
   tickRate_ = song_.tickRate;
   samplesToTick_ = 0;
+  clearEffects();
 }
 
 int Engine::speed() const {
@@ -137,6 +147,10 @@ void Engine::noteOn(int c, int note, int ins, int vol) {
   ch_[c].pitchSlide = 0;
   triggerNote(c, note, 0);
   updateChannel(c);
+}
+
+void Engine::resetPan(int c) {
+  if (c >= 0 && c < song_.channelCount()) linearPan(song_.channels[c].pan, ch_[c].panL, ch_[c].panR);
 }
 
 void Engine::noteOff(int c) {
@@ -814,6 +828,21 @@ void Engine::render(float* out, int frames) {
   const float smooth = 1.0f - std::exp(-1.0f / (0.002f * sampleRate_));  // ~2 ms
   const float dcR = 1.0f - 20.0f / sampleRate_;
   int nch = song_.channelCount();
+  const MasterFx& fx = song_.fx;
+  // An effect switched back on starts from silence, not from an old tail.
+  if (fx.reverb && !reverbWasOn_) reverb_.clear();
+  if (fx.delay && !delayWasOn_) delay_.clear();
+  if (fx.filter && !filterWasOn_) {
+    filterL_.clear();
+    filterR_.clear();
+  }
+  reverbWasOn_ = fx.reverb;
+  delayWasOn_ = fx.delay;
+  filterWasOn_ = fx.filter;
+  if (fx.filter) {
+    filterL_.set(fx.cutoff, fx.resonance, (float)sampleRate_);
+    filterR_.set(fx.cutoff, fx.resonance, (float)sampleRate_);
+  }
 
   for (int i = 0; i < frames; i++) {
     if (samplesToTick_ <= 0) {
@@ -822,7 +851,7 @@ void Engine::render(float* out, int frames) {
     }
     samplesToTick_ -= 1.0;
 
-    float l = 0, r = 0;
+    float l = 0, r = 0, rvIn = 0, dlL = 0, dlR = 0;
     for (int c = 0; c < nch; c++) {
       ChannelState& s = ch_[c];
       s.gain += (s.targetGain - s.gain) * smooth;
@@ -839,10 +868,36 @@ void Engine::render(float* out, int frames) {
       }
       v *= song_.channels[c].mix;
       s.scope[scopePos_] = v;
-      if (song_.channels[c].muted) continue;
-      l += v * s.panL;
-      r += v * s.panR;
+      const ChannelInfo& info = song_.channels[c];
+      if (info.muted) continue;
+      float vl = v * s.panL, vr = v * s.panR;
+      l += vl;
+      r += vr;
+      rvIn += (vl + vr) * info.reverbSend;
+      dlL += vl * info.delaySend;
+      dlR += vr * info.delaySend;
     }
+    if (fx.delay) {
+      // The echo time follows the song: delayRows rows at the current speed.
+      int delay = (int)(fx.delayRows * speed() * sampleRate_ / std::max(tickRate_, 1.0f));
+      float el, er;
+      delay_.process(dlL, dlR, delay, fx.delayFeedback, fx.pingPong, el, er);
+      l += el * fx.delayLevel;
+      r += er * fx.delayLevel;
+      rvIn += (el + er) * 0.5f * fx.delayLevel * 0.5f;  // echoes get some reverb too
+    }
+    if (fx.reverb) {
+      float wl, wr;
+      reverb_.process(rvIn, fx.roomSize, fx.damping, wl, wr);
+      l += wl * fx.reverbLevel;
+      r += wr * fx.reverbLevel;
+    }
+    if (fx.filter) {
+      l = filterL_.process(l, fx.filterType);
+      r = filterR_.process(r, fx.filterType);
+    }
+    l *= fx.volume;
+    r *= fx.volume;
     // DC blocker, master gain and soft clip.
     float hl = l - dcPrevL_ + dcR * dcL_;
     float hr = r - dcPrevR_ + dcR * dcR_;
