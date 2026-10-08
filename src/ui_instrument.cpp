@@ -141,6 +141,11 @@ void App::instrumentsWindow() {
     curIns_ = std::min(del, (int)song_.instruments.size() - 1);
     dirty_ = true;
   }
+  if (ImGui::Button("Load...")) openFileDialog(FileDialogMode::LoadInstrument);
+  if (ImGui::IsItemHovered()) ImGui::SetTooltip("Add an instrument from a .dti preset, a Furnace .fui or a .wav");
+  ImGui::SameLine();
+  if (ImGui::Button("Save...") && curIns_ < n) openFileDialog(FileDialogMode::SaveInstrument);
+  if (ImGui::IsItemHovered()) ImGui::SetTooltip("Save the selected instrument as a .dti preset");
   ImGui::BeginChild("list");
   for (int i = 0; i < (int)song_.instruments.size(); i++) {
     char buf[128];

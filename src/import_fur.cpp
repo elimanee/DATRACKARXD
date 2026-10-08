@@ -4,6 +4,7 @@
 #include <algorithm>
 #include <cmath>
 #include <cstring>
+#include <map>
 
 #include "import.h"
 
@@ -208,6 +209,9 @@ struct FurIns {
   bool useSample = false, useWave = false;
   std::vector<std::pair<int, int>> sampleMap;  // our note -> sample
   int firstWave = -1;
+  // Instrument files (.fui) carry their own samples and wavetables:
+  // original index -> file offset of the SMP2/WAVE block.
+  std::vector<std::pair<int, uint32_t>> sampleList, waveList;
 };
 
 bool isFMType(int t) { return t == 1 || t == 33 || t == 19 || t == 14 || t == 13 || t == 32 || t == 55; }
@@ -319,6 +323,13 @@ void parseINS2(ByteReader& r, size_t end, FurIns& ins, int songVersion) {
         m.delay = mdelay;
         m.speed = std::max(1, (int)mspeed);
       }
+    } else if (code == "LS" || code == "LW" || code == "SL" || code == "WL") {
+      bool wide = code[0] == 'L';  // new lists use 16-bit counts and indexes
+      int count = wide ? r.u16() : r.u8();
+      std::vector<int> idx(count);
+      for (int& v : idx) v = wide ? r.u16() : r.u8();
+      auto& list = (code == "LS" || code == "SL") ? ins.sampleList : ins.waveList;
+      for (int i = 0; i < count; i++) list.push_back({idx[i], r.u32()});
     } else if (code == "GB") {
       ins.hasGB = true;
       int env = r.u8();
@@ -767,6 +778,77 @@ void parseWave(ByteReader& r, Wavetable& w) {
 }
 
 }  // namespace
+
+// Furnace instrument file: "FINS" (features, no length) or the older
+// "-Furnace instr.-" header pointing at an INST/INS2 block.
+bool importFUI(const std::vector<uint8_t>& raw, Song& out, std::string& err) {
+  ByteReader r(raw);
+  FurIns fi;
+  int version = 0;
+  if (raw.size() >= 8 && (std::memcmp(raw.data(), "FINS", 4) == 0 || std::memcmp(raw.data(), "FINB", 4) == 0)) {
+    r.seek(4);
+    version = ByteReader(raw.data() + 4, 2).u16();
+    parseINS2(r, raw.size(), fi, version);
+  } else if (raw.size() >= 32 && std::memcmp(raw.data(), "-Furnace instr.-", 16) == 0) {
+    r.seek(16);
+    version = r.u16();
+    r.u16();
+    uint32_t ptr = r.u32();
+    r.seek(ptr);
+    std::string id = r.str(4);
+    uint32_t size = r.u32();
+    if (id == "INST") parseINST(r, fi, version);
+    else if (id == "INS2") parseINS2(r, ptr + 8 + size, fi, version);
+    else {
+      err = "Unknown Furnace instrument data";
+      return false;
+    }
+  } else {
+    err = "Not a Furnace instrument (.fui)";
+    return false;
+  }
+
+  out = Song();
+  out.instruments.clear();
+  // Bring the samples and wavetables along, renumbered from 0.
+  std::map<int, int> sampleMap, waveMap;
+  for (auto& [idx, ptr] : fi.sampleList) {
+    r.seek(ptr);
+    std::string id = r.str(4);
+    uint32_t size = r.u32();
+    if (id != "SMP2" && id != "SMPL") continue;
+    Sample smp;
+    parseSample(r, ptr + 8 + size, id, version, smp);
+    sampleMap[idx] = (int)out.samples.size();
+    out.samples.push_back(std::move(smp));
+  }
+  for (auto& [idx, ptr] : fi.waveList) {
+    r.seek(ptr);
+    if (r.str(4) != "WAVE") continue;
+    r.u32();
+    Wavetable w;
+    parseWave(r, w);
+    waveMap[idx] = (int)out.wavetables.size();
+    out.wavetables.push_back(std::move(w));
+  }
+  auto remap = [](const std::map<int, int>& m, int v) {
+    auto it = m.find(v);
+    return it == m.end() ? (m.empty() ? v : 0) : it->second;
+  };
+  if (fi.initSample >= 0) fi.initSample = remap(sampleMap, fi.initSample);
+  for (auto& e : fi.sampleMap) e.second = remap(sampleMap, e.second);
+  if (fi.firstWave >= 0) fi.firstWave = remap(waveMap, fi.firstWave);
+  if (isWaveType(fi.type) && !waveMap.empty())
+    for (int& v : fi.macros[MACRO_WAVE].values) v = remap(waveMap, v);
+  Instrument ins = convertInstrument(fi, out.tickRate, !out.wavetables.empty());
+  if (fi.name.empty()) ins.name.clear();  // the caller names it after the file
+  if (ins.sample >= (int)out.samples.size()) ins.sample = out.samples.empty() ? -1 : 0;
+  for (auto& v : ins.sampleMap)
+    if (v >= (int)out.samples.size()) v = -1;
+  if (ins.songWave >= (int)out.wavetables.size()) ins.songWave = out.wavetables.empty() ? -1 : 0;
+  out.instruments.push_back(std::move(ins));
+  return true;
+}
 
 bool importFUR(const std::vector<uint8_t>& raw, Song& song, std::string& err) {
   std::vector<uint8_t> inflated;

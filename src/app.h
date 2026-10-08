@@ -51,7 +51,7 @@ struct PRNote {
 
 enum class PRDrag { None, Move, Resize, Select, Erase, Velocity, Key };
 
-enum class FileDialogMode { None, Open, Save, ExportWav, LoadSample };
+enum class FileDialogMode { None, Open, Save, ExportWav, LoadSample, LoadInstrument, SaveInstrument };
 enum class PendingAction { None, New, Open, Demo, Quit };
 
 class App {

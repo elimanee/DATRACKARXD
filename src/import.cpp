@@ -6,6 +6,7 @@
 #include <cmath>
 #include <cstring>
 #include <fstream>
+#include <map>
 
 float ByteReader::f32() {
   uint32_t v = u32();
@@ -325,4 +326,92 @@ void TrackerConverter::build(Song& song) {
     (void)rowHasJump;
   }
   for (int c = 0; c < nch; c++) song.channels[c].effectCols = std::clamp(fxCols[c], 1, MAX_EFFECTS);
+}
+
+// ---------------------------------------------------------------------------
+// Instrument files
+// ---------------------------------------------------------------------------
+
+std::vector<std::string> instrumentFileExtensions() { return {".dti", ".fui", ".wav"}; }
+
+namespace {
+// Copies instrument idx of src to the end of dst, with the samples and song
+// wavetables it refers to (renumbered). Returns the new index or -1.
+int appendInstrument(Song& dst, const Song& src, int idx, std::string& err) {
+  if (idx < 0 || idx >= (int)src.instruments.size()) {
+    err = "No instrument";
+    return -1;
+  }
+  if ((int)dst.instruments.size() >= MAX_INSTRUMENTS) {
+    err = "Too many instruments";
+    return -1;
+  }
+  Instrument ins = src.instruments[idx];
+  std::map<int, int> smap, wmap;
+  auto addSample = [&](int i) {
+    if (i < 0 || i >= (int)src.samples.size()) return -1;
+    auto it = smap.find(i);
+    if (it != smap.end()) return it->second;
+    if ((int)dst.samples.size() >= MAX_SAMPLES) return -1;
+    dst.samples.push_back(src.samples[i]);
+    return smap[i] = (int)dst.samples.size() - 1;
+  };
+  auto addWave = [&](int i) {
+    if (i < 0 || i >= (int)src.wavetables.size()) return -1;
+    auto it = wmap.find(i);
+    if (it != wmap.end()) return it->second;
+    if ((int)dst.wavetables.size() >= MAX_WAVETABLES) return -1;
+    dst.wavetables.push_back(src.wavetables[i]);
+    return wmap[i] = (int)dst.wavetables.size() - 1;
+  };
+  ins.sample = addSample(ins.sample);
+  for (auto& v : ins.sampleMap)
+    if (v >= 0) v = (int16_t)addSample(v);
+  if (ins.songWave >= 0) {
+    // On a wavetable instrument the wave macro picks song wavetables too.
+    if (ins.wave == WAVE_TABLE)
+      for (int& v : ins.macros[MACRO_WAVE].values) v = std::max(0, addWave(v));
+    ins.songWave = addWave(ins.songWave);
+  }
+  dst.instruments.push_back(std::move(ins));
+  return (int)dst.instruments.size() - 1;
+}
+}  // namespace
+
+bool saveInstrumentFile(const Song& song, int idx, const std::string& path, std::string& err) {
+  Song t;
+  t.instruments.clear();
+  t.samples.clear();
+  t.wavetables.clear();
+  if (appendInstrument(t, song, idx, err) < 0) return false;
+  t.name = t.instruments[0].name;
+  t.tickRate = song.tickRate;
+  return t.save(path, err);
+}
+
+int loadInstrumentFile(const std::string& path, Song& song, std::string& err) {
+  std::ifstream f(path, std::ios::binary);
+  if (!f) {
+    err = "Cannot open " + path;
+    return -1;
+  }
+  std::vector<uint8_t> d((std::istreambuf_iterator<char>(f)), std::istreambuf_iterator<char>());
+  std::string stem = path.substr(path.find_last_of("/\\") == std::string::npos ? 0 : path.find_last_of("/\\") + 1);
+  if (stem.find('.') != std::string::npos) stem.resize(stem.find_last_of('.'));
+  Song t;
+  if (d.size() >= 11 && std::memcmp(d.data(), "DATRACKARXD", 11) == 0) {
+    if (!t.load(path, err)) return -1;
+  } else if (d.size() >= 12 && std::memcmp(d.data(), "RIFF", 4) == 0 && std::memcmp(d.data() + 8, "WAVE", 4) == 0) {
+    Sample smp;
+    if (!loadWavSample(path, smp, err)) return -1;
+    t.instruments.assign(1, Instrument());
+    t.instruments[0].type = INS_SAMPLE;
+    t.instruments[0].name = stem;
+    t.instruments[0].sample = 0;
+    t.samples.assign(1, std::move(smp));
+  } else {
+    if (!importFUI(d, t, err)) return -1;
+    if (t.instruments[0].name.empty()) t.instruments[0].name = stem;
+  }
+  return appendInstrument(song, t, 0, err);
 }

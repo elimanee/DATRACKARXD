@@ -20,6 +20,7 @@ static int usage() {
       "  datrackarxd --export song out.wav [n]       render n loops to WAV (dtk/fur/mod/xm/it/s3m)\n"
       "  datrackarxd --convert module out.dtk        import a module and save it as .dtk\n"
       "  datrackarxd --export-stems song prefix      one WAV per channel (prefix_01.wav...)\n"
+      "  datrackarxd --convert-instrument in out.dti instrument preset from .fui/.wav/.dti\n"
       "  datrackarxd --export-demo out.wav           render the demo song\n"
       "  datrackarxd --save-demo out.dtk             write the demo song file\n");
   return 1;
@@ -35,6 +36,19 @@ static int commandLine(int argc, char** argv) {
   Song song;
   if (cmd == "--convert" && argc >= 4) {
     if (!loadAnySong(argv[2], song, err) || !song.save(argv[3], err)) {
+      std::fprintf(stderr, "%s\n", err.c_str());
+      return 1;
+    }
+    std::printf("wrote %s\n", argv[3]);
+    return 0;
+  }
+  if (cmd == "--convert-instrument" && argc >= 4) {
+    Song t;
+    t.instruments.clear();
+    t.samples.clear();
+    t.wavetables.clear();
+    int idx = loadInstrumentFile(argv[2], t, err);
+    if (idx < 0 || !saveInstrumentFile(t, idx, argv[3], err)) {
       std::fprintf(stderr, "%s\n", err.c_str());
       return 1;
     }

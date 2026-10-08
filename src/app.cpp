@@ -218,6 +218,8 @@ void App::openFileDialog(FileDialogMode mode) {
   if (mode == FileDialogMode::Open) base.clear();
   if (mode == FileDialogMode::Save) base += ".dtk";
   if (mode == FileDialogMode::ExportWav) base += ".wav";
+  if (mode == FileDialogMode::LoadInstrument) base.clear();
+  if (mode == FileDialogMode::SaveInstrument && curIns_ < (int)song_.instruments.size()) base = song_.instruments[curIns_].name + ".dti";
   std::snprintf(dialogName_, sizeof(dialogName_), "%s", base.c_str());
 }
 
@@ -225,6 +227,8 @@ void App::fileDialog() {
   const char* title = dialogMode_ == FileDialogMode::Open        ? "Open song / import module###filedlg"
                       : dialogMode_ == FileDialogMode::Save      ? "Save song###filedlg"
                       : dialogMode_ == FileDialogMode::LoadSample ? "Load WAV sample###filedlg"
+                      : dialogMode_ == FileDialogMode::LoadInstrument ? "Load instrument###filedlg"
+                      : dialogMode_ == FileDialogMode::SaveInstrument ? "Save instrument###filedlg"
                                                                  : "Export WAV###filedlg";
   if (dialogOpenRequest_) {
     ImGui::OpenPopup("###filedlg");
@@ -236,6 +240,8 @@ void App::fileDialog() {
   std::vector<std::string> exts;
   if (dialogMode_ == FileDialogMode::Open) exts = supportedSongExtensions();
   else if (dialogMode_ == FileDialogMode::Save) exts = {".dtk"};
+  else if (dialogMode_ == FileDialogMode::LoadInstrument) exts = instrumentFileExtensions();
+  else if (dialogMode_ == FileDialogMode::SaveInstrument) exts = {".dti"};
   else exts = {".wav"};
   const std::string& ext = exts[0];
   auto matches = [&](const fs::path& p) {
@@ -299,7 +305,8 @@ void App::fileDialog() {
     ImGui::InputInt("loops", &exportLoops_);
     exportLoops_ = std::clamp(exportLoops_, 1, 16);
   }
-  bool opening = dialogMode_ == FileDialogMode::Open || dialogMode_ == FileDialogMode::LoadSample;
+  bool opening = dialogMode_ == FileDialogMode::Open || dialogMode_ == FileDialogMode::LoadSample ||
+                 dialogMode_ == FileDialogMode::LoadInstrument;
   if (ImGui::Button(opening ? "Open" : "Save", ImVec2(100, 0))) accept = true;
   ImGui::SameLine();
   bool cancel = ImGui::Button("Cancel", ImVec2(100, 0)) || ImGui::IsKeyPressed(ImGuiKey_Escape);
@@ -328,6 +335,26 @@ void App::fileDialog() {
         cancel = true;
       } else {
         setStatus("Sample load failed: " + err);
+      }
+    } else if (dialogMode_ == FileDialogMode::LoadInstrument) {
+      Song next = song_;
+      int idx = loadInstrumentFile(path, next, err);
+      if (idx >= 0) {
+        pushFullUndo();  // samples and wavetables may come along
+        song_ = std::move(next);
+        curIns_ = idx;
+        dirty_ = true;
+        setStatus("Loaded instrument " + song_.instruments[idx].name);
+        cancel = true;
+      } else {
+        setStatus("Instrument load failed: " + err);
+      }
+    } else if (dialogMode_ == FileDialogMode::SaveInstrument) {
+      if (saveInstrumentFile(song_, curIns_, path, err)) {
+        setStatus("Saved instrument " + path);
+        cancel = true;
+      } else {
+        setStatus("Instrument save failed: " + err);
       }
     } else if (dialogMode_ == FileDialogMode::Save) {
       filePath_ = path;

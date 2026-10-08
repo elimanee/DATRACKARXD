@@ -21,6 +21,16 @@ bool importXM(const std::vector<uint8_t>& data, Song& song, std::string& err);
 bool importIT(const std::vector<uint8_t>& data, Song& song, std::string& err);
 bool importFUR(const std::vector<uint8_t>& data, Song& song, std::string& err);
 
+// Instrument presets. A .dti file is a .dtk song holding one instrument with
+// the samples and wavetables it uses. Loading also takes Furnace .fui files
+// and .wav files (as a sample instrument). The instrument is appended to the
+// song with its samples and wavetables; returns its index, or -1.
+std::vector<std::string> instrumentFileExtensions();
+bool saveInstrumentFile(const Song& song, int ins, const std::string& path, std::string& err);
+int loadInstrumentFile(const std::string& path, Song& song, std::string& err);
+// Fills out with the .fui's instrument (index 0) and its samples and wavetables.
+bool importFUI(const std::vector<uint8_t>& data, Song& out, std::string& err);
+
 // zlib decompression (used by .fur files). Returns false on corrupt data.
 bool zlibInflate(const uint8_t* src, size_t len, std::vector<uint8_t>& out);
 
