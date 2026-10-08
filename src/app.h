@@ -9,6 +9,8 @@
 #include <vector>
 
 #include "engine.h"
+#include "keygen_fx.h"
+#include "midi.h"
 #include "song.h"
 
 struct KeyEvent {
@@ -19,14 +21,18 @@ struct KeyEvent {
   bool repeat;
 };
 
-// A snapshot of some patterns, taken before an edit.
+// One undo step: either some patterns (note editing), the song without its
+// pattern and sample data (instrument, order and setting edits), or the
+// whole song (structural changes like the channel count).
 struct UndoStep {
+  enum Kind { Patterns, Meta, Full } kind = Patterns;
   struct Entry {
     int ch, pat;
     std::vector<Cell> rows;
   };
   std::vector<Entry> entries;
-  int order, row, ch, col;
+  int order = 0, row = 0, ch = 0, col = 0;
+  std::shared_ptr<Song> song;
 };
 
 // Copied block of cells: [channel][row], with the column range it covers.
@@ -41,11 +47,12 @@ int scancodeToNote(SDL_Scancode sc);
 // A note as the piano roll sees it: a start row and a length in rows.
 struct PRNote {
   int start, len, note, ins, vol;
+  int ch = 0;  // channel the note lives in
 };
 
 enum class PRDrag { None, Move, Resize, Select, Erase, Velocity, Key };
 
-enum class FileDialogMode { None, Open, Save, ExportWav, LoadSample };
+enum class FileDialogMode { None, Open, Save, ExportWav, LoadSample, LoadInstrument, SaveInstrument, ExportMidi, ExportOgg, ExportPlayer };
 enum class PendingAction { None, New, Open, Demo, Quit };
 
 class App {
@@ -84,8 +91,22 @@ class App {
   Clipboard clipboard_;
 
   std::vector<UndoStep> undo_, redo_;
+  Song metaShadow_;            // song settings as of the last undo step
+  bool metaTouched_ = false;   // settings edited since metaShadow_
+  bool shadowStale_ = false;   // a full snapshot was just taken
   std::vector<KeyEvent> keys_;
   std::map<SDL_Scancode, int> jamming_;  // held key -> channel
+
+  // MIDI keyboard.
+  MidiInput midi_;
+  std::string midiPort_;               // port to reopen at startup
+  std::vector<std::string> midiPorts_; // last scan
+  bool midiVelocity_ = true;           // velocity -> volume column
+  struct MidiHeld {
+    int ch, order, row;  // where the note was written (row -1 = not written)
+  };
+  std::map<int, MidiHeld> midiHeld_;   // held MIDI note -> channel
+  bool midiChord_ = false;             // a recorded chord is waiting for all keys up
 
   std::string filePath_;
   bool dirty_ = false;
@@ -95,7 +116,9 @@ class App {
   // Windows.
   bool showPattern_ = true, showOrders_ = true, showInstruments_ = true, showInsEditor_ = true;
   bool showSamples_ = true;
+  bool showMixer_ = true;
   bool showScroller_ = false;
+  KeygenScene keygen_;
   int curSample_ = 0;
   int loadSampleIntoIns_ = -1;  // instrument that receives the next loaded WAV
   bool showSong_ = true, showScope_ = true, showEffects_ = false, showKeys_ = false, showAbout_ = false;
@@ -110,7 +133,8 @@ class App {
   float prTop_ = -1;                   // pitch at the top edge (-1 = not placed yet)
   bool prGhosts_ = true;
   int prLength_ = 4;                   // length of new notes, in rows
-  std::set<int> prSel_;                // selected notes, by start row
+  int prVoices_ = 1;                   // channels used for chords (1 = this channel only)
+  std::set<int> prSel_;                // selected notes (start * 256 + note)
   int prViewCh_ = -1, prViewOrder_ = -1;
   PRDrag prDrag_ = PRDrag::None;
   std::vector<PRNote> prOrig_;         // notes when the drag started
@@ -129,6 +153,12 @@ class App {
   std::string dialogDir_;
   char dialogName_[256] = {};
   int exportLoops_ = 1;
+  int oggQuality_ = 6;
+  // Keygen player export.
+  bool playerPopupRequest_ = false;
+  char playerLogo_[64] = "DATRACKARXD";
+  char playerTitle_[128] = {};
+  char playerScroll_[2048] = {};
 
   PendingAction pending_ = PendingAction::None;
   bool confirmRequest_ = false;
@@ -142,11 +172,16 @@ class App {
   void askAction(PendingAction a);
   void confirmPopup();
   void fileDialog();
+  void playerExportPopup();
   void openFileDialog(FileDialogMode mode);
   void saveSong(bool forceDialog);
   void defaultLayout(unsigned int dockId);
   void togglePlay(bool fromCursor);
   void afterSongReplaced();
+  void midiMenu();
+  void midiEvents();
+  void midiNoteOn(int key, int velocity);
+  void midiNoteOff(int key);
 
   // ui_pattern.cpp
   void patternWindow();
@@ -156,7 +191,13 @@ class App {
   void moveRows(int d);
   void setCursorFromPlayback();
   Cell* cursorCell(bool create);
-  void pushUndo(int ch0, int ch1);
+  void pushUndo(int ch0, int ch1, int order = -1);  // order -1: the cursor's
+  void pushFullUndo();
+  void commitMetaEdit();
+  void resetUndo();
+  Song metaSnapshot();
+  void restoreMeta(const Song& m);
+  void trimUndo();
   void applyUndo(std::vector<UndoStep>& from, std::vector<UndoStep>& to);
   void enterNote(int note);
   void enterHex(int digit);
@@ -180,10 +221,12 @@ class App {
   bool sampleInsEditor(Instrument& ins);
   void samplesWindow();
   bool wavetableEditor(Instrument& ins);
+  bool sidEditor(Instrument& ins);
 
   // ui_windows.cpp
   void ordersWindow();
   void songWindow();
+  void mixerWindow();
   void scopeWindow();
   void scrollerWindow();
   void saveSettings();

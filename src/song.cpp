@@ -7,7 +7,7 @@
 #include <sstream>
 
 const char* const WAVE_NAMES[WAVE_COUNT] = {"Pulse", "Triangle", "Saw", "Noise", "Sine", "Wavetable"};
-const char* const MACRO_NAMES[MACRO_COUNT] = {"Volume", "Arpeggio", "Duty", "Waveform", "Pitch"};
+const char* const MACRO_NAMES[MACRO_COUNT] = {"Volume", "Arpeggio", "Duty", "Waveform", "Pitch", "Cutoff"};
 const char* const INS_TYPE_NAMES[INS_TYPE_COUNT] = {"Chip", "FM", "Sample"};
 const char* const LOOP_NAMES[4] = {"No loop", "Forward", "Ping-pong", "Backward"};
 
@@ -37,7 +37,8 @@ void Instrument::macroRange(int macro, int& lo, int& hi) const {
       hi = type == INS_FM ? 127 : type == INS_SAMPLE ? 64 : 15;
       break;
     case MACRO_ARP: lo = -60; hi = ARP_FIXED + NOTE_COUNT - 1; break;
-    case MACRO_DUTY: lo = 0; hi = 3; break;
+    case MACRO_DUTY: lo = 0; hi = pulseWidth >= 0 ? 255 : 3; break;
+    case MACRO_CUTOFF: lo = 0; hi = 255; break;
     case MACRO_WAVE: lo = 0; hi = 255; break;
     default: lo = -128; hi = 127; break;
   }
@@ -187,6 +188,26 @@ bool Song::save(const std::string& path, std::string& err) const {
     err = "Cannot open " + path + " for writing";
     return false;
   }
+  write(f);
+  if (!f) {
+    err = "Write error on " + path;
+    return false;
+  }
+  return true;
+}
+
+std::string Song::toText() const {
+  std::ostringstream ss;
+  write(ss);
+  return ss.str();
+}
+
+bool Song::fromText(const std::string& text, std::string& err) {
+  std::istringstream ss(text);
+  return read(ss, "song", err);
+}
+
+void Song::write(std::ostream& f) const {
   f.precision(9);  // enough digits for floats to load back exactly
   f << FILE_MAGIC << ' ' << FILE_VERSION << '\n';
   f << "name " << name << '\n';
@@ -211,7 +232,12 @@ bool Song::save(const std::string& path, std::string& err) const {
     if (ch.volSlideUnit != 512) f << "chanslide " << c << ' ' << ch.volSlideUnit << '\n';
     if (ch.fixedDuty >= 0 || ch.minNote > 0 || ch.mix != 1.0f)
       f << "chanchip " << c << ' ' << ch.fixedDuty << ' ' << ch.minNote << ' ' << ch.mix << '\n';
+    if (ch.reverbSend > 0 || ch.delaySend > 0) f << "chansend " << c << ' ' << ch.reverbSend << ' ' << ch.delaySend << '\n';
   }
+  f << "fx.reverb " << fx.reverb << ' ' << fx.roomSize << ' ' << fx.damping << ' ' << fx.reverbLevel << '\n';
+  f << "fx.delay " << fx.delay << ' ' << fx.delayRows << ' ' << fx.delayFeedback << ' ' << fx.delayLevel << ' ' << fx.pingPong << '\n';
+  f << "fx.filter " << fx.filter << ' ' << fx.filterType << ' ' << fx.cutoff << ' ' << fx.resonance << '\n';
+  f << "fx.volume " << fx.volume << '\n';
 
   for (size_t i = 0; i < instruments.size(); i++) {
     const Instrument& ins = instruments[i];
@@ -220,6 +246,9 @@ bool Song::save(const std::string& path, std::string& err) const {
     f << "ins.wave " << ins.wave << '\n';
     f << "ins.duty " << ins.duty << '\n';
     f << "ins.volume " << ins.volume << '\n';
+    if (!ins.sidDefault())
+      f << "ins.sid " << ins.filter.on << ' ' << ins.filter.mode << ' ' << ins.filter.cutoff << ' ' << ins.filter.resonance << ' '
+        << ins.ringMod << ' ' << ins.sync << ' ' << ins.pulseWidth << ' ' << ins.pwmSweep << '\n';
     f << "ins.wavetable";
     for (int v : ins.wavetable) f << ' ' << v;
     f << '\n';
@@ -285,11 +314,6 @@ bool Song::save(const std::string& path, std::string& err) const {
     }
   }
   f << "end\n";
-  if (!f) {
-    err = "Write error on " + path;
-    return false;
-  }
-  return true;
 }
 
 bool Song::load(const std::string& path, std::string& err) {
@@ -298,6 +322,10 @@ bool Song::load(const std::string& path, std::string& err) {
     err = "Cannot open " + path;
     return false;
   }
+  return read(f, path, err);
+}
+
+bool Song::read(std::istream& f, const std::string& path, std::string& err) {
   std::string line;
   if (!std::getline(f, line) || line.rfind(FILE_MAGIC, 0) != 0) {
     err = path + " is not a DATRACKARXD song";
@@ -365,6 +393,39 @@ bool Song::load(const std::string& path, std::string& err) {
         s.channels[c].forceWave = clampVal(forceWave, -1, WAVE_COUNT - 1);
         s.channels[c].name = restOfLine(ss);
       }
+    } else if (key == "chansend") {
+      int c = -1;
+      float rv = 0, dl = 0;
+      ss >> c >> rv >> dl;
+      if (c >= 0 && c < s.channelCount()) {
+        s.channels[c].reverbSend = std::clamp(rv, 0.0f, 1.0f);
+        s.channels[c].delaySend = std::clamp(dl, 0.0f, 1.0f);
+      }
+    } else if (key == "fx.reverb") {
+      int on = 0;
+      ss >> on >> s.fx.roomSize >> s.fx.damping >> s.fx.reverbLevel;
+      s.fx.reverb = on != 0;
+      s.fx.roomSize = std::clamp(s.fx.roomSize, 0.0f, 1.0f);
+      s.fx.damping = std::clamp(s.fx.damping, 0.0f, 1.0f);
+      s.fx.reverbLevel = std::clamp(s.fx.reverbLevel, 0.0f, 2.0f);
+    } else if (key == "fx.delay") {
+      int on = 0, pp = 1;
+      ss >> on >> s.fx.delayRows >> s.fx.delayFeedback >> s.fx.delayLevel >> pp;
+      s.fx.delay = on != 0;
+      s.fx.pingPong = pp != 0;
+      s.fx.delayRows = clampVal(s.fx.delayRows, 1, 64);
+      s.fx.delayFeedback = std::clamp(s.fx.delayFeedback, 0.0f, 0.95f);
+      s.fx.delayLevel = std::clamp(s.fx.delayLevel, 0.0f, 2.0f);
+    } else if (key == "fx.filter") {
+      int on = 0;
+      ss >> on >> s.fx.filterType >> s.fx.cutoff >> s.fx.resonance;
+      s.fx.filter = on != 0;
+      s.fx.filterType = clampVal(s.fx.filterType, 0, 2);
+      s.fx.cutoff = std::clamp(s.fx.cutoff, 20.0f, 20000.0f);
+      s.fx.resonance = std::clamp(s.fx.resonance, 0.0f, 1.0f);
+    } else if (key == "fx.volume") {
+      ss >> s.fx.volume;
+      s.fx.volume = std::clamp(s.fx.volume, 0.0f, 4.0f);
     } else if (key == "chanslide") {
       int c = -1, unit = 512;
       ss >> c >> unit;
@@ -403,6 +464,18 @@ bool Song::load(const std::string& path, std::string& err) {
       } else if (key == "ins.volume") {
         ss >> curIns->volume;
         curIns->volume = clampVal(curIns->volume, 0, 15);
+      } else if (key == "ins.sid") {
+        int on = 0, ring = 0, sync = 0;
+        InsFilter& fl = curIns->filter;
+        ss >> on >> fl.mode >> fl.cutoff >> fl.resonance >> ring >> sync >> curIns->pulseWidth >> curIns->pwmSweep;
+        fl.on = on != 0;
+        fl.mode = clampVal(fl.mode, 0, 2);
+        fl.cutoff = clampVal(fl.cutoff, 0, 255);
+        fl.resonance = clampVal(fl.resonance, 0, 15);
+        curIns->ringMod = ring != 0;
+        curIns->sync = sync != 0;
+        curIns->pulseWidth = curIns->pulseWidth < 0 ? -1 : clampVal(curIns->pulseWidth, 1, 255);
+        curIns->pwmSweep = clampVal(curIns->pwmSweep, -64, 64);
       } else if (key == "ins.wavetable") {
         for (int& v : curIns->wavetable) {
           ss >> v;

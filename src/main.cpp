@@ -11,15 +11,22 @@
 #include "app.h"
 #include "demo.h"
 #include "import.h"
+#include "midifile.h"
+#include "payload.h"
+#include "player.h"
 
 static int usage() {
   std::printf(
       "DATRACKARXD " DATRACKARXD_VERSION "\n"
       "usage:\n"
       "  datrackarxd [song.dtk]                      open the tracker\n"
-      "  datrackarxd --export song out.wav [n]       render n loops to WAV (dtk/fur/mod/xm/it/s3m)\n"
-      "  datrackarxd --convert module out.dtk        import a module and save it as .dtk\n"
+      "  datrackarxd --export song out.wav [n]       render n loops to WAV, or OGG with out.ogg\n"
+      "  datrackarxd --convert module out.dtk        import a module (or .mid) and save it as .dtk\n"
+      "  datrackarxd --export-midi song out.mid [n]  write the song as a MIDI file\n"
       "  datrackarxd --export-stems song prefix      one WAV per channel (prefix_01.wav...)\n"
+      "  datrackarxd --convert-instrument in out.dti instrument preset from .fui/.wav/.dti\n"
+      "  datrackarxd --export-player song out [logo] [scroller text]\n"
+      "                                              standalone keygen-style player\n"
       "  datrackarxd --export-demo out.wav           render the demo song\n"
       "  datrackarxd --save-demo out.dtk             write the demo song file\n");
   return 1;
@@ -41,13 +48,53 @@ static int commandLine(int argc, char** argv) {
     std::printf("wrote %s\n", argv[3]);
     return 0;
   }
+  if (cmd == "--convert-instrument" && argc >= 4) {
+    Song t;
+    t.instruments.clear();
+    t.samples.clear();
+    t.wavetables.clear();
+    int idx = loadInstrumentFile(argv[2], t, err);
+    if (idx < 0 || !saveInstrumentFile(t, idx, argv[3], err)) {
+      std::fprintf(stderr, "%s\n", err.c_str());
+      return 1;
+    }
+    std::printf("wrote %s\n", argv[3]);
+    return 0;
+  }
+  if (cmd == "--export-player" && argc >= 4) {
+    PlayerPayload p;
+    if (!loadAnySong(argv[2], song, err)) {
+      std::fprintf(stderr, "%s\n", err.c_str());
+      return 1;
+    }
+    p.song = song.toText();
+    p.title = song.name;
+    if (argc >= 5) p.logo = argv[4];
+    if (argc >= 6) p.scroll = argv[5];
+    if (!writePlayer(argv[3], p, err)) {
+      std::fprintf(stderr, "%s\n", err.c_str());
+      return 1;
+    }
+    std::printf("wrote %s\n", argv[3]);
+    return 0;
+  }
+  if (cmd == "--export-midi" && argc >= 4) {
+    if (!loadAnySong(argv[2], song, err) || !exportMIDI(song, argv[3], argc >= 5 ? std::atoi(argv[4]) : 1, err)) {
+      std::fprintf(stderr, "%s\n", err.c_str());
+      return 1;
+    }
+    std::printf("wrote %s\n", argv[3]);
+    return 0;
+  }
   if (cmd == "--export" && argc >= 4) {
     if (!loadAnySong(argv[2], song, err)) {
       std::fprintf(stderr, "%s\n", err.c_str());
       return 1;
     }
     int loops = argc >= 5 ? std::atoi(argv[4]) : 1;
-    if (!exportWav(song, argv[3], 44100, loops, err)) {
+    std::string out = argv[3];
+    bool ogg = out.size() > 4 && out.compare(out.size() - 4, 4, ".ogg") == 0;
+    if (ogg ? !exportOgg(song, out, 44100, loops, 6, err) : !exportWav(song, out, 44100, loops, err)) {
       std::fprintf(stderr, "%s\n", err.c_str());
       return 1;
     }
@@ -95,6 +142,9 @@ static int commandLine(int argc, char** argv) {
 }
 
 int main(int argc, char** argv) {
+  // An exported keygen player carries its song: play it and nothing else.
+  PlayerPayload payload;
+  if (readOwnPayload(payload)) return runPlayer(payload, argc, argv);
   if (argc >= 2 && argv[1][0] == '-' && argv[1][1] == '-') return commandLine(argc, argv);
 
   if (SDL_Init(SDL_INIT_VIDEO | SDL_INIT_AUDIO | SDL_INIT_TIMER) != 0) {

@@ -2,6 +2,7 @@
 #pragma once
 #include <array>
 #include <cstdint>
+#include <iosfwd>
 #include <string>
 #include <vector>
 
@@ -58,7 +59,7 @@ struct Pattern {
   bool isEmpty() const;
 };
 
-enum MacroType : int { MACRO_VOL = 0, MACRO_ARP, MACRO_DUTY, MACRO_WAVE, MACRO_PITCH, MACRO_COUNT };
+enum MacroType : int { MACRO_VOL = 0, MACRO_ARP, MACRO_DUTY, MACRO_WAVE, MACRO_PITCH, MACRO_CUTOFF, MACRO_COUNT };
 extern const char* const MACRO_NAMES[MACRO_COUNT];
 
 struct Macro {
@@ -103,6 +104,14 @@ struct Wavetable {
   std::vector<float> data;  // -1..1, any length
 };
 
+// SID-style resonant filter on the instrument's output (any instrument type).
+struct InsFilter {
+  bool on = false;
+  int mode = 0;        // 0 low-pass, 1 band-pass, 2 high-pass
+  int cutoff = 128;    // 0..255, exponential from ~30 Hz to ~18 kHz
+  int resonance = 8;   // 0..15
+};
+
 struct Instrument {
   std::string name = "Instrument";
   int type = INS_STANDARD;
@@ -116,6 +125,15 @@ struct Instrument {
   int sample = -1;                // default sample (sample instruments)
   std::vector<int16_t> sampleMap;  // empty, or NOTE_COUNT sample indexes (-1 = default)
   float fadeout = 0;               // volume lost per tick after note off (0 = none)
+  InsFilter filter;
+  bool ringMod = false;  // multiply by the previous channel's square (SID ring mod)
+  bool sync = false;     // restart the waveform with the previous channel (hard sync)
+  int pulseWidth = -1;   // 1..255 fine pulse width (duty macro and 12xx too); -1 = 4 duty steps
+  int pwmSweep = 0;      // pulse width change per tick, bouncing between the ends
+  bool sidDefault() const {
+    return !filter.on && !ringMod && !sync && pulseWidth < 0 && pwmSweep == 0 && filter.cutoff == 128 && filter.resonance == 8 &&
+           filter.mode == 0;
+  }
   Instrument();
   void macroRange(int macro, int& lo, int& hi) const;
 };
@@ -130,7 +148,24 @@ struct ChannelInfo {
   int fixedDuty = -1;      // duty this channel always uses (-1 = from instrument)
   int minNote = 0;         // lowest pitch the channel can play (like a chip's range)
   float mix = 1.0f;        // channel output level
+  float reverbSend = 0.0f;   // 0..1, how much goes to the master reverb
+  float delaySend = 0.0f;    // 0..1, how much goes to the master delay
   std::vector<Pattern> patterns;  // MAX_PATTERNS entries
+};
+
+// Master effects: sends from the channels to a reverb and a delay, then a
+// filter and the master volume.
+struct MasterFx {
+  bool reverb = false;
+  float roomSize = 0.7f, damping = 0.5f, reverbLevel = 0.35f;
+  bool delay = false;
+  int delayRows = 3;  // echo time, follows the song speed
+  float delayFeedback = 0.35f, delayLevel = 0.35f;
+  bool pingPong = true;
+  bool filter = false;
+  int filterType = 0;  // 0 low-pass, 1 band-pass, 2 high-pass
+  float cutoff = 6000.0f, resonance = 0.2f;
+  float volume = 1.0f;
 };
 
 struct Song {
@@ -148,6 +183,7 @@ struct Song {
   std::vector<Instrument> instruments;
   std::vector<Sample> samples;
   std::vector<Wavetable> wavetables;
+  MasterFx fx;
 
   Song();
   void reset(int channelCount = 8);
@@ -164,6 +200,11 @@ struct Song {
 
   bool save(const std::string& path, std::string& err) const;
   bool load(const std::string& path, std::string& err);
+  // The same .dtk text in memory (the keygen player embeds it).
+  std::string toText() const;
+  bool fromText(const std::string& text, std::string& err);
+  void write(std::ostream& out) const;
+  bool read(std::istream& in, const std::string& name, std::string& err);
 };
 
 std::string noteName(int note);  // "C-4", "OFF", "---"

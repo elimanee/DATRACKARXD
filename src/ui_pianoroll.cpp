@@ -1,6 +1,7 @@
 // Piano roll: edits the current channel's pattern as note bars, FL Studio style.
 // A tracker channel plays one note at a time, so overlapping notes are cut
-// where the next one starts.
+// where the next one starts, unless "Voices" spreads chords over several
+// channels.
 #include <imgui.h>
 
 #include <algorithm>
@@ -55,6 +56,46 @@ void writeNotes(Pattern* p, int len, std::vector<PRNote> notes) {
   }
 }
 
+int noteKey(const PRNote& n) { return n.start * 256 + n.note; }
+
+// Spreads notes over voice channels so overlapping notes get their own
+// channel. A note keeps its channel when that one is free; when all are
+// busy, the voice that frees up first is cut short.
+std::vector<std::vector<PRNote>> allocateVoices(std::vector<PRNote> notes, int ch0, int voices) {
+  std::vector<std::vector<PRNote>> out(voices);
+  std::stable_sort(notes.begin(), notes.end(), [](const PRNote& a, const PRNote& b) {
+    return a.start != b.start ? a.start < b.start : a.note > b.note;
+  });
+  // Same start and pitch: keep the last one.
+  std::vector<PRNote> uniq;
+  for (const PRNote& n : notes) {
+    bool dup = false;
+    for (auto& u : uniq)
+      if (u.start == n.start && u.note == n.note) {
+        u = n;
+        dup = true;
+      }
+    if (!dup) uniq.push_back(n);
+  }
+  std::vector<int> busyUntil(voices, 0);
+  for (PRNote n : uniq) {
+    int v = n.ch - ch0;
+    if (v < 0 || v >= voices || busyUntil[v] > n.start) {
+      v = -1;
+      for (int k = 0; k < voices; k++)
+        if (busyUntil[k] <= n.start) {
+          v = k;
+          break;
+        }
+      if (v < 0) v = (int)(std::min_element(busyUntil.begin(), busyUntil.end()) - busyUntil.begin());
+    }
+    n.ch = ch0 + v;
+    busyUntil[v] = n.start + std::max(1, n.len);
+    out[v].push_back(n);
+  }
+  return out;
+}
+
 ImU32 insColor(int ins, int alpha) {
   float h = ins < 0 ? 0.55f : std::fmod(ins * 0.137f + 0.55f, 1.0f);
   float r, g, b;
@@ -107,6 +148,12 @@ void App::pianoRollWindow() {
   ImGui::InputInt("Length", &prLength_);
   prLength_ = std::clamp(prLength_, 1, MAX_ROWS);
   ImGui::SameLine();
+  ImGui::SetNextItemWidth(80);
+  ImGui::InputInt("Voices", &prVoices_);
+  prVoices_ = std::clamp(prVoices_, 1, 8);
+  if (ImGui::IsItemHovered())
+    ImGui::SetTooltip("Chords: notes that overlap are spread over this channel and the next ones");
+  ImGui::SameLine();
   ImGui::Checkbox("Ghosts", &prGhosts_);
   ImGui::SameLine();
   curIns_ = std::clamp(curIns_, 0, std::max(0, (int)song_.instruments.size() - 1));
@@ -124,8 +171,19 @@ void App::pianoRollWindow() {
   ImGui::SameLine();
   ImGui::TextDisabled("Order %02X  |  Ctrl+wheel: zoom, Shift+wheel: scroll", curOrder_);
 
-  Pattern* pat = song_.pattern(ch, song_.orders[curOrder_][ch], false);
-  std::vector<PRNote> notes = readNotes(pat, len);
+  // Channels edited together: this one, plus the next ones for chords.
+  int voices = std::min(prVoices_, nch - ch);
+  int chLast = ch + voices - 1;
+  auto readGroup = [&]() {
+    std::vector<PRNote> all;
+    for (int c = ch; c <= chLast; c++)
+      for (PRNote n : readNotes(song_.pattern(c, song_.orders[curOrder_][c]), len)) {
+        n.ch = c;
+        all.push_back(n);
+      }
+    return all;
+  };
+  std::vector<PRNote> notes = readGroup();
 
   // Layout.
   ImVec2 p0 = ImGui::GetCursorScreenPos();
@@ -192,7 +250,7 @@ void App::pianoRollWindow() {
   // Ghost notes from the other channels.
   if (prGhosts_) {
     for (int c = 0; c < nch; c++) {
-      if (c == ch) continue;
+      if (c >= ch && c <= chLast) continue;
       for (const PRNote& n : readNotes(song_.pattern(c, song_.orders[curOrder_][c]), len)) {
         float x0 = rowX((float)n.start), x1 = rowX((float)(n.start + n.len)), y = noteY((float)n.note);
         if (x1 < g0.x || x0 > g1.x) continue;
@@ -209,7 +267,7 @@ void App::pianoRollWindow() {
   for (size_t i = 0; i < notes.size(); i++) {
     const PRNote& n = notes[i];
     float x0 = rowX((float)n.start), x1 = rowX((float)(n.start + n.len)), y = noteY((float)n.note);
-    bool sel = prSel_.count(n.start) > 0;
+    bool sel = prSel_.count(noteKey(n)) > 0;
     if (x1 >= g0.x && x0 <= g1.x) {
       dl->AddRectFilled(ImVec2(x0 + 1, y + 1), ImVec2(x1 - 1, y + zy - 1), insColor(n.ins, sel ? 255 : 210), 3);
       dl->AddRect(ImVec2(x0 + 1, y + 1), ImVec2(x1 - 1, y + zy - 1), sel ? IM_COL32(255, 255, 255, 255) : IM_COL32(0, 0, 0, 120), 3, 0,
@@ -292,11 +350,18 @@ void App::pianoRollWindow() {
 
   auto writeBack = [&](std::vector<PRNote> out) {
     if (!prUndone_) {
-      pushUndo(ch, ch);
+      pushUndo(ch, chLast);
       prUndone_ = true;
     }
-    Pattern* p = song_.pattern(ch, song_.orders[curOrder_][ch], true);
-    writeNotes(p, len, std::move(out));
+    if (voices == 1) {
+      writeNotes(song_.pattern(ch, song_.orders[curOrder_][ch], true), len, std::move(out));
+    } else {
+      auto perVoice = allocateVoices(std::move(out), ch, voices);
+      for (int v = 0; v < voices; v++) {
+        Pattern* p = song_.pattern(ch + v, song_.orders[curOrder_][ch + v], !perVoice[v].empty());
+        if (p) writeNotes(p, len, perVoice[v]);
+      }
+    }
     dirty_ = true;
   };
   auto preview = [&](int note) {
@@ -309,7 +374,7 @@ void App::pianoRollWindow() {
     prDrag_ = kind;
     prOrig_ = base;
     prOrigSel_.assign(base.size(), false);
-    for (size_t i = 0; i < base.size(); i++) prOrigSel_[i] = prSel_.count(base[i].start) > 0;
+    for (size_t i = 0; i < base.size(); i++) prOrigSel_[i] = prSel_.count(noteKey(base[i])) > 0;
     prGrab_ = grab;
     prMx0_ = m.x;
     prMy0_ = m.y;
@@ -349,11 +414,11 @@ void App::pianoRollWindow() {
       beginDrag(PRDrag::Velocity, notes, -1);
     } else if (inGrid) {
       if (hoverNote >= 0) {
-        int start = notes[hoverNote].start;
+        int start = notes[hoverNote].start, key = noteKey(notes[hoverNote]);
         if (io.KeyShift) {
-          prSel_.insert(start);
-        } else if (!prSel_.count(start)) {
-          prSel_ = {start};
+          prSel_.insert(key);
+        } else if (!prSel_.count(key)) {
+          prSel_ = {key};
         }
         beginDrag(hoverEdge ? PRDrag::Resize : PRDrag::Move, notes, hoverNote);
         if (!hoverEdge) preview(notes[hoverNote].note);
@@ -366,15 +431,17 @@ void App::pianoRollWindow() {
         // New note, then drag it around.
         int row = std::clamp(xRow(m.x), 0, len - 1), note = std::clamp(yNote(m.y), 0, NOTE_COUNT - 1);
         std::vector<PRNote> base = notes;
-        base.push_back({row, prLength_, note, curIns_, -1});
+        PRNote added{row, prLength_, note, curIns_, -1};
+        added.ch = -1;  // any free voice
+        base.push_back(added);
         prUndone_ = false;
         writeBack(base);
         bool undone = prUndone_;
-        notes = readNotes(song_.pattern(ch, song_.orders[curOrder_][ch]), len);
-        prSel_ = {row};
+        notes = readGroup();
+        prSel_ = {noteKey(added)};
         int grab = -1;
         for (size_t i = 0; i < notes.size(); i++)
-          if (notes[i].start == row) grab = (int)i;
+          if (noteKey(notes[i]) == noteKey(added)) grab = (int)i;
         beginDrag(PRDrag::Move, notes, grab);
         prUndone_ = undone;
         preview(note);
@@ -412,7 +479,7 @@ void App::pianoRollWindow() {
             n.start += dRow;
             n.note += dNote;
             moved.push_back(n);
-            sel.insert(n.start);
+            sel.insert(noteKey(n));
           } else {
             out.push_back(n);
           }
@@ -434,7 +501,7 @@ void App::pianoRollWindow() {
       case PRDrag::Erase:
         if (hoverNote >= 0) {
           std::vector<PRNote> out = notes;
-          prSel_.erase(out[hoverNote].start);
+          prSel_.erase(noteKey(out[hoverNote]));
           out.erase(out.begin() + hoverNote);
           writeBack(out);
         }
@@ -457,10 +524,10 @@ void App::pianoRollWindow() {
         std::set<int> sel;
         if (io.KeyShift)
           for (size_t i = 0; i < prOrig_.size(); i++)
-            if (prOrigSel_[i]) sel.insert(prOrig_[i].start);
+            if (prOrigSel_[i]) sel.insert(noteKey(prOrig_[i]));
         for (const PRNote& n : notes) {
           float nx0 = rowX((float)n.start), nx1 = rowX((float)(n.start + n.len)), ny = noteY((float)n.note);
-          if (nx1 > x0 && nx0 < x1 && ny + zy > y0 && ny < y1) sel.insert(n.start);
+          if (nx1 > x0 && nx0 < x1 && ny + zy > y0 && ny < y1) sel.insert(noteKey(n));
         }
         prSel_ = sel;
         break;
@@ -483,7 +550,7 @@ void App::pianoRollWindow() {
       std::vector<PRNote> out, moved;
       std::set<int> sel;
       for (const PRNote& n : notes) {
-        if (!prSel_.count(n.start)) {
+        if (!prSel_.count(noteKey(n))) {
           out.push_back(n);
           continue;
         }
@@ -492,7 +559,7 @@ void App::pianoRollWindow() {
         k.start = std::clamp(n.start + dRow, 0, len - 1);
         k.note = std::clamp(n.note + dNote, 0, NOTE_COUNT - 1);
         moved.push_back(k);
-        sel.insert(k.start);
+        sel.insert(noteKey(k));
       }
       out.insert(out.end(), moved.begin(), moved.end());
       prUndone_ = false;
@@ -507,7 +574,7 @@ void App::pianoRollWindow() {
     if (ImGui::IsKeyPressed(ImGuiKey_Escape)) prSel_.clear();
     if (io.KeyCtrl && ImGui::IsKeyPressed(ImGuiKey_A)) {
       prSel_.clear();
-      for (const PRNote& n : notes) prSel_.insert(n.start);
+      for (const PRNote& n : notes) prSel_.insert(noteKey(n));
     }
   }
 

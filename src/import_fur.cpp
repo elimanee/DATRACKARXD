@@ -4,8 +4,12 @@
 #include <algorithm>
 #include <cmath>
 #include <cstring>
+#include <map>
 
+#include "fur_internal.h"
 #include "import.h"
+
+using namespace fur;
 
 namespace {
 
@@ -182,31 +186,6 @@ void flattenChip(int id, std::vector<std::pair<int, int>>& chips) {
 
 // --- instruments ------------------------------------------------------------
 
-struct FurMacro {
-  std::vector<int> values;
-  int loop = -1, release = -1, mode = 0, type = 0, delay = 0, speed = 1;
-};
-
-struct FurIns {
-  std::string name;
-  int type = 0;
-  bool hasFM = false;
-  int alg = 0, fb = 0, opCount = 4, llPatch = 0;
-  struct Op {
-    int mult = 1, dt = 3, tl = 0, ar = 31, dr = 0, sl = 0, d2r = 0, rr = 15, rs = 0, ksr = 0, egt = 0;
-    bool enabled = true;
-  } ops[4];
-  FurMacro macros[5];  // vol, arp, duty, wave, pitch
-  bool hasGB = false;
-  int gbVol = 15, gbDir = 0, gbLen = 0, gbSoft = 0;
-  bool hasC64 = false;
-  int c64Wave = 4, c64A = 0, c64D = 0, c64S = 15, c64R = 0, c64Duty = 2048;
-  int initSample = -1;
-  bool useSample = false, useWave = false;
-  std::vector<std::pair<int, int>> sampleMap;  // our note -> sample
-  int firstWave = -1;
-};
-
 bool isFMType(int t) { return t == 1 || t == 33 || t == 19 || t == 14 || t == 13 || t == 32 || t == 55; }
 bool isOPL(int t) { return t == 14 || t == 13 || t == 32; }
 
@@ -307,7 +286,7 @@ void parseINS2(ByteReader& r, size_t end, FurIns& ins, int songVersion) {
         int mlen = r.u8(), mloop = r.u8(), mrel = r.u8(), mmode = r.u8(), mtype = r.u8(), mdelay = r.u8(), mspeed = r.u8();
         r.seek(start + std::max(hdrLen, 8));
         FurMacro tmp;
-        FurMacro& m = mc < 5 ? ins.macros[mc] : tmp;
+        FurMacro& m = mc < 5 ? ins.macros[mc] : mc == 8 ? ins.macros[5] : tmp;
         readMacroData(r, m, mlen, mtype >> 6);
         m.loop = mloop == 255 || mloop >= mlen ? -1 : mloop;
         m.release = mrel == 255 || mrel >= mlen ? -1 : mrel;
@@ -316,6 +295,13 @@ void parseINS2(ByteReader& r, size_t end, FurIns& ins, int songVersion) {
         m.delay = mdelay;
         m.speed = std::max(1, (int)mspeed);
       }
+    } else if (code == "LS" || code == "LW" || code == "SL" || code == "WL") {
+      bool wide = code[0] == 'L';  // new lists use 16-bit counts and indexes
+      int count = wide ? r.u16() : r.u8();
+      std::vector<int> idx(count);
+      for (int& v : idx) v = wide ? r.u16() : r.u8();
+      auto& list = (code == "LS" || code == "SL") ? ins.sampleList : ins.waveList;
+      for (int i = 0; i < count; i++) list.push_back({idx[i], r.u32()});
     } else if (code == "GB") {
       ins.hasGB = true;
       int env = r.u8();
@@ -327,9 +313,20 @@ void parseINS2(ByteReader& r, size_t end, FurIns& ins, int songVersion) {
     } else if (code == "64") {
       ins.hasC64 = true;
       int f1 = r.u8();
-      r.u8();
+      int f2 = r.u8();
       int ad = r.u8(), sr = r.u8();
       ins.c64Duty = r.u16() & 4095;
+      int cr = r.u16();
+      ins.c64Cut = cr & 2047;
+      ins.c64Res = cr >> 12;
+      ins.c64DutyAbs = f1 & 0x80;
+      ins.c64ToFilter = f1 & 0x10;
+      ins.c64Sync = f2 & 0x80;
+      ins.c64Ring = f2 & 0x40;
+      ins.c64FilterAbs = f2 & 0x10;
+      ins.c64Bp = f2 & 4;
+      ins.c64Hp = f2 & 2;
+      ins.c64Lp = f2 & 1;
       ins.c64Wave = f1 & 15;
       ins.c64A = ad >> 4;
       ins.c64D = ad & 15;
@@ -412,8 +409,20 @@ void parseINST(ByteReader& r, FurIns& ins, int songVersion) {
   ins.c64D = r.u8();
   ins.c64S = r.u8();
   ins.c64R = r.u8();
-  ins.c64Duty = r.u16();
-  r.skip(14);
+  ins.c64Duty = r.u16() & 4095;
+  ins.c64Ring = r.u8();
+  ins.c64Sync = r.u8();
+  ins.c64ToFilter = r.u8();
+  r.u8();  // init filter
+  r.u8();  // volume is cutoff
+  ins.c64Res = r.u8() & 15;
+  ins.c64Lp = r.u8();
+  ins.c64Bp = r.u8();
+  ins.c64Hp = r.u8();
+  r.u8();  // ch3 off
+  ins.c64Cut = r.u16() & 2047;
+  ins.c64DutyAbs = r.u8();
+  ins.c64FilterAbs = r.u8();
   ins.hasC64 = ins.type == 3;
   // Amiga
   ins.initSample = r.s16();
@@ -440,9 +449,17 @@ void parseINST(ByteReader& r, FurIns& ins, int songVersion) {
     for (int& v : ins.macros[1].values) v |= 1 << 30;
 }
 
+// SID cutoff register (0-2047, about 30 Hz to 12 kHz, roughly linear) to
+// our exponential 0-255 cutoff.
+int sidCutoff(int reg) {
+  double hz = 30.0 + reg * 5.85;
+  return std::clamp((int)std::lround(std::log2(hz / 30.0) / 9.2 * 255.0), 0, 255);
+}
+
 Macro convertMacro(const FurMacro& fm, int which, const FurIns& ins, int ourType) {
   Macro m;
   if (fm.values.empty() || fm.type != 0) return m;
+  int acc = which == MACRO_CUTOFF ? ins.c64Cut : ins.c64Duty;  // for relative SID macros
   int typeMax = typeVolMax(ins.type);
   for (int v : fm.values) {
     switch (which) {
@@ -456,7 +473,11 @@ Macro convertMacro(const FurMacro& fm, int which, const FurIns& ins, int ourType
         else v = std::clamp(v, -60, 60);
         break;
       case MACRO_DUTY:
-        if (ins.type == 3) v = v < 768 ? 0 : v < 1536 ? 1 : v < 2560 ? 2 : 3;
+        if (ins.type == 3) {
+          // SID pulse width (12 bits) to our fine width; relative macros add up.
+          if (!ins.c64DutyAbs) v = acc = std::clamp(acc - (ins.c64MultiplyRel ? (int8_t)v * 4 : v), 0, 4095);
+          v = std::clamp((v & 4095) / 16, 1, 255);
+        }
         else if (ins.type == 0) v = (v & 1) ? 0 : 3;  // SN noise: white or periodic
         else if (ins.type == 12) v = std::clamp(v, 0, 7) / 2;
         else v &= 3;
@@ -466,6 +487,10 @@ Macro convertMacro(const FurMacro& fm, int which, const FurIns& ins, int ourType
         else v = std::clamp(v, 0, 255);
         break;
       case MACRO_PITCH: v = std::clamp(v / 4, -128, 127); break;
+      case MACRO_CUTOFF:
+        if (!ins.c64FilterAbs) v = acc = std::clamp(acc + (ins.c64MultiplyRel ? (int8_t)v * 7 : v), 0, 2047);
+        v = sidCutoff(std::clamp(v, 0, 2047));
+        break;
     }
     m.values.push_back(v);
   }
@@ -516,7 +541,9 @@ Macro rampMacro(int from, int to, double ticksPerStep) {
   return m;
 }
 
-Instrument convertInstrument(const FurIns& f, float tickRate, bool haveWaves) {
+}  // namespace
+
+Instrument fur::convertInstrument(const FurIns& f, float tickRate, bool haveWaves) {
   Instrument ins;
   ins.name = f.name.empty() ? "Instrument" : f.name;
   if (isFMType(f.type)) {
@@ -592,6 +619,7 @@ Instrument convertInstrument(const FurIns& f, float tickRate, bool haveWaves) {
   for (int m = 0; m < MACRO_COUNT; m++) {
     if (ins.type == INS_FM && (m == MACRO_DUTY || m == MACRO_WAVE)) continue;
     if (m == MACRO_DUTY && (f.type == 6 || f.type == 7 || f.type == 9 || f.type == 5)) continue;
+    if (m == MACRO_CUTOFF && !(f.hasC64 || f.type == 3)) continue;
     if (m == MACRO_WAVE && !isWaveType(f.type) && f.type != 3 && !(f.type == 4 && f.useWave)) continue;
     ins.macros[m] = convertMacro(f.macros[m], m, f, ins.type);
   }
@@ -609,6 +637,13 @@ Instrument convertInstrument(const FurIns& f, float tickRate, bool haveWaves) {
       ins.wave = (w & 8) ? WAVE_NOISE : (w & 4) ? WAVE_PULSE : (w & 2) ? WAVE_SAW : WAVE_TRIANGLE;
       int d = f.c64Duty;
       ins.duty = d < 768 ? 0 : d < 1536 ? 1 : d < 2560 ? 2 : 3;
+      ins.pulseWidth = std::clamp(d / 16, 1, 255);
+      ins.ringMod = f.c64Ring;
+      ins.sync = f.c64Sync;
+      ins.filter.on = f.c64ToFilter;
+      ins.filter.mode = f.c64Lp ? 0 : f.c64Bp ? 1 : f.c64Hp ? 2 : 0;
+      ins.filter.cutoff = sidCutoff(f.c64Cut);
+      ins.filter.resonance = f.c64Res & 15;
       if (ins.macros[MACRO_VOL].values.empty()) {
         // SID ADSR as a volume macro.
         static const int atk[16] = {2, 8, 16, 24, 38, 56, 68, 80, 100, 250, 500, 800, 1000, 3000, 5000, 8000};
@@ -643,6 +678,8 @@ Instrument convertInstrument(const FurIns& f, float tickRate, bool haveWaves) {
 }
 
 // --- samples and waves --------------------------------------------------------
+
+namespace {
 
 void parseSample(ByteReader& r, size_t end, const std::string& id, int version, Sample& s) {
   s.name = r.cstr();
@@ -717,6 +754,77 @@ void parseWave(ByteReader& r, Wavetable& w) {
 }
 
 }  // namespace
+
+// Furnace instrument file: "FINS" (features, no length) or the older
+// "-Furnace instr.-" header pointing at an INST/INS2 block.
+bool importFUI(const std::vector<uint8_t>& raw, Song& out, std::string& err) {
+  ByteReader r(raw);
+  FurIns fi;
+  int version = 0;
+  if (raw.size() >= 8 && (std::memcmp(raw.data(), "FINS", 4) == 0 || std::memcmp(raw.data(), "FINB", 4) == 0)) {
+    r.seek(4);
+    version = ByteReader(raw.data() + 4, 2).u16();
+    parseINS2(r, raw.size(), fi, version);
+  } else if (raw.size() >= 32 && std::memcmp(raw.data(), "-Furnace instr.-", 16) == 0) {
+    r.seek(16);
+    version = r.u16();
+    r.u16();
+    uint32_t ptr = r.u32();
+    r.seek(ptr);
+    std::string id = r.str(4);
+    uint32_t size = r.u32();
+    if (id == "INST") parseINST(r, fi, version);
+    else if (id == "INS2") parseINS2(r, ptr + 8 + size, fi, version);
+    else {
+      err = "Unknown Furnace instrument data";
+      return false;
+    }
+  } else {
+    err = "Not a Furnace instrument (.fui)";
+    return false;
+  }
+
+  out = Song();
+  out.instruments.clear();
+  // Bring the samples and wavetables along, renumbered from 0.
+  std::map<int, int> sampleMap, waveMap;
+  for (auto& [idx, ptr] : fi.sampleList) {
+    r.seek(ptr);
+    std::string id = r.str(4);
+    uint32_t size = r.u32();
+    if (id != "SMP2" && id != "SMPL") continue;
+    Sample smp;
+    parseSample(r, ptr + 8 + size, id, version, smp);
+    sampleMap[idx] = (int)out.samples.size();
+    out.samples.push_back(std::move(smp));
+  }
+  for (auto& [idx, ptr] : fi.waveList) {
+    r.seek(ptr);
+    if (r.str(4) != "WAVE") continue;
+    r.u32();
+    Wavetable w;
+    parseWave(r, w);
+    waveMap[idx] = (int)out.wavetables.size();
+    out.wavetables.push_back(std::move(w));
+  }
+  auto remap = [](const std::map<int, int>& m, int v) {
+    auto it = m.find(v);
+    return it == m.end() ? (m.empty() ? v : 0) : it->second;
+  };
+  if (fi.initSample >= 0) fi.initSample = remap(sampleMap, fi.initSample);
+  for (auto& e : fi.sampleMap) e.second = remap(sampleMap, e.second);
+  if (fi.firstWave >= 0) fi.firstWave = remap(waveMap, fi.firstWave);
+  if (isWaveType(fi.type) && !waveMap.empty())
+    for (int& v : fi.macros[MACRO_WAVE].values) v = remap(waveMap, v);
+  Instrument ins = convertInstrument(fi, out.tickRate, !out.wavetables.empty());
+  if (fi.name.empty()) ins.name.clear();  // the caller names it after the file
+  if (ins.sample >= (int)out.samples.size()) ins.sample = out.samples.empty() ? -1 : 0;
+  for (auto& v : ins.sampleMap)
+    if (v >= (int)out.samples.size()) v = -1;
+  if (ins.songWave >= (int)out.wavetables.size()) ins.songWave = out.wavetables.empty() ? -1 : 0;
+  out.instruments.push_back(std::move(ins));
+  return true;
+}
 
 bool importFUR(const std::vector<uint8_t>& raw, Song& song, std::string& err) {
   std::vector<uint8_t> inflated;
@@ -875,31 +983,170 @@ bool importFUR(const std::vector<uint8_t>& raw, Song& song, std::string& err) {
     return false;
   }
 
+  FurModule m;
+  m.name = name;
+  m.author = author;
+  m.comment = comment;
+  m.hz = hz;
+  m.vtNum = vtNum;
+  m.vtDen = vtDen;
+  m.speeds = speeds;
+  m.patLen = patLen;
+  m.hlA = hlA;
+  m.hlB = hlB;
+  m.chips = chips;
+  m.chipVol = chipVol;
+  m.totalCh = totalCh;
+  m.orders = orders;
+  m.fxCols = fxCols;
+  m.chanNames = chanNames;
+  int nch = std::clamp(totalCh, 1, MAX_CHANNELS);
+
+  // Wavetables and samples.
+  for (uint32_t p : wavePtr) {
+    if ((int)m.waves.size() >= MAX_WAVETABLES) break;
+    r.seek(p);
+    Wavetable w;
+    if (r.str(4) == "WAVE") {
+      r.u32();
+      parseWave(r, w);
+    }
+    m.waves.push_back(std::move(w));
+  }
+  for (uint32_t p : smpPtr) {
+    if ((int)m.samples.size() >= MAX_SAMPLES) break;
+    r.seek(p);
+    std::string id = r.str(4);
+    uint32_t size = r.u32();
+    Sample s;
+    if (id == "SMP2" || id == "SMPL") parseSample(r, p + 8 + size, id, version, s);
+    m.samples.push_back(std::move(s));
+  }
+
+  // Instruments.
+  for (uint32_t p : insPtr) {
+    if ((int)m.instruments.size() >= MAX_INSTRUMENTS) break;
+    r.seek(p);
+    std::string id = r.str(4);
+    uint32_t size = r.u32();
+    FurIns fi;
+    if (id == "INS2") parseINS2(r, p + 8 + size, fi, version);
+    else if (id == "INST") parseINST(r, fi, version);
+    m.instruments.push_back(std::move(fi));
+  }
+
+  // Patterns.
+  for (uint32_t p : patPtr) {
+    r.seek(p);
+    std::string id = r.str(4);
+    uint32_t size = r.u32();
+    size_t end = p + 8 + size;
+    if (id == "PATN") {
+      int sub = r.u8();
+      int ch = r.u8();
+      int idx = r.u16();
+      r.cstr();
+      if (sub != 0 || ch >= nch || idx >= MAX_PATTERNS) continue;
+      std::vector<FurCell>& rows = m.patterns[{ch, idx}];
+      rows.assign(std::min(patLen, MAX_ROWS), FurCell());
+      int row = 0;
+      while (row < patLen && r.pos() < end) {
+        int b = r.u8();
+        if (b == 0xFF) break;
+        if (b & 0x80) {
+          row += (b & 0x7F) + 2;
+          continue;
+        }
+        if (b == 0) {
+          row++;
+          continue;
+        }
+        int mask = (b & 0x20) ? r.u8() : ((b >> 3) & 3);
+        if (b & 0x40) mask |= r.u8() << 8;
+        FurCell cell;
+        if (b & 1) {
+          int n = r.u8();
+          if (n == 183) {
+            r.u32();
+          } else if (n >= 180) {
+            cell.note = NOTE_OFF;
+          } else {
+            int ours = n - 60;
+            if (ours >= 0 && ours < NOTE_COUNT) cell.note = ours;
+          }
+        }
+        if (b & 2) cell.ins = r.u8();
+        if (b & 4) cell.vol = r.u8();
+        for (int e = 0; e < 8; e++) {
+          if (mask & (1 << (e * 2))) cell.fx[e][0] = r.u8();
+          if (mask & (1 << (e * 2 + 1))) cell.fx[e][1] = r.u8();
+        }
+        if (row < (int)rows.size()) rows[row] = cell;
+        row++;
+      }
+    } else if (id == "PATR") {
+      int ch = r.u16();
+      int idx = r.u16();
+      int sub = r.u16();
+      r.u16();
+      if ((version >= 95 && sub != 0) || ch >= nch || idx >= MAX_PATTERNS) continue;
+      int cols = ch < (int)fxCols.size() ? fxCols[ch] : 1;
+      std::vector<FurCell>& rows = m.patterns[{ch, idx}];
+      rows.assign(std::min(patLen, MAX_ROWS), FurCell());
+      for (int row = 0; row < patLen; row++) {
+        int note = r.s16(), oct = r.s16(), ins = r.s16(), vol = r.s16();
+        FurCell cell;
+        if (note == 100 || note == 101 || note == 102) {
+          cell.note = NOTE_OFF;
+        } else if (note != 0 || oct != 0) {
+          int o = (int8_t)(oct & 0xFF);
+          int n = o * 12 + note;
+          if (n >= 0 && n < NOTE_COUNT) cell.note = n;
+        }
+        if (ins >= 0) cell.ins = ins;
+        if (vol >= 0) cell.vol = vol;
+        for (int e = 0; e < cols; e++) {
+          int cmd = r.s16(), val = r.s16();
+          if (e < 8 && cmd >= 0) {
+            cell.fx[e][0] = cmd;
+            cell.fx[e][1] = val;
+          }
+        }
+        if (row < (int)rows.size()) rows[row] = cell;
+      }
+    }
+  }
+  return buildFurSong(m, song, err);
+}
+
+bool fur::buildFurSong(const FurModule& m, Song& song, std::string& err) {
+  (void)err;
+  const int totalCh = m.totalCh;
   // Channel layout.
   std::vector<ChanDesc> desc;
-  for (size_t i = 0; i < chips.size(); i++) {
+  for (size_t i = 0; i < m.chips.size(); i++) {
     size_t before = desc.size();
-    chipChannels(chips[i].first, chips[i].second, desc);
-    float v = i < chipVol.size() ? chipVol[i] : 1.0f;
+    chipChannels(m.chips[i].first, m.chips[i].second, desc);
+    float v = i < m.chipVol.size() ? m.chipVol[i] : 1.0f;
     for (size_t k = before; k < desc.size(); k++) desc[k].mix *= v;
   }
-  desc.resize(totalCh);
+  desc.resize(std::max(totalCh, 1));
   int nch = std::clamp(totalCh, 1, MAX_CHANNELS);
   song.reset(nch);
-  song.name = name.empty() ? "Furnace song" : name;
-  song.author = author;
-  song.comment = comment;
-  song.tickRate = std::clamp(hz * vtNum / (float)vtDen, 1.0f, 1000.0f);
-  song.speeds = speeds.empty() ? std::vector<int>{6} : speeds;
+  song.name = m.name.empty() ? "Furnace song" : m.name;
+  song.author = m.author;
+  song.comment = m.comment;
+  song.tickRate = std::clamp(m.hz * m.vtNum / (float)m.vtDen, 1.0f, 1000.0f);
+  song.speeds = m.speeds.empty() ? std::vector<int>{6} : m.speeds;
   if ((int)song.speeds.size() > MAX_GROOVE) song.speeds.resize(MAX_GROOVE);
-  song.patternLength = std::clamp(patLen, 1, MAX_ROWS);
-  song.highlight1 = hlA;
-  song.highlight2 = hlB;
+  song.patternLength = std::clamp(m.patLen, 1, MAX_ROWS);
+  song.highlight1 = m.hlA;
+  song.highlight2 = m.hlB;
   for (int c = 0; c < nch; c++) {
     ChannelInfo& ch = song.channels[c];
     const ChanDesc& cd = desc[c];
-    ch.name = c < (int)chanNames.size() && !chanNames[c].empty() ? chanNames[c] : cd.name;
-    ch.effectCols = c < (int)fxCols.size() ? fxCols[c] : 1;
+    ch.name = c < (int)m.chanNames.size() && !m.chanNames[c].empty() ? m.chanNames[c] : cd.name;
+    ch.effectCols = c < (int)m.fxCols.size() ? m.fxCols[c] : 1;
     switch (cd.kind) {
       case Kind::Pulse: ch.forceWave = WAVE_PULSE; break;
       case Kind::Triangle: ch.forceWave = WAVE_TRIANGLE; break;
@@ -915,46 +1162,21 @@ bool importFUR(const std::vector<uint8_t>& raw, Song& song, std::string& err) {
     ch.mix = cd.mix;
   }
   song.orders.clear();
+  int ordLen = m.orders.empty() ? 0 : (int)m.orders[0].size();
   for (int o = 0; o < std::min(ordLen, MAX_ORDERS); o++) {
     std::array<uint8_t, MAX_CHANNELS> row{};
-    for (int c = 0; c < nch; c++) row[c] = (uint8_t)orders[c][o];
+    for (int c = 0; c < nch && c < (int)m.orders.size(); c++) row[c] = (uint8_t)m.orders[c][o];
     song.orders.push_back(row);
   }
   if (song.orders.empty()) song.orders.push_back({});
 
-  // Wavetables and samples.
-  for (uint32_t p : wavePtr) {
-    if ((int)song.wavetables.size() >= MAX_WAVETABLES) break;
-    r.seek(p);
-    Wavetable w;
-    if (r.str(4) == "WAVE") {
-      r.u32();
-      parseWave(r, w);
-    }
-    song.wavetables.push_back(std::move(w));
-  }
-  for (uint32_t p : smpPtr) {
-    if ((int)song.samples.size() >= MAX_SAMPLES) break;
-    r.seek(p);
-    std::string id = r.str(4);
-    uint32_t size = r.u32();
-    Sample s;
-    if (id == "SMP2" || id == "SMPL") parseSample(r, p + 8 + size, id, version, s);
-    song.samples.push_back(std::move(s));
-  }
-
-  // Instruments.
+  song.wavetables = m.waves;
+  song.samples = m.samples;
   song.instruments.clear();
-  for (uint32_t p : insPtr) {
-    if ((int)song.instruments.size() >= MAX_INSTRUMENTS) break;
-    r.seek(p);
-    std::string id = r.str(4);
-    uint32_t size = r.u32();
-    FurIns fi;
-    if (id == "INS2") parseINS2(r, p + 8 + size, fi, version);
-    else if (id == "INST") parseINST(r, fi, version);
-    song.instruments.push_back(convertInstrument(fi, song.tickRate, !song.wavetables.empty()));
-  }
+  for (const FurIns& fi : m.instruments) song.instruments.push_back(convertInstrument(fi, song.tickRate, !song.wavetables.empty()));
+  int rawBase = (int)song.instruments.size();
+  for (const Instrument& ins : m.rawInstruments) song.instruments.push_back(ins);
+  if ((int)song.instruments.size() > MAX_INSTRUMENTS) song.instruments.resize(MAX_INSTRUMENTS);
   if (song.instruments.empty()) song.instruments.emplace_back();
 
   // Patterns.
@@ -988,90 +1210,31 @@ bool importFUR(const std::vector<uint8_t>& raw, Song& song, std::string& err) {
       default: return;
     }
   };
-
-  for (uint32_t p : patPtr) {
-    r.seek(p);
-    std::string id = r.str(4);
-    uint32_t size = r.u32();
-    size_t end = p + 8 + size;
-    if (id == "PATN") {
-      int sub = r.u8();
-      int ch = version >= 240 ? r.u16() : r.u8();
-      int idx = r.u16();
-      r.cstr();
-      if (sub != 0 || ch >= nch || idx >= MAX_PATTERNS) continue;
-      Pattern* pat = song.pattern(ch, idx, true);
-      int row = 0;
-      while (row < patLen && r.pos() < end) {
-        int b = r.u8();
-        if (b == 0xFF) break;
-        if (b & 0x80) {
-          row += (b & 0x7F) + 2;
-          continue;
-        }
-        if (b == 0) {
-          row++;
-          continue;
-        }
-        int mask = (b & 0x20) ? r.u8() : ((b >> 3) & 3);
-        if (b & 0x40) mask |= r.u8() << 8;
-        Cell cell;
-        if (b & 1) {
-          int n = r.u8();
-          if (n == 183) {
-            r.u32();
-          } else if (n >= 180) {
-            cell.note = NOTE_OFF;
-          } else {
-            int ours = n - 60;
-            if (ours >= 0 && ours < NOTE_COUNT) cell.note = (int16_t)ours;
-          }
-        }
-        if (b & 2) cell.ins = r.u8();
-        if (b & 4) cell.vol = (int16_t)convertVol(ch, r.u8());
-        int col = 0;
-        for (int e = 0; e < 8; e++) {
-          int cmd = -1, val = -1;
-          if (mask & (1 << (e * 2))) cmd = r.u8();
-          if (mask & (1 << (e * 2 + 1))) val = r.u8();
-          if (cmd < 0 && val < 0) continue;
-          Effect out;
-          if (cmd >= 0) convertFx(ch, cmd, val, out);
-          if (out.cmd >= 0 && e < MAX_EFFECTS) cell.fx[std::min(e, MAX_EFFECTS - 1)] = out;
-          col = std::max(col, e + 1);
-        }
-        if (row < MAX_ROWS) pat->rows[row] = cell;
-        row++;
+  for (const auto& [key, rows] : m.patterns) {
+    int ch = key.first, idx = key.second;
+    if (ch >= nch || idx >= MAX_PATTERNS) continue;
+    Pattern* pat = song.pattern(ch, idx, true);
+    for (size_t row = 0; row < rows.size() && row < (size_t)MAX_ROWS; row++) {
+      const FurCell& fc = rows[row];
+      Cell cell;
+      cell.note = (int16_t)fc.note;
+      cell.ins = (int16_t)fc.ins;
+      if (desc[ch].kind == Kind::Sample && fc.ins >= 0) {
+        auto it = m.sampleInsRemap.find(fc.ins);
+        if (it != m.sampleInsRemap.end() && rawBase + it->second < (int)song.instruments.size()) cell.ins = (int16_t)(rawBase + it->second);
       }
-    } else if (id == "PATR") {
-      int ch = r.u16();
-      int idx = r.u16();
-      int sub = r.u16();
-      r.u16();
-      if ((version >= 95 && sub != 0) || ch >= nch || idx >= MAX_PATTERNS) continue;
-      int cols = ch < (int)fxCols.size() ? fxCols[ch] : 1;
-      Pattern* pat = song.pattern(ch, idx, true);
-      for (int row = 0; row < patLen; row++) {
-        int note = r.s16(), oct = r.s16(), ins = r.s16(), vol = r.s16();
-        Cell cell;
-        if (note == 100 || note == 101 || note == 102) {
-          cell.note = NOTE_OFF;
-        } else if (note != 0 || oct != 0) {
-          int o = (int8_t)(oct & 0xFF);
-          int n = o * 12 + note;
-          if (n >= 0 && n < NOTE_COUNT) cell.note = (int16_t)n;
-        }
-        if (ins >= 0) cell.ins = (int16_t)ins;
-        if (vol >= 0) cell.vol = (int16_t)convertVol(ch, vol);
-        for (int e = 0; e < cols; e++) {
-          int cmd = r.s16(), val = r.s16();
-          if (cmd < 0) continue;
-          Effect out;
-          convertFx(ch, cmd, val, out);
-          if (out.cmd >= 0 && e < MAX_EFFECTS) cell.fx[e] = out;
-        }
-        if (row < MAX_ROWS) pat->rows[row] = cell;
+      if (m.legacySampleNotes && desc[ch].kind == Kind::Sample && fc.note >= 0) {
+        int k = rawBase + fc.note % 12;
+        cell.ins = (int16_t)(k < (int)song.instruments.size() && fc.note % 12 < (int)m.rawInstruments.size() ? k : -1);
       }
+      if (fc.vol >= 0) cell.vol = (int16_t)convertVol(ch, fc.vol);
+      for (int e = 0; e < 8; e++) {
+        if (fc.fx[e][0] < 0) continue;
+        Effect out;
+        convertFx(ch, fc.fx[e][0], fc.fx[e][1], out);
+        if (out.cmd >= 0) cell.fx[std::min(e, MAX_EFFECTS - 1)] = out;
+      }
+      pat->rows[row] = cell;
     }
   }
   return true;

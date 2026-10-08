@@ -175,36 +175,181 @@ void App::moveCursor(int dRow, int dCol) {
 // Undo
 // ---------------------------------------------------------------------------
 
-void App::pushUndo(int ch0, int ch1) {
+void App::pushUndo(int ch0, int ch1, int order) {
+  commitMetaEdit();
+  if (order < 0) order = curOrder_;
   UndoStep step;
-  step.order = curOrder_;
+  step.order = order;
   step.row = curRow_;
   step.ch = curCh_;
   step.col = curCol_;
   for (int c = std::max(ch0, 0); c <= std::min(ch1, song_.channelCount() - 1); c++) {
-    int pat = song_.orders[curOrder_][c];
+    int pat = song_.orders[order][c];
     const Pattern* p = song_.pattern(c, pat);
     step.entries.push_back({c, pat, p ? p->rows : std::vector<Cell>()});
   }
   undo_.push_back(std::move(step));
-  if (undo_.size() > 200) undo_.erase(undo_.begin());
+  trimUndo();
   redo_.clear();
   dirty_ = true;
 }
 
+// Keeps the history bounded: 200 steps, at most 20 full song copies.
+void App::trimUndo() {
+  if (undo_.size() > 200) undo_.erase(undo_.begin(), undo_.begin() + (undo_.size() - 200));
+  int fulls = 0;
+  for (auto& u : undo_) fulls += u.kind == UndoStep::Full;
+  while (fulls > 20) {
+    auto it = std::find_if(undo_.begin(), undo_.end(), [](const UndoStep& u) { return u.kind == UndoStep::Full; });
+    undo_.erase(undo_.begin(), it + 1);
+    fulls--;
+  }
+}
+
+// Song without pattern and sample data: what instrument, order and setting
+// edits can change.
+Song App::metaSnapshot() {
+  Song m;
+  m.name = song_.name;
+  m.author = song_.author;
+  m.comment = song_.comment;
+  m.tickRate = song_.tickRate;
+  m.speeds = song_.speeds;
+  m.patternLength = song_.patternLength;
+  m.highlight1 = song_.highlight1;
+  m.highlight2 = song_.highlight2;
+  m.insResetsVolume = song_.insResetsVolume;
+  m.orders = song_.orders;
+  m.instruments = song_.instruments;
+  m.wavetables = song_.wavetables;
+  m.fx = song_.fx;
+  m.channels.clear();
+  for (auto& c : song_.channels) {
+    std::vector<Pattern> pats = std::move(c.patterns);
+    m.channels.push_back(c);
+    c.patterns = std::move(pats);
+  }
+  m.samples.clear();
+  for (auto& smp : song_.samples) {
+    std::vector<float> data = std::move(smp.data);
+    m.samples.push_back(smp);
+    smp.data = std::move(data);
+  }
+  return m;
+}
+
+void App::restoreMeta(const Song& m) {
+  song_.name = m.name;
+  song_.author = m.author;
+  song_.comment = m.comment;
+  song_.tickRate = m.tickRate;
+  song_.speeds = m.speeds;
+  song_.patternLength = m.patternLength;
+  song_.highlight1 = m.highlight1;
+  song_.highlight2 = m.highlight2;
+  song_.insResetsVolume = m.insResetsVolume;
+  song_.orders = m.orders;
+  song_.instruments = m.instruments;
+  song_.wavetables = m.wavetables;
+  song_.fx = m.fx;
+  for (size_t c = 0; c < m.channels.size() && c < song_.channels.size(); c++) {
+    std::vector<Pattern> pats = std::move(song_.channels[c].patterns);
+    song_.channels[c] = m.channels[c];
+    song_.channels[c].patterns = std::move(pats);
+  }
+  for (size_t i = 0; i < m.samples.size() && i < song_.samples.size(); i++) {
+    std::vector<float> data = std::move(song_.samples[i].data);
+    song_.samples[i] = m.samples[i];
+    song_.samples[i].data = std::move(data);
+  }
+}
+
+// Turns pending setting edits into one undo step (called when the edit gesture ends).
+void App::commitMetaEdit() {
+  if (shadowStale_) {
+    metaShadow_ = metaSnapshot();
+    shadowStale_ = false;
+    metaTouched_ = false;
+    return;
+  }
+  if (!metaTouched_) return;
+  UndoStep step;
+  step.kind = UndoStep::Meta;
+  step.song = std::make_shared<Song>(std::move(metaShadow_));
+  step.order = curOrder_;
+  step.row = curRow_;
+  step.ch = curCh_;
+  step.col = curCol_;
+  undo_.push_back(std::move(step));
+  trimUndo();
+  redo_.clear();
+  metaShadow_ = metaSnapshot();
+  metaTouched_ = false;
+}
+
+// Call before a structural change: snapshots the whole song.
+void App::pushFullUndo() {
+  commitMetaEdit();
+  UndoStep step;
+  step.kind = UndoStep::Full;
+  step.song = std::make_shared<Song>(song_);
+  step.order = curOrder_;
+  step.row = curRow_;
+  step.ch = curCh_;
+  step.col = curCol_;
+  undo_.push_back(std::move(step));
+  trimUndo();
+  redo_.clear();
+  shadowStale_ = true;
+  dirty_ = true;
+}
+
+void App::resetUndo() {
+  undo_.clear();
+  redo_.clear();
+  metaShadow_ = metaSnapshot();
+  metaTouched_ = false;
+  shadowStale_ = false;
+}
+
 void App::applyUndo(std::vector<UndoStep>& from, std::vector<UndoStep>& to) {
+  commitMetaEdit();
   if (from.empty()) return;
   UndoStep step = std::move(from.back());
   from.pop_back();
   UndoStep inverse = step;
-  for (size_t i = 0; i < step.entries.size(); i++) {
-    auto& e = step.entries[i];
-    if (e.ch >= song_.channelCount()) continue;
-    Pattern& p = song_.channels[e.ch].patterns[e.pat];
-    inverse.entries[i].rows = p.rows;
-    p.rows = e.rows;
+  inverse.order = curOrder_;
+  inverse.row = curRow_;
+  inverse.ch = curCh_;
+  inverse.col = curCol_;
+  switch (step.kind) {
+    case UndoStep::Patterns:
+      for (size_t i = 0; i < step.entries.size(); i++) {
+        auto& e = step.entries[i];
+        if (e.ch >= song_.channelCount()) continue;
+        Pattern& p = song_.channels[e.ch].patterns[e.pat];
+        inverse.entries[i].rows = p.rows;
+        p.rows = e.rows;
+      }
+      inverse.order = step.order;
+      inverse.row = step.row;
+      inverse.ch = step.ch;
+      inverse.col = step.col;
+      break;
+    case UndoStep::Meta:
+      inverse.song = std::make_shared<Song>(metaSnapshot());
+      restoreMeta(*step.song);
+      break;
+    case UndoStep::Full:
+      inverse.song = std::make_shared<Song>(song_);
+      if (step.song->channelCount() != song_.channelCount()) engine_->stop();
+      song_ = *step.song;
+      break;
   }
+  metaShadow_ = metaSnapshot();
   to.push_back(std::move(inverse));
+  curIns_ = std::clamp(curIns_, 0, std::max(0, (int)song_.instruments.size() - 1));
+  curSample_ = std::min(curSample_, (int)song_.samples.size() - 1);
   curOrder_ = std::min(step.order, (int)song_.orders.size() - 1);
   curRow_ = step.row;
   curCh_ = std::min(step.ch, song_.channelCount() - 1);

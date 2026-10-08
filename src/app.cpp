@@ -11,6 +11,8 @@
 
 #include "demo.h"
 #include "import.h"
+#include "midifile.h"
+#include "payload.h"
 #include "theme.h"
 
 namespace fs = std::filesystem;
@@ -23,6 +25,7 @@ static void audioCallback(void* user, Uint8* stream, int len) {
 
 App::App() {
   loadDemoSong(song_);
+  metaShadow_ = metaSnapshot();
   engine_ = std::make_unique<Engine>(song_, 44100);
   std::error_code ec;
   dialogDir_ = fs::current_path(ec).string();
@@ -49,10 +52,14 @@ void App::loadSettings() {
       if (k == "scroller") showScroller_ = std::stoi(v) != 0;
       if (k == "octave") octave_ = std::clamp(std::stoi(v), 0, 8);
       if (k == "dir" && fs::is_directory(v)) dialogDir_ = v;
+      if (k == "midi") midiPort_ = v;
+      if (k == "midivelocity") midiVelocity_ = std::stoi(v) != 0;
     } catch (...) {
     }
   }
   setTheme(th);
+  // The keyboard may be unplugged: keep the name so it reconnects next time.
+  if (!midiPort_.empty() && midi_.open(midiPort_)) setStatus("MIDI input: " + midiPort_);
 }
 
 void App::saveSettings() {
@@ -61,6 +68,8 @@ void App::saveSettings() {
   f << "scroller=" << (showScroller_ ? 1 : 0) << "\n";
   f << "octave=" << octave_ << "\n";
   f << "dir=" << dialogDir_ << "\n";
+  f << "midi=" << midiPort_ << "\n";
+  f << "midivelocity=" << (midiVelocity_ ? 1 : 0) << "\n";
 }
 
 void App::openAudio() {
@@ -95,11 +104,12 @@ std::string App::windowTitle() const {
 
 void App::afterSongReplaced() {
   engine_->reset();
+  midiHeld_.clear();
+  midiChord_ = false;
   curOrder_ = curRow_ = curCh_ = curCol_ = 0;
   curIns_ = 0;
   hasSel_ = false;
-  undo_.clear();
-  redo_.clear();
+  resetUndo();
   dirty_ = false;
 }
 
@@ -210,13 +220,49 @@ void App::openFileDialog(FileDialogMode mode) {
   if (mode == FileDialogMode::Open) base.clear();
   if (mode == FileDialogMode::Save) base += ".dtk";
   if (mode == FileDialogMode::ExportWav) base += ".wav";
+  if (mode == FileDialogMode::ExportMidi) base += ".mid";
+  if (mode == FileDialogMode::ExportOgg) base += ".ogg";
+#ifdef _WIN32
+  if (mode == FileDialogMode::ExportPlayer) base += ".exe";
+#endif
+  if (mode == FileDialogMode::LoadInstrument) base.clear();
+  if (mode == FileDialogMode::SaveInstrument && curIns_ < (int)song_.instruments.size()) base = song_.instruments[curIns_].name + ".dti";
   std::snprintf(dialogName_, sizeof(dialogName_), "%s", base.c_str());
+}
+
+// Texts of the keygen player, then the file dialog for where to write it.
+void App::playerExportPopup() {
+  if (playerPopupRequest_) {
+    ImGui::OpenPopup("Export keygen player");
+    playerPopupRequest_ = false;
+  }
+  ImGui::SetNextWindowSize(ImVec2(520, 0), ImGuiCond_Appearing);
+  if (!ImGui::BeginPopupModal("Export keygen player", nullptr)) return;
+  ImGui::TextWrapped("A standalone program that plays this song with the keygen intro: starfield, logo and scroller. "
+                     "It runs on its own, without DATRACKARXD.");
+  ImGui::Separator();
+  ImGui::InputText("Logo", playerLogo_, sizeof(playerLogo_));
+  ImGui::InputText("Window title", playerTitle_, sizeof(playerTitle_));
+  ImGui::TextUnformatted("Scroller text");
+  ImGui::InputTextMultiline("##scroll", playerScroll_, sizeof(playerScroll_), ImVec2(-1, 90));
+  if (ImGui::Button("Export...", ImVec2(120, 0))) {
+    ImGui::CloseCurrentPopup();
+    openFileDialog(FileDialogMode::ExportPlayer);
+  }
+  ImGui::SameLine();
+  if (ImGui::Button("Cancel", ImVec2(120, 0)) || ImGui::IsKeyPressed(ImGuiKey_Escape)) ImGui::CloseCurrentPopup();
+  ImGui::EndPopup();
 }
 
 void App::fileDialog() {
   const char* title = dialogMode_ == FileDialogMode::Open        ? "Open song / import module###filedlg"
                       : dialogMode_ == FileDialogMode::Save      ? "Save song###filedlg"
                       : dialogMode_ == FileDialogMode::LoadSample ? "Load WAV sample###filedlg"
+                      : dialogMode_ == FileDialogMode::LoadInstrument ? "Load instrument###filedlg"
+                      : dialogMode_ == FileDialogMode::SaveInstrument ? "Save instrument###filedlg"
+                      : dialogMode_ == FileDialogMode::ExportMidi ? "Export MIDI###filedlg"
+                      : dialogMode_ == FileDialogMode::ExportOgg ? "Export OGG###filedlg"
+                      : dialogMode_ == FileDialogMode::ExportPlayer ? "Export keygen player###filedlg"
                                                                  : "Export WAV###filedlg";
   if (dialogOpenRequest_) {
     ImGui::OpenPopup("###filedlg");
@@ -228,6 +274,15 @@ void App::fileDialog() {
   std::vector<std::string> exts;
   if (dialogMode_ == FileDialogMode::Open) exts = supportedSongExtensions();
   else if (dialogMode_ == FileDialogMode::Save) exts = {".dtk"};
+  else if (dialogMode_ == FileDialogMode::LoadInstrument) exts = instrumentFileExtensions();
+  else if (dialogMode_ == FileDialogMode::SaveInstrument) exts = {".dti"};
+  else if (dialogMode_ == FileDialogMode::ExportMidi) exts = {".mid"};
+  else if (dialogMode_ == FileDialogMode::ExportOgg) exts = {".ogg"};
+#ifdef _WIN32
+  else if (dialogMode_ == FileDialogMode::ExportPlayer) exts = {".exe"};
+#else
+  else if (dialogMode_ == FileDialogMode::ExportPlayer) exts = {""};
+#endif
   else exts = {".wav"};
   const std::string& ext = exts[0];
   auto matches = [&](const fs::path& p) {
@@ -285,13 +340,22 @@ void App::fileDialog() {
   ImGui::SetNextItemWidth(-200);
   if (ImGui::IsWindowAppearing()) ImGui::SetKeyboardFocusHere();
   if (ImGui::InputText("##name", dialogName_, sizeof(dialogName_), ImGuiInputTextFlags_EnterReturnsTrue)) accept = true;
-  if (dialogMode_ == FileDialogMode::ExportWav) {
+  if (dialogMode_ == FileDialogMode::ExportWav || dialogMode_ == FileDialogMode::ExportMidi ||
+      dialogMode_ == FileDialogMode::ExportOgg) {
     ImGui::SameLine();
     ImGui::SetNextItemWidth(80);
     ImGui::InputInt("loops", &exportLoops_);
     exportLoops_ = std::clamp(exportLoops_, 1, 16);
   }
-  bool opening = dialogMode_ == FileDialogMode::Open || dialogMode_ == FileDialogMode::LoadSample;
+  if (dialogMode_ == FileDialogMode::ExportOgg) {
+    ImGui::SetNextItemWidth(200);
+    ImGui::SliderInt("Quality", &oggQuality_, 0, 10);
+    ImGui::SameLine();
+    static const int kbps[11] = {64, 80, 96, 112, 128, 160, 192, 224, 256, 320, 500};
+    ImGui::TextDisabled("about %d kbit/s", kbps[std::clamp(oggQuality_, 0, 10)]);
+  }
+  bool opening = dialogMode_ == FileDialogMode::Open || dialogMode_ == FileDialogMode::LoadSample ||
+                 dialogMode_ == FileDialogMode::LoadInstrument;
   if (ImGui::Button(opening ? "Open" : "Save", ImVec2(100, 0))) accept = true;
   ImGui::SameLine();
   bool cancel = ImGui::Button("Cancel", ImVec2(100, 0)) || ImGui::IsKeyPressed(ImGuiKey_Escape);
@@ -310,6 +374,7 @@ void App::fileDialog() {
       if ((int)song_.samples.size() >= MAX_SAMPLES) {
         setStatus("Too many samples");
       } else if (loadWavSample(path, smp, err)) {
+        pushFullUndo();
         song_.samples.push_back(std::move(smp));
         curSample_ = (int)song_.samples.size() - 1;
         if (loadSampleIntoIns_ >= 0 && loadSampleIntoIns_ < (int)song_.instruments.size())
@@ -320,6 +385,49 @@ void App::fileDialog() {
       } else {
         setStatus("Sample load failed: " + err);
       }
+    } else if (dialogMode_ == FileDialogMode::LoadInstrument) {
+      Song next = song_;
+      int idx = loadInstrumentFile(path, next, err);
+      if (idx >= 0) {
+        pushFullUndo();  // samples and wavetables may come along
+        song_ = std::move(next);
+        curIns_ = idx;
+        dirty_ = true;
+        setStatus("Loaded instrument " + song_.instruments[idx].name);
+        cancel = true;
+      } else {
+        setStatus("Instrument load failed: " + err);
+      }
+    } else if (dialogMode_ == FileDialogMode::SaveInstrument) {
+      if (saveInstrumentFile(song_, curIns_, path, err)) {
+        setStatus("Saved instrument " + path);
+        cancel = true;
+      } else {
+        setStatus("Instrument save failed: " + err);
+      }
+    } else if (dialogMode_ == FileDialogMode::ExportPlayer) {
+      PlayerPayload p;
+      p.song = song_.toText();
+      p.logo = playerLogo_;
+      p.title = playerTitle_;
+      p.scroll = playerScroll_;
+      if (writePlayer(path, p, err))
+        setStatus("Exported player " + path);
+      else
+        setStatus("Player export failed: " + err);
+      cancel = true;
+    } else if (dialogMode_ == FileDialogMode::ExportOgg) {
+      if (exportOgg(song_, path, 44100, exportLoops_, oggQuality_, err))
+        setStatus("Exported " + path);
+      else
+        setStatus("OGG export failed: " + err);
+      cancel = true;
+    } else if (dialogMode_ == FileDialogMode::ExportMidi) {
+      if (exportMIDI(song_, path, exportLoops_, err))
+        setStatus("Exported " + path);
+      else
+        setStatus("MIDI export failed: " + err);
+      cancel = true;
     } else if (dialogMode_ == FileDialogMode::Save) {
       filePath_ = path;
       saveSong(false);
@@ -350,6 +458,17 @@ void App::menuBar() {
     if (ImGui::MenuItem("Save as...", "Ctrl+Shift+S")) saveSong(true);
     ImGui::Separator();
     if (ImGui::MenuItem("Export WAV...")) openFileDialog(FileDialogMode::ExportWav);
+    if (ImGui::MenuItem("Export OGG...")) openFileDialog(FileDialogMode::ExportOgg);
+    if (ImGui::MenuItem("Export MIDI...")) openFileDialog(FileDialogMode::ExportMidi);
+    if (ImGui::MenuItem("Export keygen player...")) {
+      std::snprintf(playerTitle_, sizeof(playerTitle_), "%s", song_.name.c_str());
+      if (!playerScroll_[0]) {
+        std::string t = "Now playing: " + song_.name + (song_.author.empty() ? "" : "  by " + song_.author) +
+                        "   ***   made with DATRACKARXD   ***   greetings to all trackers";
+        std::snprintf(playerScroll_, sizeof(playerScroll_), "%s", t.c_str());
+      }
+      playerPopupRequest_ = true;
+    }
     if (ImGui::MenuItem("Load demo song")) askAction(PendingAction::Demo);
     ImGui::Separator();
     if (ImGui::MenuItem("Quit")) requestQuit();
@@ -377,6 +496,7 @@ void App::menuBar() {
     ImGui::MenuItem("Instrument editor", nullptr, &showInsEditor_);
     ImGui::MenuItem("Song", nullptr, &showSong_);
     ImGui::MenuItem("Samples", nullptr, &showSamples_);
+    ImGui::MenuItem("Mixer", nullptr, &showMixer_);
     ImGui::MenuItem("Oscilloscope", nullptr, &showScope_);
     ImGui::MenuItem("Keygen scroller", nullptr, &showScroller_);
     ImGui::Separator();
@@ -391,6 +511,7 @@ void App::menuBar() {
     if (ImGui::MenuItem("Reset layout")) layoutDone_ = false;
     ImGui::EndMenu();
   }
+  midiMenu();
   if (ImGui::BeginMenu("Help")) {
     ImGui::MenuItem("Effects", nullptr, &showEffects_);
     ImGui::MenuItem("Keyboard", nullptr, &showKeys_);
@@ -421,6 +542,128 @@ void App::menuBar() {
   ImGui::EndMainMenuBar();
 }
 
+// ---------------------------------------------------------------------------
+// MIDI keyboard
+// ---------------------------------------------------------------------------
+
+void App::midiMenu() {
+  if (!ImGui::BeginMenu("MIDI")) return;
+  if (ImGui::IsWindowAppearing()) midiPorts_ = midi_.ports();
+  if (ImGui::MenuItem("None", nullptr, !midi_.isOpen())) {
+    midi_.close();
+    midiPort_.clear();
+  }
+  for (const std::string& p : midiPorts_) {
+    if (ImGui::MenuItem(p.c_str(), nullptr, midi_.portName() == p) && midi_.portName() != p) {
+      if (midi_.open(p)) {
+        midiPort_ = p;
+        setStatus("MIDI input: " + p);
+      } else {
+        setStatus(midi_.error());
+      }
+    }
+  }
+  if (midiPorts_.empty()) ImGui::TextDisabled("%s", midi_.error().empty() ? "No MIDI input found" : midi_.error().c_str());
+  ImGui::Separator();
+  if (ImGui::MenuItem("Rescan")) midiPorts_ = midi_.ports();
+  ImGui::MenuItem("Velocity -> volume", nullptr, &midiVelocity_);
+  ImGui::EndMenu();
+}
+
+void App::midiEvents() {
+  for (const MidiMessage& m : midi_.drain()) {
+    int type = m.status & 0xf0;
+    if (type == 0x90 && m.data2 > 0)
+      midiNoteOn(m.data1, m.data2);
+    else if (type == 0x80 || type == 0x90)
+      midiNoteOff(m.data1);
+    else if (type == 0xc0 && m.data1 < song_.instruments.size())
+      curIns_ = m.data1;  // program change picks the instrument
+  }
+}
+
+// MIDI note 60 (middle C) is C-4, like the computer keyboard at octave 4.
+// Held notes spread over the piano roll's voice channels. In Record mode
+// they are written at the cursor (stopped: the cursor moves on once every
+// key is up) or at the playing row (live: key up writes a note off).
+void App::midiNoteOn(int key, int velocity) {
+  if (midiHeld_.count(key)) midiNoteOff(key);
+  int nch = song_.channelCount();
+  if (curCh_ >= nch) return;
+  int note = std::clamp(key - 12, 0, 119);
+  int voices = std::clamp(prVoices_, 1, nch - curCh_);
+  auto used = [&](int c) {
+    for (auto& h : midiHeld_)
+      if (h.second.ch == c) return true;
+    return false;
+  };
+  int ch = -1;
+  for (int c = curCh_; c < curCh_ + voices && ch < 0; c++)
+    if (!used(c)) ch = c;
+  if (ch < 0) {  // all voices busy: take over the last one
+    ch = curCh_ + voices - 1;
+    for (auto it = midiHeld_.begin(); it != midiHeld_.end();)
+      it = it->second.ch == ch ? midiHeld_.erase(it) : std::next(it);
+  }
+  int vol = midiVelocity_ ? std::clamp(velocity, 1, 127) : -1;
+  engine_->noteOn(ch, note, curIns_, vol);
+  MidiHeld held{ch, -1, -1};
+
+  if (editMode_) {
+    bool live = engine_->playing();
+    int order = live ? engine_->order() : curOrder_;
+    int row = live ? engine_->row() : curRow_;
+    bool chordStep = !live && midiChord_ && !undo_.empty() && undo_.back().kind == UndoStep::Patterns;
+    if (chordStep) {
+      // Later notes of a chord join the undo step of the first one.
+      UndoStep& step = undo_.back();
+      bool have = false;
+      for (auto& e : step.entries) have |= e.ch == ch;
+      if (!have) {
+        int pat = song_.orders[order][ch];
+        const Pattern* p = song_.pattern(ch, pat);
+        step.entries.push_back({ch, pat, p ? p->rows : std::vector<Cell>()});
+      }
+    } else {
+      pushUndo(ch, ch, order);
+    }
+    Cell* c = song_.cell(ch, order, row, true);
+    c->note = (int16_t)note;
+    c->ins = (int16_t)curIns_;
+    if (vol >= 0) c->vol = (int16_t)vol;
+    dirty_ = true;
+    held = {ch, order, row};
+    if (!live) midiChord_ = true;
+  }
+  midiHeld_[key] = held;
+}
+
+void App::midiNoteOff(int key) {
+  auto it = midiHeld_.find(key);
+  if (it == midiHeld_.end()) return;
+  MidiHeld h = it->second;
+  midiHeld_.erase(it);
+  engine_->noteOff(h.ch);
+
+  if (h.row >= 0 && editMode_ && engine_->playing() && h.ch < song_.channelCount()) {
+    int order = engine_->order(), row = engine_->row();
+    if (order == h.order && row == h.row) row++;  // released within its own row
+    if (row < song_.patternLength && order < (int)song_.orders.size()) {
+      Cell* c = song_.cell(h.ch, order, row, false);
+      if (!c || c->note == NOTE_EMPTY) {
+        pushUndo(h.ch, h.ch, order);
+        c = song_.cell(h.ch, order, row, true);
+        c->note = NOTE_OFF;
+        c->ins = -1;
+      }
+    }
+  }
+  if (midiChord_ && midiHeld_.empty()) {
+    midiChord_ = false;
+    if (!engine_->playing()) moveRows(editStep_);
+  }
+}
+
 void App::defaultLayout(unsigned int dockId) {
   ImGui::DockBuilderRemoveNode(dockId);
   ImGui::DockBuilderAddNode(dockId, ImGuiDockNodeFlags_DockSpace);
@@ -440,6 +683,7 @@ void App::defaultLayout(unsigned int dockId) {
   ImGui::DockBuilderDockWindow("Samples", rightBottom);
   ImGui::DockBuilderDockWindow("Oscilloscope", bottom);
   ImGui::DockBuilderDockWindow("Keygen", bottom);
+  ImGui::DockBuilderDockWindow("Mixer", bottom);
   ImGui::DockBuilderDockWindow("Effects", rightBottom);
   ImGui::DockBuilderDockWindow("Keyboard", rightBottom);
   ImGui::DockBuilderFinish(dockId);
@@ -501,6 +745,7 @@ void App::handleKeys() {
 }
 
 void App::frame() {
+  midiEvents();
   if (engine_->playing() && follow_) setCursorFromPlayback();
 
   menuBar();
@@ -519,13 +764,17 @@ void App::frame() {
   if (showInsEditor_) instrumentEditor();
   if (showSong_) songWindow();
   if (showSamples_) samplesWindow();
+  if (showMixer_) mixerWindow();
   if (showScope_) scopeWindow();
   if (showScroller_) scrollerWindow();
   if (showEffects_) effectsHelp();
   if (showKeys_) keysHelp();
   if (showAbout_) aboutWindow();
 
+  playerExportPopup();
   fileDialog();
   confirmPopup();
   handleKeys();
+  // A settings edit becomes one undo step once the mouse/text gesture ends.
+  if (shadowStale_ || (metaTouched_ && !ImGui::IsAnyItemActive())) commitMetaEdit();
 }

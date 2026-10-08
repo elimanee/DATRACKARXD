@@ -731,7 +731,9 @@ bool importXM(const std::vector<uint8_t>& data, Song& song, std::string& err) {
         }
         if (bytes % div) r.skip(1);
         int mode = sh[k].type == 1 ? 1 : sh[k].type == 2 ? 2 : 0;
-        setLoop(s, mode, sh[k].loopStart / div, (sh[k].loopStart + sh[k].loopLen) / div);
+        // Corrupt files can hold huge loop values: work in 64 bits.
+        int64_t ls = (uint32_t)sh[k].loopStart, le = ls + (uint32_t)sh[k].loopLen;
+        setLoop(s, mode, (int)std::min<int64_t>(ls / div, INT32_MAX), (int)std::min<int64_t>(le / div, INT32_MAX));
       }
       ins.sample = baseSample < (int)song.samples.size() ? baseSample : -1;
       bool multi = false;

@@ -50,6 +50,7 @@ void App::ordersWindow() {
   if (ImGui::IsItemHovered()) ImGui::SetTooltip("Duplicate this order (same patterns)");
   ImGui::SameLine();
   if (ImGui::Button("Clone") && numOrders < MAX_ORDERS) {
+    pushFullUndo();
     // Copy the patterns into new unused slots.
     std::array<uint8_t, MAX_CHANNELS> row = song_.orders[curOrder_];
     for (int c = 0; c < nch; c++) {
@@ -147,7 +148,10 @@ void App::ordersWindow() {
     }
     ImGui::EndTable();
   }
-  if (changed) dirty_ = true;
+  if (changed) {
+    dirty_ = true;
+    metaTouched_ = true;
+  }
   ImGui::End();
 }
 
@@ -222,11 +226,10 @@ void App::songWindow() {
   ImGui::Separator();
   int nch = song_.channelCount();
   ImGui::SetNextItemWidth(120);
-  if (ImGui::InputInt("Channels", &nch)) {
+  if (ImGui::InputInt("Channels", &nch) && nch != song_.channelCount()) {
+    pushFullUndo();
     engine_->stop();
     song_.setChannelCount(nch);
-    undo_.clear();
-    redo_.clear();
     changed = true;
   }
   if (ImGui::BeginTable("chans", 4, ImGuiTableFlags_SizingStretchProp | ImGuiTableFlags_RowBg)) {
@@ -262,7 +265,101 @@ void App::songWindow() {
     ImGui::EndTable();
   }
   if (!audioStatus_.empty()) ImGui::TextDisabled("%s", audioStatus_.c_str());
-  if (changed) dirty_ = true;
+  if (changed) {
+    dirty_ = true;
+    metaTouched_ = true;
+  }
+  ImGui::End();
+}
+
+// Master effects and the per-channel levels and sends.
+void App::mixerWindow() {
+  if (!ImGui::Begin("Mixer", &showMixer_)) {
+    ImGui::End();
+    return;
+  }
+  bool changed = false;
+  MasterFx& fx = song_.fx;
+  const float w = 150;
+  if (ImGui::BeginTable("master", 3, ImGuiTableFlags_SizingStretchSame | ImGuiTableFlags_BordersInnerV)) {
+    ImGui::TableNextRow();
+    ImGui::TableNextColumn();
+    changed |= ImGui::Checkbox("Reverb", &fx.reverb);
+    ImGui::BeginDisabled(!fx.reverb);
+    ImGui::SetNextItemWidth(w);
+    changed |= ImGui::SliderFloat("Room size", &fx.roomSize, 0, 1, "%.2f");
+    ImGui::SetNextItemWidth(w);
+    changed |= ImGui::SliderFloat("Damping", &fx.damping, 0, 1, "%.2f");
+    ImGui::SetNextItemWidth(w);
+    changed |= ImGui::SliderFloat("Level##rv", &fx.reverbLevel, 0, 2, "%.2f");
+    ImGui::EndDisabled();
+
+    ImGui::TableNextColumn();
+    changed |= ImGui::Checkbox("Delay", &fx.delay);
+    ImGui::SameLine();
+    changed |= ImGui::Checkbox("Ping-pong", &fx.pingPong);
+    ImGui::BeginDisabled(!fx.delay);
+    ImGui::SetNextItemWidth(w);
+    changed |= ImGui::SliderInt("Time (rows)", &fx.delayRows, 1, 16);
+    ImGui::SetNextItemWidth(w);
+    changed |= ImGui::SliderFloat("Feedback", &fx.delayFeedback, 0, 0.95f, "%.2f");
+    ImGui::SetNextItemWidth(w);
+    changed |= ImGui::SliderFloat("Level##dl", &fx.delayLevel, 0, 2, "%.2f");
+    ImGui::EndDisabled();
+
+    ImGui::TableNextColumn();
+    changed |= ImGui::Checkbox("Filter", &fx.filter);
+    ImGui::BeginDisabled(!fx.filter);
+    ImGui::SetNextItemWidth(w);
+    changed |= ImGui::Combo("Type", &fx.filterType, "Low-pass\0Band-pass\0High-pass\0");
+    ImGui::SetNextItemWidth(w);
+    changed |= ImGui::SliderFloat("Cutoff", &fx.cutoff, 20, 20000, "%.0f Hz", ImGuiSliderFlags_Logarithmic);
+    ImGui::SetNextItemWidth(w);
+    changed |= ImGui::SliderFloat("Resonance", &fx.resonance, 0, 1, "%.2f");
+    ImGui::EndDisabled();
+    ImGui::SetNextItemWidth(w);
+    changed |= ImGui::SliderFloat("Master", &fx.volume, 0, 2, "%.2f");
+    ImGui::EndTable();
+  }
+
+  ImGui::Separator();
+  if (ImGui::BeginTable("sends", 6, ImGuiTableFlags_SizingStretchSame | ImGuiTableFlags_RowBg)) {
+    ImGui::TableSetupColumn("Channel");
+    ImGui::TableSetupColumn("Mix");
+    ImGui::TableSetupColumn("Pan");
+    ImGui::TableSetupColumn("Reverb send");
+    ImGui::TableSetupColumn("Delay send");
+    ImGui::TableSetupColumn("Mute", ImGuiTableColumnFlags_WidthFixed);
+    ImGui::TableHeadersRow();
+    for (int c = 0; c < song_.channelCount(); c++) {
+      ChannelInfo& info = song_.channels[c];
+      ImGui::PushID(c);
+      ImGui::TableNextRow();
+      ImGui::TableNextColumn();
+      ImGui::Text("%d %s", c + 1, info.name.c_str());
+      ImGui::TableNextColumn();
+      ImGui::SetNextItemWidth(-1);
+      changed |= ImGui::SliderFloat("##mix", &info.mix, 0.0f, 2.0f, "%.2f");
+      ImGui::TableNextColumn();
+      ImGui::SetNextItemWidth(-1);
+      if (ImGui::SliderInt("##pan", &info.pan, 0, 255, info.pan == 128 ? "C" : info.pan < 128 ? "L%d" : "R%d")) changed = true;
+      if (ImGui::IsItemActive()) engine_->resetPan(c);  // hear it right away
+      ImGui::TableNextColumn();
+      ImGui::SetNextItemWidth(-1);
+      changed |= ImGui::SliderFloat("##rv", &info.reverbSend, 0, 1, "%.2f");
+      ImGui::TableNextColumn();
+      ImGui::SetNextItemWidth(-1);
+      changed |= ImGui::SliderFloat("##dl", &info.delaySend, 0, 1, "%.2f");
+      ImGui::TableNextColumn();
+      ImGui::Checkbox("##m", &info.muted);  // like the pattern header: not an edit
+      ImGui::PopID();
+    }
+    ImGui::EndTable();
+  }
+  if (changed) {
+    dirty_ = true;
+    metaTouched_ = true;
+  }
   ImGui::End();
 }
 
@@ -312,93 +409,19 @@ void App::scrollerWindow() {
     ImGui::End();
     return;
   }
-  ImDrawList* dl = ImGui::GetWindowDrawList();
   ImVec2 p0 = ImGui::GetCursorScreenPos();
   ImVec2 size = ImGui::GetContentRegionAvail();
   size.x = std::max(size.x, 50.0f);
   size.y = std::max(size.y, 50.0f);
-  ImVec2 p1(p0.x + size.x, p0.y + size.y);
-  float t = (float)ImGui::GetTime();
-  float dt = std::min(ImGui::GetIO().DeltaTime, 0.1f);
-  dl->PushClipRect(p0, p1, true);
-  dl->AddRectFilled(p0, p1, IM_COL32(0, 0, 0, 255));
-
-  // Music level drives the bars and the stars.
   float peak = 0;
   for (float v : engine_->masterScope()) peak = std::max(peak, std::abs(v));
-
-  // Starfield.
-  struct Star {
-    float x, y, z;
-  };
-  static std::vector<Star> stars;
-  if (stars.empty()) {
-    for (int i = 0; i < 220; i++) stars.push_back({(std::rand() % 2000 - 1000) / 1000.0f, (std::rand() % 2000 - 1000) / 1000.0f, (std::rand() % 1000 + 1) / 1000.0f});
-  }
-  ImVec2 c((p0.x + p1.x) / 2, (p0.y + p1.y) / 2);
-  for (Star& s : stars) {
-    s.z -= dt * (0.25f + peak * 0.8f);
-    if (s.z <= 0.02f) {
-      s = {(std::rand() % 2000 - 1000) / 1000.0f, (std::rand() % 2000 - 1000) / 1000.0f, 1.0f};
-    }
-    float sx = c.x + s.x / s.z * size.x * 0.5f, sy = c.y + s.y / s.z * size.y * 0.5f;
-    int b = (int)(255 * (1.0f - s.z));
-    float r = 1.0f + (1.0f - s.z) * 1.5f;
-    dl->AddRectFilled(ImVec2(sx - r / 2, sy - r / 2), ImVec2(sx + r / 2, sy + r / 2), IM_COL32(b, b, b, 255));
-  }
-
-  // Copper bars.
-  static const ImU32 barCols[3][2] = {{IM_COL32(255, 0, 200, 0), IM_COL32(255, 0, 200, 200)},
-                                      {IM_COL32(0, 255, 240, 0), IM_COL32(0, 255, 240, 200)},
-                                      {IM_COL32(120, 255, 60, 0), IM_COL32(120, 255, 60, 200)}};
-  for (int i = 0; i < 3; i++) {
-    float y = c.y + std::sin(t * 1.3f + i * 2.1f) * size.y * 0.3f;
-    float hh = 6 + peak * 14;
-    dl->AddRectFilledMultiColor(ImVec2(p0.x, y - hh), ImVec2(p1.x, y), barCols[i][0], barCols[i][0], barCols[i][1], barCols[i][1]);
-    dl->AddRectFilledMultiColor(ImVec2(p0.x, y), ImVec2(p1.x, y + hh), barCols[i][1], barCols[i][1], barCols[i][0], barCols[i][0]);
-  }
-
-  ImFont* font = ImGui::GetFont();
-  auto hue = [](float h, int alpha) {
-    float r, g, b;
-    ImGui::ColorConvertHSVtoRGB(h - std::floor(h), 0.9f, 1.0f, r, g, b);
-    return IM_COL32((int)(r * 255), (int)(g * 255), (int)(b * 255), alpha);
-  };
-
-  // Logo.
-  const char* logo = "DATRACKARXD";
-  float logoSize = std::clamp(size.y * 0.22f, 16.0f, 64.0f);
-  float lw = font->CalcTextSizeA(logoSize, FLT_MAX, 0, logo).x;
-  float lx = c.x - lw / 2, ly = p0.y + size.y * 0.12f;
-  for (const char* ch = logo; *ch; ch++) {
-    int i = (int)(ch - logo);
-    float oy = std::sin(t * 4 + i * 0.6f) * logoSize * 0.12f;
-    dl->AddText(font, logoSize, ImVec2(lx + 3, ly + oy + 3), IM_COL32(0, 0, 0, 200), ch, ch + 1);
-    dl->AddText(font, logoSize, ImVec2(lx, ly + oy), hue(t * 0.2f + i * 0.07f, 255), ch, ch + 1);
-    lx += font->CalcTextSizeA(logoSize, FLT_MAX, 0, ch, ch + 1).x;
-  }
-
-  // Sine scroller.
   std::string text = "      *** DATRACKARXD ***   NOW PLAYING: " + song_.name;
   if (!song_.author.empty()) text += "  BY " + song_.author;
   text += "   ***   " + std::to_string(song_.channelCount()) + " CHANNELS OF PURE CHIP POWER   ***   " +
           std::to_string(song_.instruments.size()) + " INSTRUMENTS   ***   PRESS ENTER TO PLAY   ***   "
           "GREETINGS TO ALL TRACKER MUSICIANS, DEMOSCENERS AND FURNACE USERS   ***   ";
-  for (char& ch : text) ch = (char)std::toupper((unsigned char)ch);
-  float fs = std::clamp(size.y * 0.16f, 14.0f, 48.0f);
-  float charW = font->CalcTextSizeA(fs, FLT_MAX, 0, "W").x;
-  float total = text.size() * charW;
-  float offset = std::fmod(t * 140.0f, total);
-  float baseY = p0.y + size.y * 0.72f;
-  for (size_t i = 0; i < text.size() * 2; i++) {
-    float x = p0.x + i * charW - offset;
-    if (x < p0.x - charW) continue;
-    if (x > p1.x) break;
-    const char* ch = &text[i % text.size()];
-    float y = baseY + std::sin(t * 3.0f + x * 0.015f) * size.y * 0.1f;
-    dl->AddText(font, fs, ImVec2(x, y), hue(x * 0.002f + t * 0.3f, 255), ch, ch + 1);
-  }
-  dl->PopClipRect();
+  keygen_.scroll = text;
+  keygen_.draw(ImGui::GetWindowDrawList(), p0, size, (float)ImGui::GetTime(), ImGui::GetIO().DeltaTime, peak);
   ImGui::Dummy(size);
   ImGui::End();
 }
@@ -424,7 +447,8 @@ void App::effectsHelp() {
       {"0Dxx", "Go to row xx of the next order"},
       {"0Fxx", "Set speed (ticks per row)"},
       {"10xx", "Set waveform (0 pulse..5 wavetable; wavetable index on wavetable channels)"},
-      {"12xx", "Set duty (0-3). Noise: 1 = metallic, 3 = periodic"},
+      {"12xx", "Set duty (0-3), or the pulse width (01-FF) with fine pulse width. Noise: 1 = metallic, 3 = periodic"},
+      {"13xx", "Set the instrument filter cutoff (00-FF)"},
       {"80xx", "Panning: 00 left, 80 center, FF right"},
       {"90xx-92xx", "Sample offset (byte 0, 1, 2 of the position)"},
       {"C0xx-C3xx", "Set tick rate in Hz (C0-C3 hold the high bits)"},
@@ -501,7 +525,9 @@ void App::aboutWindow() {
   if (ImGui::Begin("About", &showAbout_, ImGuiWindowFlags_NoDocking)) {
     ImGui::Text("DATRACKARXD %s", DATRACKARXD_VERSION);
     ImGui::TextWrapped("A small tracker in the spirit of Furnace: chip waves (pulse, triangle, saw, noise, sine, "
-                       "wavetable), 4-operator FM and samples, with Furnace-style macros. Imports FUR, MOD, XM, IT and S3M.");
+                       "wavetable), 4-operator FM, SID-style filter, ring mod and sync, and samples, with Furnace-style "
+                       "macros, master effects and MIDI input. Imports FUR, DMF, FTM, MOD, XM, IT, S3M and MIDI; exports "
+                       "WAV, OGG, MIDI and standalone keygen players.");
   }
   ImGui::End();
 }

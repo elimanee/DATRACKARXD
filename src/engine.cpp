@@ -74,7 +74,16 @@ void linearPan(int p, float& l, float& r) {
 
 Engine::Engine(const Song& song, int sampleRate) : song_(song), sampleRate_(sampleRate) {
   tables();
+  reverb_.init(sampleRate);
+  delay_.init(sampleRate, 4.0f);
   reset();
+}
+
+void Engine::clearEffects() {
+  reverb_.clear();
+  delay_.clear();
+  filterL_.clear();
+  filterR_.clear();
 }
 
 void Engine::resetChannel(int c) {
@@ -90,6 +99,7 @@ void Engine::reset() {
   speeds_ = song_.speeds;
   tickRate_ = song_.tickRate;
   samplesToTick_ = 0;
+  clearEffects();
 }
 
 int Engine::speed() const {
@@ -129,13 +139,18 @@ const Instrument* Engine::instrument(int c) const {
   return &song_.instruments[i];
 }
 
-void Engine::noteOn(int c, int note, int ins) {
+void Engine::noteOn(int c, int note, int ins, int vol) {
   if (c < 0 || c >= MAX_CHANNELS) return;
   if (ins >= 0) ch_[c].ins = ins;
+  if (vol >= 0) ch_[c].vol = std::min(vol, 0x7f);
   ch_[c].portaTarget = -1;
   ch_[c].pitchSlide = 0;
   triggerNote(c, note, 0);
   updateChannel(c);
+}
+
+void Engine::resetPan(int c) {
+  if (c >= 0 && c < song_.channelCount()) linearPan(song_.channels[c].pan, ch_[c].panL, ch_[c].panR);
 }
 
 void Engine::noteOff(int c) {
@@ -270,6 +285,12 @@ void Engine::triggerNote(int c, int note, int offset) {
   s.tremPos = 0;
   s.pitchMacroAcc = 0;
   s.dutyOverride = -1;
+  s.cutoffOverride = -1;
+  if (ins && ins->pulseWidth >= 0) {
+    s.pwPos = ins->pulseWidth;
+    s.pwDir = 1;
+  }
+  if (ins && ins->filter.on && !s.filterOn) s.filter.clear();
   s.waveOverride = -1;
   s.fade = 1;
   s.lfsr = 1;
@@ -277,6 +298,7 @@ void Engine::triggerNote(int c, int note, int offset) {
   for (auto& m : s.macros) m = MacroState();
   stepMacros(c);
   s.justTriggered = true;
+  s.triggers++;
 
   if (s.type == INS_SAMPLE) {
     int idx = ins->sample;
@@ -343,6 +365,18 @@ void Engine::stepMacros(int c) {
         ms.finished = true;
       }
     }
+  }
+  // Pulse width sweep (PWM), bouncing between the ends.
+  if (ins && ins->pulseWidth >= 0 && ins->pwmSweep) {
+    s.pwPos += s.pwDir * ins->pwmSweep;
+    if (s.pwPos > 248) {
+      s.pwPos = 496 - s.pwPos;
+      s.pwDir = -s.pwDir;
+    } else if (s.pwPos < 8) {
+      s.pwPos = 16 - s.pwPos;
+      s.pwDir = -s.pwDir;
+    }
+    s.pwPos = std::clamp(s.pwPos, 8, 248);
   }
   // The pitch macro is cumulative; a finished one stops adding.
   if (s.macros[MACRO_PITCH].finished) s.macros[MACRO_PITCH].hasValue = false;
@@ -448,7 +482,8 @@ void Engine::processCell(int c, const Cell& cell, bool fromDelay) {
         if (val > 0) speeds_ = {val};
         break;
       case 0x10: s.waveOverride = val; break;
-      case 0x12: s.dutyOverride = val & 3; break;
+      case 0x12: s.dutyOverride = val; break;  // fine pulse width instruments use all of xx
+      case 0x13: s.cutoffOverride = val; break;
       case 0xE6:
         if (!playing_ || fromDelay) break;
         if (val == 0) {
@@ -647,9 +682,30 @@ void Engine::updateChannel(int c) {
   }
 
   s.duty = ins ? ins->duty : 2;
-  if (s.dutyOverride >= 0) s.duty = s.dutyOverride;
+  if (s.dutyOverride >= 0) s.duty = s.dutyOverride & 3;
   if (s.macros[MACRO_DUTY].hasValue) s.duty = s.macros[MACRO_DUTY].value & 3;
   if (c < song_.channelCount() && song_.channels[c].fixedDuty >= 0) s.duty = song_.channels[c].fixedDuty;
+
+  // Fine pulse width, filter, ring mod and sync (SID style).
+  s.pw = -1;
+  if (ins && ins->pulseWidth >= 0) {
+    int w = s.pwPos;
+    if (s.dutyOverride >= 0) w = s.dutyOverride;
+    if (s.macros[MACRO_DUTY].hasValue) w = s.macros[MACRO_DUTY].value;
+    s.pw = std::clamp(w, 1, 255) / 256.0f;
+  }
+  s.ring = ins && ins->ringMod;
+  s.sync = ins && ins->sync;
+  s.filterOn = ins && ins->filter.on;
+  if (s.filterOn) {
+    int cut = ins->filter.cutoff;
+    if (s.cutoffOverride >= 0) cut = s.cutoffOverride;
+    if (s.macros[MACRO_CUTOFF].hasValue) cut = s.macros[MACRO_CUTOFF].value;
+    float hz = 30.0f * std::pow(2.0f, std::clamp(cut, 0, 255) / 255.0f * 9.2f);
+    s.filterMode = ins->filter.mode;
+    // Q from 0.707 to 2.5, a little past the SID's own range.
+    s.filter.set(hz, 0.707f + ins->filter.resonance * (1.8f / 15.0f), (float)sampleRate_);
+  }
 
   int vol = s.vol;
   if (s.tremDepth && s.tremSpeed) vol += (int)std::lround(std::sin(s.tremPos * 2.0 * PI / 64.0) * s.tremDepth * 8);
@@ -704,7 +760,7 @@ float Engine::oscillate(ChannelState& s) {
   float out = 0;
   switch (s.wave) {
     case WAVE_PULSE: {
-      double d = DUTY_TABLE[s.duty & 3];
+      double d = s.pw >= 0 ? s.pw : DUTY_TABLE[s.duty & 3];
       out = s.phase < d ? 1.0f : -1.0f;
       out += polyBlep(s.phase, dt);
       out -= polyBlep(std::fmod(s.phase + 1.0 - d, 1.0), dt);
@@ -757,7 +813,8 @@ float Engine::oscillate(ChannelState& s) {
       break;
   }
   s.phase += dt;
-  if (s.phase >= 1.0) s.phase -= std::floor(s.phase);
+  s.wrapped = s.phase >= 1.0;
+  if (s.wrapped) s.phase -= std::floor(s.phase);
   return out;
 }
 
@@ -813,6 +870,22 @@ void Engine::render(float* out, int frames) {
   const float smooth = 1.0f - std::exp(-1.0f / (0.002f * sampleRate_));  // ~2 ms
   const float dcR = 1.0f - 20.0f / sampleRate_;
   int nch = song_.channelCount();
+  const MasterFx& fx = song_.fx;
+  // An effect switched back on starts from silence, not from an old tail.
+  if (fx.reverb && !reverbWasOn_) reverb_.clear();
+  if (fx.delay && !delayWasOn_) delay_.clear();
+  if (fx.filter && !filterWasOn_) {
+    filterL_.clear();
+    filterR_.clear();
+  }
+  reverbWasOn_ = fx.reverb;
+  delayWasOn_ = fx.delay;
+  filterWasOn_ = fx.filter;
+  if (fx.filter) {
+    float q = 0.707f + fx.resonance * 9.3f;
+    filterL_.set(fx.cutoff, q, (float)sampleRate_);
+    filterR_.set(fx.cutoff, q, (float)sampleRate_);
+  }
 
   for (int i = 0; i < frames; i++) {
     if (samplesToTick_ <= 0) {
@@ -821,7 +894,7 @@ void Engine::render(float* out, int frames) {
     }
     samplesToTick_ -= 1.0;
 
-    float l = 0, r = 0;
+    float l = 0, r = 0, rvIn = 0, dlL = 0, dlR = 0;
     for (int c = 0; c < nch; c++) {
       ChannelState& s = ch_[c];
       s.gain += (s.targetGain - s.gain) * smooth;
@@ -832,16 +905,52 @@ void Engine::render(float* out, int frames) {
         } else if (s.type == INS_FM) {
           const Instrument* ins = instrument(c);
           if (ins) v = playFM(s, *ins) * s.gain;
+        } else if (s.ring || s.sync) {
+          // The previous channel (the last one for channel 1) is the modulator.
+          const ChannelState& m = ch_[c > 0 ? c - 1 : nch - 1];
+          if (s.sync && m.wrapped) s.phase = 0;
+          v = oscillate(s);
+          if (s.ring) v *= m.phase < 0.5 ? 1.0f : -1.0f;
+          v *= s.gain;
         } else {
           v = oscillate(s) * s.gain;
         }
+        if (s.filterOn) v = s.filter.process(v, s.filterMode);
+      } else {
+        s.wrapped = false;
       }
       v *= song_.channels[c].mix;
       s.scope[scopePos_] = v;
-      if (song_.channels[c].muted) continue;
-      l += v * s.panL;
-      r += v * s.panR;
+      const ChannelInfo& info = song_.channels[c];
+      if (info.muted) continue;
+      float vl = v * s.panL, vr = v * s.panR;
+      l += vl;
+      r += vr;
+      rvIn += (vl + vr) * info.reverbSend;
+      dlL += vl * info.delaySend;
+      dlR += vr * info.delaySend;
     }
+    if (fx.delay) {
+      // The echo time follows the song: delayRows rows at the current speed.
+      int delay = (int)(fx.delayRows * speed() * sampleRate_ / std::max(tickRate_, 1.0f));
+      float el, er;
+      delay_.process(dlL, dlR, delay, fx.delayFeedback, fx.pingPong, el, er);
+      l += el * fx.delayLevel;
+      r += er * fx.delayLevel;
+      rvIn += (el + er) * 0.5f * fx.delayLevel * 0.5f;  // echoes get some reverb too
+    }
+    if (fx.reverb) {
+      float wl, wr;
+      reverb_.process(rvIn, fx.roomSize, fx.damping, wl, wr);
+      l += wl * fx.reverbLevel;
+      r += wr * fx.reverbLevel;
+    }
+    if (fx.filter) {
+      l = filterL_.process(l, fx.filterType);
+      r = filterR_.process(r, fx.filterType);
+    }
+    l *= fx.volume;
+    r *= fx.volume;
     // DC blocker, master gain and soft clip.
     float hl = l - dcPrevL_ + dcR * dcL_;
     float hr = r - dcPrevR_ + dcR * dcR_;
@@ -873,28 +982,32 @@ void put16(std::ofstream& f, uint16_t v) {
 }
 }  // namespace
 
-bool exportWav(const Song& song, const std::string& path, int sampleRate, int loops, std::string& err) {
+std::vector<float> renderSong(const Song& song, int sampleRate, int loops) {
   Engine engine(song, sampleRate);
   engine.play(0, 0);
-  std::vector<int16_t> data;
+  std::vector<float> data;
   const int chunk = 512;
   float buf[chunk * 2];
   const size_t maxFrames = (size_t)sampleRate * 60 * 20;  // 20 minutes safety limit
   size_t frames = 0;
-  auto append = [&]() {
-    for (int i = 0; i < chunk * 2; i++) data.push_back((int16_t)std::lround(std::clamp(buf[i], -1.0f, 1.0f) * 32767));
-  };
   while (engine.loops() < std::max(loops, 1) && frames < maxFrames) {
     engine.render(buf, chunk);
-    append();
+    data.insert(data.end(), buf, buf + chunk * 2);
     frames += chunk;
   }
-  // Let released notes ring out briefly.
+  // Let released notes (and the effect tails) ring out briefly.
   engine.stop();
   for (int n = 0; n < sampleRate; n += chunk) {
     engine.render(buf, chunk);
-    append();
+    data.insert(data.end(), buf, buf + chunk * 2);
   }
+  return data;
+}
+
+bool exportWav(const Song& song, const std::string& path, int sampleRate, int loops, std::string& err) {
+  std::vector<float> mix = renderSong(song, sampleRate, loops);
+  std::vector<int16_t> data(mix.size());
+  for (size_t i = 0; i < mix.size(); i++) data[i] = (int16_t)std::lround(std::clamp(mix[i], -1.0f, 1.0f) * 32767);
 
   std::ofstream f(path, std::ios::binary);
   if (!f) {

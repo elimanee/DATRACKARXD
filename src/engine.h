@@ -7,6 +7,7 @@
 #include <string>
 #include <vector>
 
+#include "effects.h"
 #include "song.h"
 
 constexpr int SCOPE_LEN = 1024;
@@ -55,6 +56,7 @@ struct ChannelState {
   MacroState macros[MACRO_COUNT];
   int pitchMacroAcc = 0;
   bool justTriggered = false;  // macros already stepped this tick
+  uint32_t triggers = 0;       // counts note starts (for MIDI export)
 
   // Values computed each tick and consumed by the oscillators.
   double freq = 0;
@@ -78,6 +80,14 @@ struct ChannelState {
   bool smpPlaying = false;
   double smpStep = 0;
 
+  // SID-style extras.
+  SVFilter filter;
+  bool filterOn = false, ring = false, sync = false, wrapped = false;
+  int filterMode = 0;
+  int cutoffOverride = -1;  // 13xx
+  float pw = -1;            // fine pulse width (0..1), -1 = duty steps
+  int pwPos = 128, pwDir = 1;
+
   // FM.
   FMOpState fm[4];
   float fbHist[2] = {0, 0};
@@ -99,8 +109,12 @@ class Engine {
   void reset();  // silence everything
 
   // Live note preview, used while editing.
-  void noteOn(int ch, int note, int ins);
+  // vol: 00..7F for the channel volume, -1 to keep it.
+  void noteOn(int ch, int note, int ins, int vol = -1);
   void noteOff(int ch);
+  void resetPan(int ch);
+  // Runs one tick without rendering audio (MIDI export).
+  void tick() { doTick(); }  // back to the channel's default panning
 
   // Renders interleaved stereo float frames.
   void render(float* out, int frames);
@@ -137,6 +151,11 @@ class Engine {
   double samplesToTick_ = 0;
 
   float dcL_ = 0, dcR_ = 0, dcPrevL_ = 0, dcPrevR_ = 0;
+  Reverb reverb_;
+  StereoDelay delay_;
+  SVFilter filterL_, filterR_;
+  bool reverbWasOn_ = false, delayWasOn_ = false, filterWasOn_ = false;
+  void clearEffects();
   std::array<float, SCOPE_LEN> master_{};
   int scopePos_ = 0;
 
@@ -159,4 +178,8 @@ class Engine {
 };
 
 // Renders the song from the start to a 16-bit stereo WAV file.
+// Plays the song n times (plus one second of tail) to interleaved stereo.
+std::vector<float> renderSong(const Song& song, int sampleRate, int loops);
 bool exportWav(const Song& song, const std::string& path, int sampleRate, int loops, std::string& err);
+// Ogg Vorbis, quality 0..10 (5 is about 160 kbit/s).
+bool exportOgg(const Song& song, const std::string& path, int sampleRate, int loops, int quality, std::string& err);
