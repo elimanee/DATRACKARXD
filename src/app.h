@@ -51,7 +51,7 @@ struct PRNote {
 
 enum class PRDrag { None, Move, Resize, Select, Erase, Velocity, Key };
 
-enum class FileDialogMode { None, Open, Save, ExportWav, LoadSample, LoadInstrument, SaveInstrument, ExportMidi };
+enum class FileDialogMode { None, Open, Save, ExportWav, LoadSample, LoadInstrument, SaveInstrument, ExportMidi, ExportOgg };
 enum class PendingAction { None, New, Open, Demo, Quit };
 
 class App {
@@ -151,6 +151,7 @@ class App {
   std::string dialogDir_;
   char dialogName_[256] = {};
   int exportLoops_ = 1;
+  int oggQuality_ = 6;
 
   PendingAction pending_ = PendingAction::None;
   bool confirmRequest_ = false;

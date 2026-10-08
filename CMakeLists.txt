@@ -71,11 +71,53 @@ else()
   endif()
 endif()
 
+# --- libogg + libvorbis (OGG export): the sources are built directly, as
+# their own CMake files want an installed Ogg ---
+FetchContent_Declare(ogg
+  GIT_REPOSITORY https://github.com/xiph/ogg.git
+  GIT_TAG v1.3.6
+  GIT_SHALLOW TRUE
+  SOURCE_SUBDIR no-cmake)
+FetchContent_Declare(vorbis
+  GIT_REPOSITORY https://github.com/xiph/vorbis.git
+  GIT_TAG v1.3.7
+  GIT_SHALLOW TRUE
+  SOURCE_SUBDIR no-cmake)
+FetchContent_MakeAvailable(ogg vorbis)
+set(OGG_CONFIG_DIR ${CMAKE_BINARY_DIR}/ogg_config)
+file(WRITE ${OGG_CONFIG_DIR}/ogg/config_types.h
+  "#ifndef __CONFIG_TYPES_H__\n#define __CONFIG_TYPES_H__\n#include <stdint.h>\n"
+  "typedef int16_t ogg_int16_t;\ntypedef uint16_t ogg_uint16_t;\n"
+  "typedef int32_t ogg_int32_t;\ntypedef uint32_t ogg_uint32_t;\n"
+  "typedef int64_t ogg_int64_t;\ntypedef uint64_t ogg_uint64_t;\n#endif\n")
+set(VORBIS_LIB_SOURCES mdct smallft block envelope window lsp lpc analysis synthesis psy info
+  floor1 floor0 res0 mapping0 registry codebook sharedbook lookup bitrate vorbisenc)
+list(TRANSFORM VORBIS_LIB_SOURCES PREPEND ${vorbis_SOURCE_DIR}/lib/)
+list(TRANSFORM VORBIS_LIB_SOURCES APPEND .c)
+add_library(vorbisenc_static STATIC
+  ${ogg_SOURCE_DIR}/src/bitwise.c
+  ${ogg_SOURCE_DIR}/src/framing.c
+  ${VORBIS_LIB_SOURCES})
+target_include_directories(vorbisenc_static
+  PUBLIC ${ogg_SOURCE_DIR}/include ${OGG_CONFIG_DIR} ${vorbis_SOURCE_DIR}/include
+  PRIVATE ${vorbis_SOURCE_DIR}/lib)
+if(MSVC)
+  target_compile_definitions(vorbisenc_static PRIVATE _CRT_SECURE_NO_WARNINGS _USE_MATH_DEFINES)
+  target_compile_options(vorbisenc_static PRIVATE /W0)
+else()
+  target_compile_options(vorbisenc_static PRIVATE -w)
+  find_library(MATH_LIBRARY m)
+  if(MATH_LIBRARY)
+    target_link_libraries(vorbisenc_static PUBLIC ${MATH_LIBRARY})
+  endif()
+endif()
+
 # --- the tracker ---
 add_executable(datrackarxd
   src/main.cpp
   src/song.cpp
   src/engine.cpp
+  src/export.cpp
   src/effects.cpp
   src/demo.cpp
   src/import.cpp
@@ -90,7 +132,7 @@ add_executable(datrackarxd
   src/ui_instrument.cpp
   src/ui_windows.cpp
   src/theme.cpp)
-target_link_libraries(datrackarxd PRIVATE imgui rtmidi)
+target_link_libraries(datrackarxd PRIVATE imgui rtmidi vorbisenc_static)
 target_compile_definitions(datrackarxd PRIVATE DATRACKARXD_VERSION="${PROJECT_VERSION}")
 if(TARGET SDL2::SDL2main)
   target_link_libraries(datrackarxd PRIVATE SDL2::SDL2main)

@@ -982,28 +982,32 @@ void put16(std::ofstream& f, uint16_t v) {
 }
 }  // namespace
 
-bool exportWav(const Song& song, const std::string& path, int sampleRate, int loops, std::string& err) {
+std::vector<float> renderSong(const Song& song, int sampleRate, int loops) {
   Engine engine(song, sampleRate);
   engine.play(0, 0);
-  std::vector<int16_t> data;
+  std::vector<float> data;
   const int chunk = 512;
   float buf[chunk * 2];
   const size_t maxFrames = (size_t)sampleRate * 60 * 20;  // 20 minutes safety limit
   size_t frames = 0;
-  auto append = [&]() {
-    for (int i = 0; i < chunk * 2; i++) data.push_back((int16_t)std::lround(std::clamp(buf[i], -1.0f, 1.0f) * 32767));
-  };
   while (engine.loops() < std::max(loops, 1) && frames < maxFrames) {
     engine.render(buf, chunk);
-    append();
+    data.insert(data.end(), buf, buf + chunk * 2);
     frames += chunk;
   }
-  // Let released notes ring out briefly.
+  // Let released notes (and the effect tails) ring out briefly.
   engine.stop();
   for (int n = 0; n < sampleRate; n += chunk) {
     engine.render(buf, chunk);
-    append();
+    data.insert(data.end(), buf, buf + chunk * 2);
   }
+  return data;
+}
+
+bool exportWav(const Song& song, const std::string& path, int sampleRate, int loops, std::string& err) {
+  std::vector<float> mix = renderSong(song, sampleRate, loops);
+  std::vector<int16_t> data(mix.size());
+  for (size_t i = 0; i < mix.size(); i++) data[i] = (int16_t)std::lround(std::clamp(mix[i], -1.0f, 1.0f) * 32767);
 
   std::ofstream f(path, std::ios::binary);
   if (!f) {

@@ -18,7 +18,7 @@ static int usage() {
       "DATRACKARXD " DATRACKARXD_VERSION "\n"
       "usage:\n"
       "  datrackarxd [song.dtk]                      open the tracker\n"
-      "  datrackarxd --export song out.wav [n]       render n loops to WAV (dtk/fur/mod/xm/it/s3m)\n"
+      "  datrackarxd --export song out.wav [n]       render n loops to WAV, or OGG with out.ogg\n"
       "  datrackarxd --convert module out.dtk        import a module (or .mid) and save it as .dtk\n"
       "  datrackarxd --export-midi song out.mid [n]  write the song as a MIDI file\n"
       "  datrackarxd --export-stems song prefix      one WAV per channel (prefix_01.wav...)\n"
@@ -71,7 +71,9 @@ static int commandLine(int argc, char** argv) {
       return 1;
     }
     int loops = argc >= 5 ? std::atoi(argv[4]) : 1;
-    if (!exportWav(song, argv[3], 44100, loops, err)) {
+    std::string out = argv[3];
+    bool ogg = out.size() > 4 && out.compare(out.size() - 4, 4, ".ogg") == 0;
+    if (ogg ? !exportOgg(song, out, 44100, loops, 6, err) : !exportWav(song, out, 44100, loops, err)) {
       std::fprintf(stderr, "%s\n", err.c_str());
       return 1;
     }

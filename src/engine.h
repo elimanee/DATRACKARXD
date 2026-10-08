@@ -178,4 +178,8 @@ class Engine {
 };
 
 // Renders the song from the start to a 16-bit stereo WAV file.
+// Plays the song n times (plus one second of tail) to interleaved stereo.
+std::vector<float> renderSong(const Song& song, int sampleRate, int loops);
 bool exportWav(const Song& song, const std::string& path, int sampleRate, int loops, std::string& err);
+// Ogg Vorbis, quality 0..10 (5 is about 160 kbit/s).
+bool exportOgg(const Song& song, const std::string& path, int sampleRate, int loops, int quality, std::string& err);

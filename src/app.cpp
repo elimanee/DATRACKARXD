@@ -220,6 +220,7 @@ void App::openFileDialog(FileDialogMode mode) {
   if (mode == FileDialogMode::Save) base += ".dtk";
   if (mode == FileDialogMode::ExportWav) base += ".wav";
   if (mode == FileDialogMode::ExportMidi) base += ".mid";
+  if (mode == FileDialogMode::ExportOgg) base += ".ogg";
   if (mode == FileDialogMode::LoadInstrument) base.clear();
   if (mode == FileDialogMode::SaveInstrument && curIns_ < (int)song_.instruments.size()) base = song_.instruments[curIns_].name + ".dti";
   std::snprintf(dialogName_, sizeof(dialogName_), "%s", base.c_str());
@@ -232,6 +233,7 @@ void App::fileDialog() {
                       : dialogMode_ == FileDialogMode::LoadInstrument ? "Load instrument###filedlg"
                       : dialogMode_ == FileDialogMode::SaveInstrument ? "Save instrument###filedlg"
                       : dialogMode_ == FileDialogMode::ExportMidi ? "Export MIDI###filedlg"
+                      : dialogMode_ == FileDialogMode::ExportOgg ? "Export OGG###filedlg"
                                                                  : "Export WAV###filedlg";
   if (dialogOpenRequest_) {
     ImGui::OpenPopup("###filedlg");
@@ -246,6 +248,7 @@ void App::fileDialog() {
   else if (dialogMode_ == FileDialogMode::LoadInstrument) exts = instrumentFileExtensions();
   else if (dialogMode_ == FileDialogMode::SaveInstrument) exts = {".dti"};
   else if (dialogMode_ == FileDialogMode::ExportMidi) exts = {".mid"};
+  else if (dialogMode_ == FileDialogMode::ExportOgg) exts = {".ogg"};
   else exts = {".wav"};
   const std::string& ext = exts[0];
   auto matches = [&](const fs::path& p) {
@@ -303,11 +306,19 @@ void App::fileDialog() {
   ImGui::SetNextItemWidth(-200);
   if (ImGui::IsWindowAppearing()) ImGui::SetKeyboardFocusHere();
   if (ImGui::InputText("##name", dialogName_, sizeof(dialogName_), ImGuiInputTextFlags_EnterReturnsTrue)) accept = true;
-  if (dialogMode_ == FileDialogMode::ExportWav || dialogMode_ == FileDialogMode::ExportMidi) {
+  if (dialogMode_ == FileDialogMode::ExportWav || dialogMode_ == FileDialogMode::ExportMidi ||
+      dialogMode_ == FileDialogMode::ExportOgg) {
     ImGui::SameLine();
     ImGui::SetNextItemWidth(80);
     ImGui::InputInt("loops", &exportLoops_);
     exportLoops_ = std::clamp(exportLoops_, 1, 16);
+  }
+  if (dialogMode_ == FileDialogMode::ExportOgg) {
+    ImGui::SetNextItemWidth(200);
+    ImGui::SliderInt("Quality", &oggQuality_, 0, 10);
+    ImGui::SameLine();
+    static const int kbps[11] = {64, 80, 96, 112, 128, 160, 192, 224, 256, 320, 500};
+    ImGui::TextDisabled("about %d kbit/s", kbps[std::clamp(oggQuality_, 0, 10)]);
   }
   bool opening = dialogMode_ == FileDialogMode::Open || dialogMode_ == FileDialogMode::LoadSample ||
                  dialogMode_ == FileDialogMode::LoadInstrument;
@@ -360,6 +371,12 @@ void App::fileDialog() {
       } else {
         setStatus("Instrument save failed: " + err);
       }
+    } else if (dialogMode_ == FileDialogMode::ExportOgg) {
+      if (exportOgg(song_, path, 44100, exportLoops_, oggQuality_, err))
+        setStatus("Exported " + path);
+      else
+        setStatus("OGG export failed: " + err);
+      cancel = true;
     } else if (dialogMode_ == FileDialogMode::ExportMidi) {
       if (exportMIDI(song_, path, exportLoops_, err))
         setStatus("Exported " + path);
@@ -396,6 +413,7 @@ void App::menuBar() {
     if (ImGui::MenuItem("Save as...", "Ctrl+Shift+S")) saveSong(true);
     ImGui::Separator();
     if (ImGui::MenuItem("Export WAV...")) openFileDialog(FileDialogMode::ExportWav);
+    if (ImGui::MenuItem("Export OGG...")) openFileDialog(FileDialogMode::ExportOgg);
     if (ImGui::MenuItem("Export MIDI...")) openFileDialog(FileDialogMode::ExportMidi);
     if (ImGui::MenuItem("Load demo song")) askAction(PendingAction::Demo);
     ImGui::Separator();
