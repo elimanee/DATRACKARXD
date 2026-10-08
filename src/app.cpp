@@ -409,7 +409,7 @@ void App::menuBar() {
   ImGui::MenuItem("Loop pattern", nullptr, &engine_->loopPattern);
   ImGui::MenuItem("Follow", nullptr, &follow_);
   ImGui::PushStyleColor(ImGuiCol_Text, editMode_ ? ImVec4(1, 0.4f, 0.4f, 1) : ImGui::GetStyleColorVec4(ImGuiCol_Text));
-  ImGui::MenuItem("Edit", "Space", &editMode_);
+  ImGui::MenuItem("Record", "Space", &editMode_);
   ImGui::PopStyleColor();
   ImGui::Separator();
   float bpm = song_.tickRate * 60.0f / (std::max(engine_->speed(), 1) * std::max(song_.highlight1, 1));

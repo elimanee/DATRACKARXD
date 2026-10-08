@@ -462,7 +462,7 @@ void App::keysHelp() {
       {"Q 2 W 3 E R 5 T 6 Y 7 U I", "Notes, octave + 1"},
       {"1 or `", "Note off"},
       {"0-9 A-F", "Hex values (instrument, volume, effects)"},
-      {"Space", "Toggle edit mode"},
+      {"Space", "Toggle record (edit) mode"},
       {"Enter / Shift+Enter", "Play/stop from the order start / from the cursor"},
       {"F5 / F6 / F8", "Play song / play from cursor / stop"},
       {"Arrows, PgUp/PgDn, Home/End", "Move"},
