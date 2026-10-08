@@ -9,6 +9,7 @@
 #include <vector>
 
 #include "engine.h"
+#include "midi.h"
 #include "song.h"
 
 struct KeyEvent {
@@ -95,6 +96,17 @@ class App {
   std::vector<KeyEvent> keys_;
   std::map<SDL_Scancode, int> jamming_;  // held key -> channel
 
+  // MIDI keyboard.
+  MidiInput midi_;
+  std::string midiPort_;               // port to reopen at startup
+  std::vector<std::string> midiPorts_; // last scan
+  bool midiVelocity_ = true;           // velocity -> volume column
+  struct MidiHeld {
+    int ch, order, row;  // where the note was written (row -1 = not written)
+  };
+  std::map<int, MidiHeld> midiHeld_;   // held MIDI note -> channel
+  bool midiChord_ = false;             // a recorded chord is waiting for all keys up
+
   std::string filePath_;
   bool dirty_ = false;
   std::string status_;
@@ -156,6 +168,10 @@ class App {
   void defaultLayout(unsigned int dockId);
   void togglePlay(bool fromCursor);
   void afterSongReplaced();
+  void midiMenu();
+  void midiEvents();
+  void midiNoteOn(int key, int velocity);
+  void midiNoteOff(int key);
 
   // ui_pattern.cpp
   void patternWindow();
@@ -165,7 +181,7 @@ class App {
   void moveRows(int d);
   void setCursorFromPlayback();
   Cell* cursorCell(bool create);
-  void pushUndo(int ch0, int ch1);
+  void pushUndo(int ch0, int ch1, int order = -1);  // order -1: the cursor's
   void pushFullUndo();
   void commitMetaEdit();
   void resetUndo();

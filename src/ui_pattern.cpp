@@ -175,15 +175,16 @@ void App::moveCursor(int dRow, int dCol) {
 // Undo
 // ---------------------------------------------------------------------------
 
-void App::pushUndo(int ch0, int ch1) {
+void App::pushUndo(int ch0, int ch1, int order) {
   commitMetaEdit();
+  if (order < 0) order = curOrder_;
   UndoStep step;
-  step.order = curOrder_;
+  step.order = order;
   step.row = curRow_;
   step.ch = curCh_;
   step.col = curCol_;
   for (int c = std::max(ch0, 0); c <= std::min(ch1, song_.channelCount() - 1); c++) {
-    int pat = song_.orders[curOrder_][c];
+    int pat = song_.orders[order][c];
     const Pattern* p = song_.pattern(c, pat);
     step.entries.push_back({c, pat, p ? p->rows : std::vector<Cell>()});
   }

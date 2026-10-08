@@ -129,9 +129,10 @@ const Instrument* Engine::instrument(int c) const {
   return &song_.instruments[i];
 }
 
-void Engine::noteOn(int c, int note, int ins) {
+void Engine::noteOn(int c, int note, int ins, int vol) {
   if (c < 0 || c >= MAX_CHANNELS) return;
   if (ins >= 0) ch_[c].ins = ins;
+  if (vol >= 0) ch_[c].vol = std::min(vol, 0x7f);
   ch_[c].portaTarget = -1;
   ch_[c].pitchSlide = 0;
   triggerNote(c, note, 0);

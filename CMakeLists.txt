@@ -45,6 +45,32 @@ else()
   target_link_libraries(imgui PUBLIC SDL2::SDL2)
 endif()
 
+# --- RtMidi: only RtMidi.cpp is built, with the platform's MIDI API ---
+FetchContent_Declare(rtmidi
+  GIT_REPOSITORY https://github.com/thestk/rtmidi.git
+  GIT_TAG 6.0.0
+  GIT_SHALLOW TRUE
+  SOURCE_SUBDIR no-cmake)  # don't run RtMidi's own CMakeLists
+FetchContent_MakeAvailable(rtmidi)
+add_library(rtmidi STATIC ${rtmidi_SOURCE_DIR}/RtMidi.cpp)
+target_include_directories(rtmidi PUBLIC ${rtmidi_SOURCE_DIR})
+if(WIN32)
+  target_compile_definitions(rtmidi PRIVATE __WINDOWS_MM__)
+  target_link_libraries(rtmidi PUBLIC winmm)
+elseif(APPLE)
+  target_compile_definitions(rtmidi PRIVATE __MACOSX_CORE__)
+  target_link_libraries(rtmidi PUBLIC "-framework CoreMIDI" "-framework CoreAudio" "-framework CoreFoundation")
+else()
+  find_package(ALSA)
+  find_package(Threads REQUIRED)
+  if(ALSA_FOUND)
+    target_compile_definitions(rtmidi PRIVATE __LINUX_ALSA__)
+    target_link_libraries(rtmidi PUBLIC ALSA::ALSA Threads::Threads)
+  else()
+    message(WARNING "ALSA not found: building without MIDI input")
+  endif()
+endif()
+
 # --- the tracker ---
 add_executable(datrackarxd
   src/main.cpp
@@ -55,13 +81,14 @@ add_executable(datrackarxd
   src/import_tracker.cpp
   src/import_fur.cpp
   src/inflate.cpp
+  src/midi.cpp
   src/app.cpp
   src/ui_pattern.cpp
   src/ui_pianoroll.cpp
   src/ui_instrument.cpp
   src/ui_windows.cpp
   src/theme.cpp)
-target_link_libraries(datrackarxd PRIVATE imgui)
+target_link_libraries(datrackarxd PRIVATE imgui rtmidi)
 target_compile_definitions(datrackarxd PRIVATE DATRACKARXD_VERSION="${PROJECT_VERSION}")
 if(TARGET SDL2::SDL2main)
   target_link_libraries(datrackarxd PRIVATE SDL2::SDL2main)

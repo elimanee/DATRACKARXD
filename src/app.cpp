@@ -50,10 +50,14 @@ void App::loadSettings() {
       if (k == "scroller") showScroller_ = std::stoi(v) != 0;
       if (k == "octave") octave_ = std::clamp(std::stoi(v), 0, 8);
       if (k == "dir" && fs::is_directory(v)) dialogDir_ = v;
+      if (k == "midi") midiPort_ = v;
+      if (k == "midivelocity") midiVelocity_ = std::stoi(v) != 0;
     } catch (...) {
     }
   }
   setTheme(th);
+  // The keyboard may be unplugged: keep the name so it reconnects next time.
+  if (!midiPort_.empty() && midi_.open(midiPort_)) setStatus("MIDI input: " + midiPort_);
 }
 
 void App::saveSettings() {
@@ -62,6 +66,8 @@ void App::saveSettings() {
   f << "scroller=" << (showScroller_ ? 1 : 0) << "\n";
   f << "octave=" << octave_ << "\n";
   f << "dir=" << dialogDir_ << "\n";
+  f << "midi=" << midiPort_ << "\n";
+  f << "midivelocity=" << (midiVelocity_ ? 1 : 0) << "\n";
 }
 
 void App::openAudio() {
@@ -96,6 +102,8 @@ std::string App::windowTitle() const {
 
 void App::afterSongReplaced() {
   engine_->reset();
+  midiHeld_.clear();
+  midiChord_ = false;
   curOrder_ = curRow_ = curCh_ = curCol_ = 0;
   curIns_ = 0;
   hasSel_ = false;
@@ -392,6 +400,7 @@ void App::menuBar() {
     if (ImGui::MenuItem("Reset layout")) layoutDone_ = false;
     ImGui::EndMenu();
   }
+  midiMenu();
   if (ImGui::BeginMenu("Help")) {
     ImGui::MenuItem("Effects", nullptr, &showEffects_);
     ImGui::MenuItem("Keyboard", nullptr, &showKeys_);
@@ -420,6 +429,128 @@ void App::menuBar() {
     ImGui::TextUnformatted(status_.c_str());
   }
   ImGui::EndMainMenuBar();
+}
+
+// ---------------------------------------------------------------------------
+// MIDI keyboard
+// ---------------------------------------------------------------------------
+
+void App::midiMenu() {
+  if (!ImGui::BeginMenu("MIDI")) return;
+  if (ImGui::IsWindowAppearing()) midiPorts_ = midi_.ports();
+  if (ImGui::MenuItem("None", nullptr, !midi_.isOpen())) {
+    midi_.close();
+    midiPort_.clear();
+  }
+  for (const std::string& p : midiPorts_) {
+    if (ImGui::MenuItem(p.c_str(), nullptr, midi_.portName() == p) && midi_.portName() != p) {
+      if (midi_.open(p)) {
+        midiPort_ = p;
+        setStatus("MIDI input: " + p);
+      } else {
+        setStatus(midi_.error());
+      }
+    }
+  }
+  if (midiPorts_.empty()) ImGui::TextDisabled("%s", midi_.error().empty() ? "No MIDI input found" : midi_.error().c_str());
+  ImGui::Separator();
+  if (ImGui::MenuItem("Rescan")) midiPorts_ = midi_.ports();
+  ImGui::MenuItem("Velocity -> volume", nullptr, &midiVelocity_);
+  ImGui::EndMenu();
+}
+
+void App::midiEvents() {
+  for (const MidiMessage& m : midi_.drain()) {
+    int type = m.status & 0xf0;
+    if (type == 0x90 && m.data2 > 0)
+      midiNoteOn(m.data1, m.data2);
+    else if (type == 0x80 || type == 0x90)
+      midiNoteOff(m.data1);
+    else if (type == 0xc0 && m.data1 < song_.instruments.size())
+      curIns_ = m.data1;  // program change picks the instrument
+  }
+}
+
+// MIDI note 60 (middle C) is C-4, like the computer keyboard at octave 4.
+// Held notes spread over the piano roll's voice channels. In Record mode
+// they are written at the cursor (stopped: the cursor moves on once every
+// key is up) or at the playing row (live: key up writes a note off).
+void App::midiNoteOn(int key, int velocity) {
+  if (midiHeld_.count(key)) midiNoteOff(key);
+  int nch = song_.channelCount();
+  if (curCh_ >= nch) return;
+  int note = std::clamp(key - 12, 0, 119);
+  int voices = std::clamp(prVoices_, 1, nch - curCh_);
+  auto used = [&](int c) {
+    for (auto& h : midiHeld_)
+      if (h.second.ch == c) return true;
+    return false;
+  };
+  int ch = -1;
+  for (int c = curCh_; c < curCh_ + voices && ch < 0; c++)
+    if (!used(c)) ch = c;
+  if (ch < 0) {  // all voices busy: take over the last one
+    ch = curCh_ + voices - 1;
+    for (auto it = midiHeld_.begin(); it != midiHeld_.end();)
+      it = it->second.ch == ch ? midiHeld_.erase(it) : std::next(it);
+  }
+  int vol = midiVelocity_ ? std::clamp(velocity, 1, 127) : -1;
+  engine_->noteOn(ch, note, curIns_, vol);
+  MidiHeld held{ch, -1, -1};
+
+  if (editMode_) {
+    bool live = engine_->playing();
+    int order = live ? engine_->order() : curOrder_;
+    int row = live ? engine_->row() : curRow_;
+    bool chordStep = !live && midiChord_ && !undo_.empty() && undo_.back().kind == UndoStep::Patterns;
+    if (chordStep) {
+      // Later notes of a chord join the undo step of the first one.
+      UndoStep& step = undo_.back();
+      bool have = false;
+      for (auto& e : step.entries) have |= e.ch == ch;
+      if (!have) {
+        int pat = song_.orders[order][ch];
+        const Pattern* p = song_.pattern(ch, pat);
+        step.entries.push_back({ch, pat, p ? p->rows : std::vector<Cell>()});
+      }
+    } else {
+      pushUndo(ch, ch, order);
+    }
+    Cell* c = song_.cell(ch, order, row, true);
+    c->note = (int16_t)note;
+    c->ins = (int16_t)curIns_;
+    if (vol >= 0) c->vol = (int16_t)vol;
+    dirty_ = true;
+    held = {ch, order, row};
+    if (!live) midiChord_ = true;
+  }
+  midiHeld_[key] = held;
+}
+
+void App::midiNoteOff(int key) {
+  auto it = midiHeld_.find(key);
+  if (it == midiHeld_.end()) return;
+  MidiHeld h = it->second;
+  midiHeld_.erase(it);
+  engine_->noteOff(h.ch);
+
+  if (h.row >= 0 && editMode_ && engine_->playing() && h.ch < song_.channelCount()) {
+    int order = engine_->order(), row = engine_->row();
+    if (order == h.order && row == h.row) row++;  // released within its own row
+    if (row < song_.patternLength && order < (int)song_.orders.size()) {
+      Cell* c = song_.cell(h.ch, order, row, false);
+      if (!c || c->note == NOTE_EMPTY) {
+        pushUndo(h.ch, h.ch, order);
+        c = song_.cell(h.ch, order, row, true);
+        c->note = NOTE_OFF;
+        c->ins = -1;
+      }
+    }
+  }
+  if (midiChord_ && midiHeld_.empty()) {
+    midiChord_ = false;
+    if (!engine_->playing()) moveRows(editStep_);
+  }
 }
 
 void App::defaultLayout(unsigned int dockId) {
@@ -502,6 +633,7 @@ void App::handleKeys() {
 }
 
 void App::frame() {
+  midiEvents();
   if (engine_->playing() && follow_) setCursorFromPlayback();
 
   menuBar();

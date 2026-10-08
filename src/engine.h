@@ -99,7 +99,8 @@ class Engine {
   void reset();  // silence everything
 
   // Live note preview, used while editing.
-  void noteOn(int ch, int note, int ins);
+  // vol: 00..7F for the channel volume, -1 to keep it.
+  void noteOn(int ch, int note, int ins, int vol = -1);
   void noteOff(int ch);
 
   // Renders interleaved stereo float frames.
