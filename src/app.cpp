@@ -12,6 +12,7 @@
 #include "demo.h"
 #include "import.h"
 #include "midifile.h"
+#include "payload.h"
 #include "theme.h"
 
 namespace fs = std::filesystem;
@@ -221,9 +222,36 @@ void App::openFileDialog(FileDialogMode mode) {
   if (mode == FileDialogMode::ExportWav) base += ".wav";
   if (mode == FileDialogMode::ExportMidi) base += ".mid";
   if (mode == FileDialogMode::ExportOgg) base += ".ogg";
+#ifdef _WIN32
+  if (mode == FileDialogMode::ExportPlayer) base += ".exe";
+#endif
   if (mode == FileDialogMode::LoadInstrument) base.clear();
   if (mode == FileDialogMode::SaveInstrument && curIns_ < (int)song_.instruments.size()) base = song_.instruments[curIns_].name + ".dti";
   std::snprintf(dialogName_, sizeof(dialogName_), "%s", base.c_str());
+}
+
+// Texts of the keygen player, then the file dialog for where to write it.
+void App::playerExportPopup() {
+  if (playerPopupRequest_) {
+    ImGui::OpenPopup("Export keygen player");
+    playerPopupRequest_ = false;
+  }
+  ImGui::SetNextWindowSize(ImVec2(520, 0), ImGuiCond_Appearing);
+  if (!ImGui::BeginPopupModal("Export keygen player", nullptr)) return;
+  ImGui::TextWrapped("A standalone program that plays this song with the keygen intro: starfield, logo and scroller. "
+                     "It runs on its own, without DATRACKARXD.");
+  ImGui::Separator();
+  ImGui::InputText("Logo", playerLogo_, sizeof(playerLogo_));
+  ImGui::InputText("Window title", playerTitle_, sizeof(playerTitle_));
+  ImGui::TextUnformatted("Scroller text");
+  ImGui::InputTextMultiline("##scroll", playerScroll_, sizeof(playerScroll_), ImVec2(-1, 90));
+  if (ImGui::Button("Export...", ImVec2(120, 0))) {
+    ImGui::CloseCurrentPopup();
+    openFileDialog(FileDialogMode::ExportPlayer);
+  }
+  ImGui::SameLine();
+  if (ImGui::Button("Cancel", ImVec2(120, 0)) || ImGui::IsKeyPressed(ImGuiKey_Escape)) ImGui::CloseCurrentPopup();
+  ImGui::EndPopup();
 }
 
 void App::fileDialog() {
@@ -234,6 +262,7 @@ void App::fileDialog() {
                       : dialogMode_ == FileDialogMode::SaveInstrument ? "Save instrument###filedlg"
                       : dialogMode_ == FileDialogMode::ExportMidi ? "Export MIDI###filedlg"
                       : dialogMode_ == FileDialogMode::ExportOgg ? "Export OGG###filedlg"
+                      : dialogMode_ == FileDialogMode::ExportPlayer ? "Export keygen player###filedlg"
                                                                  : "Export WAV###filedlg";
   if (dialogOpenRequest_) {
     ImGui::OpenPopup("###filedlg");
@@ -249,6 +278,11 @@ void App::fileDialog() {
   else if (dialogMode_ == FileDialogMode::SaveInstrument) exts = {".dti"};
   else if (dialogMode_ == FileDialogMode::ExportMidi) exts = {".mid"};
   else if (dialogMode_ == FileDialogMode::ExportOgg) exts = {".ogg"};
+#ifdef _WIN32
+  else if (dialogMode_ == FileDialogMode::ExportPlayer) exts = {".exe"};
+#else
+  else if (dialogMode_ == FileDialogMode::ExportPlayer) exts = {""};
+#endif
   else exts = {".wav"};
   const std::string& ext = exts[0];
   auto matches = [&](const fs::path& p) {
@@ -371,6 +405,17 @@ void App::fileDialog() {
       } else {
         setStatus("Instrument save failed: " + err);
       }
+    } else if (dialogMode_ == FileDialogMode::ExportPlayer) {
+      PlayerPayload p;
+      p.song = song_.toText();
+      p.logo = playerLogo_;
+      p.title = playerTitle_;
+      p.scroll = playerScroll_;
+      if (writePlayer(path, p, err))
+        setStatus("Exported player " + path);
+      else
+        setStatus("Player export failed: " + err);
+      cancel = true;
     } else if (dialogMode_ == FileDialogMode::ExportOgg) {
       if (exportOgg(song_, path, 44100, exportLoops_, oggQuality_, err))
         setStatus("Exported " + path);
@@ -415,6 +460,15 @@ void App::menuBar() {
     if (ImGui::MenuItem("Export WAV...")) openFileDialog(FileDialogMode::ExportWav);
     if (ImGui::MenuItem("Export OGG...")) openFileDialog(FileDialogMode::ExportOgg);
     if (ImGui::MenuItem("Export MIDI...")) openFileDialog(FileDialogMode::ExportMidi);
+    if (ImGui::MenuItem("Export keygen player...")) {
+      std::snprintf(playerTitle_, sizeof(playerTitle_), "%s", song_.name.c_str());
+      if (!playerScroll_[0]) {
+        std::string t = "Now playing: " + song_.name + (song_.author.empty() ? "" : "  by " + song_.author) +
+                        "   ***   made with DATRACKARXD   ***   greetings to all trackers";
+        std::snprintf(playerScroll_, sizeof(playerScroll_), "%s", t.c_str());
+      }
+      playerPopupRequest_ = true;
+    }
     if (ImGui::MenuItem("Load demo song")) askAction(PendingAction::Demo);
     ImGui::Separator();
     if (ImGui::MenuItem("Quit")) requestQuit();
@@ -717,6 +771,7 @@ void App::frame() {
   if (showKeys_) keysHelp();
   if (showAbout_) aboutWindow();
 
+  playerExportPopup();
   fileDialog();
   confirmPopup();
   handleKeys();

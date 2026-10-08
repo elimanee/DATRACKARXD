@@ -133,7 +133,10 @@ add_executable(datrackarxd
   src/ui_pianoroll.cpp
   src/ui_instrument.cpp
   src/ui_windows.cpp
-  src/theme.cpp)
+  src/theme.cpp
+  src/keygen_fx.cpp
+  src/payload.cpp
+  src/player.cpp)
 target_link_libraries(datrackarxd PRIVATE imgui rtmidi vorbisenc_static)
 target_compile_definitions(datrackarxd PRIVATE DATRACKARXD_VERSION="${PROJECT_VERSION}")
 if(TARGET SDL2::SDL2main)

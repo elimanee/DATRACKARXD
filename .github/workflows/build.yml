@@ -70,6 +70,14 @@ jobs:
           "$exe" --export-demo demo.wav
           "$exe" --convert songs/demo.dtk check.dtk
           test -s demo.wav
+          "$exe" --export songs/demo.dtk demo.ogg
+          "$exe" --export-midi songs/demo.dtk demo.mid
+          test -s demo.ogg && test -s demo.mid
+          # An exported keygen player must start and play on every OS.
+          player=player
+          [ "${{ runner.os }}" = "Windows" ] && player=player.exe
+          "$exe" --export-player songs/demo.dtk "$player"
+          "./$player" --selftest
           cp "$exe" .
 
       - name: Package

@@ -9,6 +9,7 @@
 #include <vector>
 
 #include "engine.h"
+#include "keygen_fx.h"
 #include "midi.h"
 #include "song.h"
 
@@ -51,7 +52,7 @@ struct PRNote {
 
 enum class PRDrag { None, Move, Resize, Select, Erase, Velocity, Key };
 
-enum class FileDialogMode { None, Open, Save, ExportWav, LoadSample, LoadInstrument, SaveInstrument, ExportMidi, ExportOgg };
+enum class FileDialogMode { None, Open, Save, ExportWav, LoadSample, LoadInstrument, SaveInstrument, ExportMidi, ExportOgg, ExportPlayer };
 enum class PendingAction { None, New, Open, Demo, Quit };
 
 class App {
@@ -117,6 +118,7 @@ class App {
   bool showSamples_ = true;
   bool showMixer_ = true;
   bool showScroller_ = false;
+  KeygenScene keygen_;
   int curSample_ = 0;
   int loadSampleIntoIns_ = -1;  // instrument that receives the next loaded WAV
   bool showSong_ = true, showScope_ = true, showEffects_ = false, showKeys_ = false, showAbout_ = false;
@@ -152,6 +154,11 @@ class App {
   char dialogName_[256] = {};
   int exportLoops_ = 1;
   int oggQuality_ = 6;
+  // Keygen player export.
+  bool playerPopupRequest_ = false;
+  char playerLogo_[64] = "DATRACKARXD";
+  char playerTitle_[128] = {};
+  char playerScroll_[2048] = {};
 
   PendingAction pending_ = PendingAction::None;
   bool confirmRequest_ = false;
@@ -165,6 +172,7 @@ class App {
   void askAction(PendingAction a);
   void confirmPopup();
   void fileDialog();
+  void playerExportPopup();
   void openFileDialog(FileDialogMode mode);
   void saveSong(bool forceDialog);
   void defaultLayout(unsigned int dockId);

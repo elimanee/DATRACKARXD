@@ -188,6 +188,26 @@ bool Song::save(const std::string& path, std::string& err) const {
     err = "Cannot open " + path + " for writing";
     return false;
   }
+  write(f);
+  if (!f) {
+    err = "Write error on " + path;
+    return false;
+  }
+  return true;
+}
+
+std::string Song::toText() const {
+  std::ostringstream ss;
+  write(ss);
+  return ss.str();
+}
+
+bool Song::fromText(const std::string& text, std::string& err) {
+  std::istringstream ss(text);
+  return read(ss, "song", err);
+}
+
+void Song::write(std::ostream& f) const {
   f.precision(9);  // enough digits for floats to load back exactly
   f << FILE_MAGIC << ' ' << FILE_VERSION << '\n';
   f << "name " << name << '\n';
@@ -294,11 +314,6 @@ bool Song::save(const std::string& path, std::string& err) const {
     }
   }
   f << "end\n";
-  if (!f) {
-    err = "Write error on " + path;
-    return false;
-  }
-  return true;
 }
 
 bool Song::load(const std::string& path, std::string& err) {
@@ -307,6 +322,10 @@ bool Song::load(const std::string& path, std::string& err) {
     err = "Cannot open " + path;
     return false;
   }
+  return read(f, path, err);
+}
+
+bool Song::read(std::istream& f, const std::string& path, std::string& err) {
   std::string line;
   if (!std::getline(f, line) || line.rfind(FILE_MAGIC, 0) != 0) {
     err = path + " is not a DATRACKARXD song";

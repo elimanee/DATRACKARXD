@@ -2,6 +2,7 @@
 #pragma once
 #include <array>
 #include <cstdint>
+#include <iosfwd>
 #include <string>
 #include <vector>
 
@@ -199,6 +200,11 @@ struct Song {
 
   bool save(const std::string& path, std::string& err) const;
   bool load(const std::string& path, std::string& err);
+  // The same .dtk text in memory (the keygen player embeds it).
+  std::string toText() const;
+  bool fromText(const std::string& text, std::string& err);
+  void write(std::ostream& out) const;
+  bool read(std::istream& in, const std::string& name, std::string& err);
 };
 
 std::string noteName(int note);  // "C-4", "OFF", "---"

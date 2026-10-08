@@ -12,6 +12,8 @@
 #include "demo.h"
 #include "import.h"
 #include "midifile.h"
+#include "payload.h"
+#include "player.h"
 
 static int usage() {
   std::printf(
@@ -23,6 +25,8 @@ static int usage() {
       "  datrackarxd --export-midi song out.mid [n]  write the song as a MIDI file\n"
       "  datrackarxd --export-stems song prefix      one WAV per channel (prefix_01.wav...)\n"
       "  datrackarxd --convert-instrument in out.dti instrument preset from .fui/.wav/.dti\n"
+      "  datrackarxd --export-player song out [logo] [scroller text]\n"
+      "                                              standalone keygen-style player\n"
       "  datrackarxd --export-demo out.wav           render the demo song\n"
       "  datrackarxd --save-demo out.dtk             write the demo song file\n");
   return 1;
@@ -51,6 +55,23 @@ static int commandLine(int argc, char** argv) {
     t.wavetables.clear();
     int idx = loadInstrumentFile(argv[2], t, err);
     if (idx < 0 || !saveInstrumentFile(t, idx, argv[3], err)) {
+      std::fprintf(stderr, "%s\n", err.c_str());
+      return 1;
+    }
+    std::printf("wrote %s\n", argv[3]);
+    return 0;
+  }
+  if (cmd == "--export-player" && argc >= 4) {
+    PlayerPayload p;
+    if (!loadAnySong(argv[2], song, err)) {
+      std::fprintf(stderr, "%s\n", err.c_str());
+      return 1;
+    }
+    p.song = song.toText();
+    p.title = song.name;
+    if (argc >= 5) p.logo = argv[4];
+    if (argc >= 6) p.scroll = argv[5];
+    if (!writePlayer(argv[3], p, err)) {
       std::fprintf(stderr, "%s\n", err.c_str());
       return 1;
     }
@@ -121,6 +142,9 @@ static int commandLine(int argc, char** argv) {
 }
 
 int main(int argc, char** argv) {
+  // An exported keygen player carries its song: play it and nothing else.
+  PlayerPayload payload;
+  if (readOwnPayload(payload)) return runPlayer(payload, argc, argv);
   if (argc >= 2 && argv[1][0] == '-' && argv[1][1] == '-') return commandLine(argc, argv);
 
   if (SDL_Init(SDL_INIT_VIDEO | SDL_INIT_AUDIO | SDL_INIT_TIMER) != 0) {
