@@ -129,3 +129,128 @@ void StereoDelay::process(float inL, float inR, int delay, float feedback, bool 
   }
   if (++pos_ >= n) pos_ = 0;
 }
+
+// ---------------------------------------------------------------------------
+// Channel insert effects
+// ---------------------------------------------------------------------------
+
+void Biquad::lowShelf(float freq, float gainDb, float sr) {
+  float A = std::pow(10.0f, gainDb / 40.0f), w = 2 * 3.14159265f * freq / sr;
+  float cs = std::cos(w), alpha = std::sin(w) / 2 * std::sqrt(2.0f), sq = 2 * std::sqrt(A) * alpha;
+  float a0 = (A + 1) + (A - 1) * cs + sq;
+  b0 = A * ((A + 1) - (A - 1) * cs + sq) / a0;
+  b1 = 2 * A * ((A - 1) - (A + 1) * cs) / a0;
+  b2 = A * ((A + 1) - (A - 1) * cs - sq) / a0;
+  a1 = -2 * ((A - 1) + (A + 1) * cs) / a0;
+  a2 = ((A + 1) + (A - 1) * cs - sq) / a0;
+}
+
+void Biquad::highShelf(float freq, float gainDb, float sr) {
+  float A = std::pow(10.0f, gainDb / 40.0f), w = 2 * 3.14159265f * freq / sr;
+  float cs = std::cos(w), alpha = std::sin(w) / 2 * std::sqrt(2.0f), sq = 2 * std::sqrt(A) * alpha;
+  float a0 = (A + 1) - (A - 1) * cs + sq;
+  b0 = A * ((A + 1) + (A - 1) * cs + sq) / a0;
+  b1 = -2 * A * ((A - 1) + (A + 1) * cs) / a0;
+  b2 = A * ((A + 1) + (A - 1) * cs - sq) / a0;
+  a1 = 2 * ((A - 1) - (A + 1) * cs) / a0;
+  a2 = ((A + 1) - (A - 1) * cs - sq) / a0;
+}
+
+void Biquad::peak(float freq, float gainDb, float q, float sr) {
+  float A = std::pow(10.0f, gainDb / 40.0f), w = 2 * 3.14159265f * std::min(freq, sr * 0.45f) / sr;
+  float cs = std::cos(w), alpha = std::sin(w) / (2 * q);
+  float a0 = 1 + alpha / A;
+  b0 = (1 + alpha * A) / a0;
+  b1 = -2 * cs / a0;
+  b2 = (1 - alpha * A) / a0;
+  a1 = -2 * cs / a0;
+  a2 = (1 - alpha / A) / a0;
+}
+
+void ChannelFxUnit::clear() {
+  hold_ = 0;
+  count_ = 0;
+  lp_ = 0;
+  std::fill(buf_.begin(), buf_.end(), 0.0f);
+  pos_ = 0;
+  phase_ = 0;
+  low_.clear();
+  mid_.clear();
+  high_.clear();
+  env_ = 0;
+}
+
+float ChannelFxUnit::process(float x, const ChannelEffect& e, float sr) {
+  if (e.type != type_) {
+    clear();
+    type_ = e.type;
+  }
+  switch (e.type) {
+    case CFX_BITCRUSH: {
+      // Sample-and-hold at a lower rate, then fewer amplitude steps.
+      if (count_ <= 0) {
+        float levels = std::pow(2.0f, std::clamp(e.p[0], 1.0f, 16.0f) - 1);
+        hold_ = std::round(std::clamp(x, -1.0f, 1.0f) * levels) / levels;
+        count_ = std::max(1, (int)std::lround(e.p[1]));
+      }
+      count_--;
+      return x + (hold_ - x) * e.p[2];
+    }
+    case CFX_DISTORTION: {
+      float g = 1 + e.p[0] * e.p[0] * 49;
+      float y = x * g;
+      switch ((int)std::lround(e.p[3])) {
+        case 1: y = std::clamp(y, -1.0f, 1.0f); break;
+        case 2: y = std::sin(y); break;
+        default: y = std::tanh(y); break;
+      }
+      // Tone: a one-pole low-pass from 500 Hz to 20 kHz.
+      float fc = 500.0f * std::pow(2.0f, e.p[1] * 5.32f);
+      lp_ += (y - lp_) * (1 - std::exp(-2 * 3.14159265f * std::min(fc, sr * 0.45f) / sr));
+      return x + (lp_ - x) * e.p[2];
+    }
+    case CFX_CHORUS: {
+      int len = (int)(sr * 0.05f);
+      if ((int)buf_.size() != len) {
+        buf_.assign(len, 0.0f);
+        pos_ = 0;
+      }
+      phase_ += e.p[0] / sr;
+      if (phase_ >= 1) phase_ -= 1;
+      float ms = 7.0f + e.p[1] * (0.5f + 0.5f * (float)std::sin(phase_ * 2 * 3.14159265358979));
+      float d = std::clamp(ms * sr / 1000.0f, 1.0f, len - 2.0f);
+      float rp = pos_ - d;
+      if (rp < 0) rp += len;
+      int i0 = (int)rp, i1 = (i0 + 1) % len;
+      float fr = rp - i0;
+      float wet = buf_[i0] + (buf_[i1] - buf_[i0]) * fr;
+      buf_[pos_] = x + wet * e.p[3];
+      pos_ = (pos_ + 1) % len;
+      return x * (1 - e.p[2]) + wet * e.p[2];
+    }
+    case CFX_EQ: {
+      if (e.p[0] != eqFor_[0]) low_.lowShelf(200, e.p[0], sr);
+      if (e.p[1] != eqFor_[1] || e.p[2] != eqFor_[2]) mid_.peak(e.p[2], e.p[1], 0.9f, sr);
+      if (e.p[3] != eqFor_[3]) high_.highShelf(4000, e.p[3], sr);
+      std::copy(e.p, e.p + 4, eqFor_);
+      float y = x;
+      if (e.p[0] != 0) y = low_.process(y);
+      if (e.p[1] != 0) y = mid_.process(y);
+      if (e.p[3] != 0) y = high_.process(y);
+      return y;
+    }
+    case CFX_COMPRESSOR: {
+      float a = std::abs(x);
+      float att = std::exp(-1000.0f / (std::max(e.p[2], 0.1f) * sr));
+      float rel = std::exp(-1000.0f / (std::max(e.p[3], 1.0f) * sr));
+      env_ = a > env_ ? a + (env_ - a) * att : a + (env_ - a) * rel;
+      float db = 20 * std::log10(env_ + 1e-9f);
+      float over = db - e.p[0];
+      float slope = 1 - 1 / std::max(e.p[1], 1.0f);
+      float gainDb = (over > 0 ? -over * slope : 0) - e.p[0] * slope * 0.5f;  // with half the reduction made up
+      return x * std::pow(10.0f, gainDb / 20);
+    }
+    default:
+      return x;
+  }
+}

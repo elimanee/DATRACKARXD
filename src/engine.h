@@ -1,12 +1,14 @@
 // Playback engine: pattern sequencing, effects, macros and synthesis
-// (chip waves, 4-operator FM and samples).
+// (chip waves, 4-operator FM, samples and emulated sound chips).
 #pragma once
 #include <array>
 #include <cstdint>
+#include <memory>
 #include <mutex>
 #include <string>
 #include <vector>
 
+#include "chips.h"
 #include "effects.h"
 #include "song.h"
 
@@ -90,6 +92,18 @@ struct ChannelState {
   float pw = -1;            // fine pulse width (0..1), -1 = duty steps
   int pwPos = 128, pwDir = 1;
 
+  // ADSR envelope (run per sample) and LFOs / wavetable morph (per tick).
+  bool envOn = false;
+  int envStage = 4;  // 0 attack, 1 decay, 2 sustain, 3 release, 4 off
+  float envLevel = 0;
+  float envAtk = 1, envDecK = 0, envSus = 1, envRelK = 0;
+  double noteTime = 0;  // seconds since the note started
+  double lfoPhase[INS_LFOS] = {0, 0};
+  float lfoHold[INS_LFOS] = {0, 0};  // random shape: the value held this cycle
+  float lfoPan = 0;                   // -1..1 added to the panning
+  bool morphOn = false;
+  float morphPos = 0;  // 0 = the instrument's wavetable, 1 = the morph target
+
   // FM.
   FMOpState fm[4];
   float fbHist[2] = {0, 0};
@@ -161,6 +175,8 @@ class Engine {
   Reverb reverb_;
   StereoDelay delay_;
   SVFilter filterL_, filterR_;
+  std::array<std::array<ChannelFxUnit, MAX_CHANNEL_FX>, MAX_CHANNELS> chanFx_;
+  std::array<std::unique_ptr<ChipVoice>, MAX_CHANNELS> chips_;  // emulated chip per channel, made on its first note
   bool reverbWasOn_ = false, delayWasOn_ = false, filterWasOn_ = false;
   void clearEffects();
   std::array<float, SCOPE_LEN> master_{};
@@ -175,9 +191,15 @@ class Engine {
   void advanceRow();
   void updateChannel(int c);
   void stepMacros(int c);
+  void advanceLfos(int c);
+  // The LFO's shape value (-1..1), and how far it has faded in (0..1).
+  float lfoValue(const ChannelState& s, int l, const InsLfo& lfo, float& fade) const;
+  uint32_t rng_ = 0x2545F491;  // random LFO shape (an engine-owned generator keeps renders identical)
+  float randomUnit();          // -1..1
   const Instrument* instrument(int c) const;
   float oscillate(ChannelState& s);
   float playSample(ChannelState& s);
+  float envelope(ChannelState& s);
   float playFM(ChannelState& s, const Instrument& ins);
   void fmKeyOn(int c);
   void fmKeyOff(int c);

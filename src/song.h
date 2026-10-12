@@ -37,7 +37,7 @@ enum WaveType : int {
 };
 extern const char* const WAVE_NAMES[WAVE_COUNT];
 
-enum InstrumentType : int { INS_STANDARD = 0, INS_FM, INS_SAMPLE, INS_TYPE_COUNT };
+enum InstrumentType : int { INS_STANDARD = 0, INS_FM, INS_SAMPLE, INS_AY, INS_SN, INS_GB, INS_OPL, INS_TYPE_COUNT };
 extern const char* const INS_TYPE_NAMES[INS_TYPE_COUNT];
 
 struct Effect {
@@ -90,6 +90,44 @@ struct FMParams {
   FMOperator ops[4];
 };
 
+// Emulated sound chips (one chip voice per channel).
+struct ChipSettings {
+  int clock = 0;  // the chip's clock, see chipClockNames()
+  // AY-3-8910 / YM2149 (ZX Spectrum, Amstrad CPC, Atari ST, MSX).
+  int ayModel = 0;  // 0 AY-3-8910, 1 YM2149
+  bool ayTone = true, ayNoise = false, ayEnv = false;
+  int ayNoiseFreq = 16;  // noise period 0-31 (also the Duty macro)
+  int ayEnvShape = 8;    // envelope shape 0-15 (8 saw down, 10 triangle, 12 saw up)
+  int ayEnvAuto = 3;     // envelope follows the note: 0 manual, 1..5 = x1/4, x1/2, x1, x2, x4
+  int ayEnvPeriod = 1000;  // manual envelope period 1-65535
+  // SN76489 (Master System, Game Gear, BBC Micro).
+  bool snNoise = false;  // the noise channel instead of a tone
+  bool snWhite = true;   // white noise, else periodic (tonal) noise
+  // Game Boy: the instrument's volume is the envelope's start level.
+  int gbChannel = 0;   // 0 pulse, 1 wave (the instrument's wavetable), 2 noise
+  int gbEnvDir = 0;    // 0 down, 1 up
+  int gbEnvLen = 2;    // envelope step time 0-7 (0 = no change)
+  int gbSweepTime = 0, gbSweepDir = 0, gbSweepShift = 0;  // pulse frequency sweep
+  bool gbShortNoise = false;  // 7-bit noise (metallic)
+};
+
+// OPL3 (Yamaha YMF262, AdLib / Sound Blaster) instrument: 2 or 4 operators.
+struct OPLOperator {
+  int am = 0, vib = 0, sus = 1, ksr = 0;
+  int mult = 1;  // 0-15
+  int ksl = 0;   // 0-3
+  int tl = 0;    // 0-63 attenuation
+  int ar = 15, dr = 4, sl = 4, rr = 6;  // 0-15
+  int ws = 0;    // waveform 0-7
+};
+struct OPLParams {
+  bool fourOp = false;
+  int alg = 0;  // 2-op: 0 FM, 1 additive; 4-op: 0-3
+  int fb = 0;   // 0-7, on operator 1
+  bool deepAm = false, deepVib = false;
+  OPLOperator ops[4];
+};
+
 struct Sample {
   std::string name = "Sample";
   std::vector<float> data;  // mono, -1..1
@@ -112,6 +150,42 @@ struct InsFilter {
   int resonance = 8;   // 0..15
 };
 
+// ADSR volume envelope, on top of the instrument's own volume (any type).
+struct InsEnvelope {
+  bool on = false;
+  float attack = 0.0f;   // seconds from silence to full
+  float decay = 0.3f;    // seconds to settle on the sustain level
+  float sustain = 0.7f;  // 0..1
+  float release = 0.3f;  // seconds to fade out after note off
+};
+
+enum LfoTarget : int { LFO_PITCH = 0, LFO_VOLUME, LFO_PULSE, LFO_CUTOFF, LFO_PAN, LFO_TARGET_COUNT };
+enum LfoShape : int { LFO_SINE = 0, LFO_TRIANGLE, LFO_SAW, LFO_SQUARE, LFO_RANDOM, LFO_SHAPE_COUNT };
+extern const char* const LFO_TARGET_NAMES[LFO_TARGET_COUNT];
+extern const char* const LFO_SHAPE_NAMES[LFO_SHAPE_COUNT];
+
+// Low-frequency oscillator restarted by each note. depth is in the target's
+// unit: semitones (pitch), 0..1 (volume, pulse width, pan), 0..255 (cutoff).
+struct InsLfo {
+  bool on = false;
+  int target = LFO_PITCH;
+  int shape = LFO_SINE;
+  float rate = 5.0f;   // Hz
+  float depth = 0.3f;
+  float delay = 0.0f;  // seconds before it fades in
+  bool isDefault() const { return !on && target == LFO_PITCH && shape == LFO_SINE && rate == 5.0f && depth == 0.3f && delay == 0.0f; }
+};
+constexpr int INS_LFOS = 2;
+
+// Wavetable morph: the wave moves from the instrument's wavetable to a second
+// one over time (chip wavetable instruments).
+struct InsMorph {
+  bool on = false;
+  std::array<int, WAVETABLE_LEN> table{};  // 0..15, the wave it morphs to
+  float time = 1.0f;  // seconds for one way
+  int mode = 0;       // 0 once, 1 loop, 2 ping-pong
+};
+
 struct Instrument {
   std::string name = "Instrument";
   int type = INS_STANDARD;
@@ -121,6 +195,8 @@ struct Instrument {
   std::array<int, WAVETABLE_LEN> wavetable{};  // 0..15
   Macro macros[MACRO_COUNT];
   FMParams fm;
+  ChipSettings chip;
+  OPLParams opl;
   int songWave = -1;              // song wavetable used instead of the own one (-1 = own)
   int sample = -1;                // default sample (sample instruments)
   std::vector<int16_t> sampleMap;  // empty, or NOTE_COUNT sample indexes (-1 = default)
@@ -130,12 +206,39 @@ struct Instrument {
   bool sync = false;     // restart the waveform with the previous channel (hard sync)
   int pulseWidth = -1;   // 1..255 fine pulse width (duty macro and 12xx too); -1 = 4 duty steps
   int pwmSweep = 0;      // pulse width change per tick, bouncing between the ends
+  InsEnvelope env;
+  InsLfo lfo[INS_LFOS];
+  InsMorph morph;
   bool sidDefault() const {
     return !filter.on && !ringMod && !sync && pulseWidth < 0 && pwmSweep == 0 && filter.cutoff == 128 && filter.resonance == 8 &&
            filter.mode == 0;
   }
   Instrument();
   void macroRange(int macro, int& lo, int& hi) const;
+};
+
+// Per-channel insert effects, run in order on the channel before the mixer.
+enum ChanFxType : int { CFX_BITCRUSH = 0, CFX_DISTORTION, CFX_CHORUS, CFX_EQ, CFX_COMPRESSOR, CFX_COUNT };
+constexpr int MAX_CHANNEL_FX = 8;
+struct ChanFxParam {
+  const char* name;
+  float min, max, def;
+  const char* format;   // slider format
+  bool log;             // logarithmic slider
+  const char* choices;  // a combo instead of a slider ("A\0B\0"), or null
+};
+struct ChanFxInfo {
+  const char* name;
+  int count;
+  ChanFxParam params[4];
+};
+extern const ChanFxInfo CHAN_FX_INFO[CFX_COUNT];
+
+struct ChannelEffect {
+  int type = CFX_BITCRUSH;
+  bool on = true;
+  float p[4] = {0, 0, 0, 0};
+  static ChannelEffect make(int type);  // with the default settings
 };
 
 struct ChannelInfo {
@@ -150,6 +253,7 @@ struct ChannelInfo {
   float mix = 1.0f;        // channel output level
   float reverbSend = 0.0f;   // 0..1, how much goes to the master reverb
   float delaySend = 0.0f;    // 0..1, how much goes to the master delay
+  std::vector<ChannelEffect> effects;  // insert effects, up to MAX_CHANNEL_FX
   std::vector<Pattern> patterns;  // MAX_PATTERNS entries
 };
 

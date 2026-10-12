@@ -9,6 +9,7 @@
 #include <filesystem>
 #include <fstream>
 
+#include "audiofile.h"
 #include "demo.h"
 #include "import.h"
 #include "midifile.h"
@@ -264,7 +265,7 @@ void App::playerExportPopup() {
 void App::fileDialog() {
   const char* title = dialogMode_ == FileDialogMode::Open        ? "Open song / import module###filedlg"
                       : dialogMode_ == FileDialogMode::Save      ? "Save song###filedlg"
-                      : dialogMode_ == FileDialogMode::LoadSample ? "Load WAV sample###filedlg"
+                      : dialogMode_ == FileDialogMode::LoadSample ? "Load sample (WAV, FLAC, MP3, OGG)###filedlg"
                       : dialogMode_ == FileDialogMode::LoadInstrument ? "Load instrument###filedlg"
                       : dialogMode_ == FileDialogMode::SaveInstrument ? "Save instrument###filedlg"
                       : dialogMode_ == FileDialogMode::ExportMidi ? "Export MIDI###filedlg"
@@ -285,6 +286,7 @@ void App::fileDialog() {
   else if (dialogMode_ == FileDialogMode::SaveInstrument) exts = {".dti"};
   else if (dialogMode_ == FileDialogMode::ExportMidi) exts = {".mid"};
   else if (dialogMode_ == FileDialogMode::ExportOgg) exts = {".ogg"};
+  else if (dialogMode_ == FileDialogMode::LoadSample) exts = {".wav", ".flac", ".mp3", ".ogg", ".oga"};
 #ifdef _WIN32
   else if (dialogMode_ == FileDialogMode::ExportPlayer) exts = {".exe"};
 #else
@@ -380,7 +382,7 @@ void App::fileDialog() {
       Sample smp;
       if ((int)song_.samples.size() >= MAX_SAMPLES) {
         setStatus("Too many samples");
-      } else if (loadWavSample(path, smp, err)) {
+      } else if (loadAudioSample(path, smp, err)) {
         pushFullUndo();
         song_.samples.push_back(std::move(smp));
         curSample_ = (int)song_.samples.size() - 1;
@@ -505,6 +507,7 @@ void App::menuBar() {
     ImGui::MenuItem("Song", nullptr, &showSong_);
     ImGui::MenuItem("Samples", nullptr, &showSamples_);
     ImGui::MenuItem("Mixer", nullptr, &showMixer_);
+    ImGui::MenuItem("Channel FX", nullptr, &showChanFx_);
     ImGui::MenuItem("Oscilloscope", nullptr, &showScope_);
     ImGui::MenuItem("Keygen scroller", nullptr, &showScroller_);
     ImGui::Separator();
@@ -775,10 +778,11 @@ void App::defaultLayout(unsigned int dockId) {
   ImGui::DockBuilderDockWindow("Song", leftBottom);
   ImGui::DockBuilderDockWindow("Instruments", right);
   ImGui::DockBuilderDockWindow("Instrument editor", rightBottom);
-  ImGui::DockBuilderDockWindow("Samples", rightBottom);
+  ImGui::DockBuilderDockWindow("Samples", center);
   ImGui::DockBuilderDockWindow("Oscilloscope", bottom);
   ImGui::DockBuilderDockWindow("Keygen", bottom);
   ImGui::DockBuilderDockWindow("Mixer", bottom);
+  ImGui::DockBuilderDockWindow("Channel FX", bottom);
   ImGui::DockBuilderDockWindow("Effects", rightBottom);
   ImGui::DockBuilderDockWindow("Keyboard", rightBottom);
   ImGui::DockBuilderFinish(dockId);
@@ -860,6 +864,7 @@ void App::frame() {
   if (showSong_) songWindow();
   if (showSamples_) samplesWindow();
   if (showMixer_) mixerWindow();
+  if (showChanFx_) channelFxWindow();
   if (showScope_) scopeWindow();
   if (showScroller_) scrollerWindow();
   if (showEffects_) effectsHelp();

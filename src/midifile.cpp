@@ -525,7 +525,8 @@ void put32be(std::ofstream& f, uint32_t v) {
 
 // GM program for a chip instrument (noise goes to the drum channel instead).
 int gmProgram(const Instrument& ins, int note) {
-  if (ins.type == INS_FM) return 81;
+  if (ins.type == INS_FM || ins.type == INS_OPL) return 81;
+  if (ins.type == INS_GB && ins.chip.gbChannel == 1) return 88;
   if (ins.type == INS_SAMPLE) return 0;
   switch (ins.wave) {
     case WAVE_TRIANGLE: return note < 48 ? 33 : 73;
@@ -605,7 +606,9 @@ bool exportMIDI(const Song& song, const std::string& path, int loops, std::strin
       else if (!sounding) noteOff(c, tick);
       if (!trig || !s.active || song.channels[c].muted || s.note < 0) continue;
       const Instrument* ins = s.ins >= 0 && s.ins < (int)song.instruments.size() ? &song.instruments[s.ins] : nullptr;
-      bool drum = ins && ins->type == INS_STANDARD && (ins->wave == WAVE_NOISE || s.wave == WAVE_NOISE);
+      bool drum = ins && ((ins->type == INS_STANDARD && (ins->wave == WAVE_NOISE || s.wave == WAVE_NOISE)) ||
+                          (ins->type == INS_SN && ins->chip.snNoise) || (ins->type == INS_GB && ins->chip.gbChannel == 2) ||
+                          (ins->type == INS_AY && !ins->chip.ayTone && ins->chip.ayNoise));
       int ch = drum ? 9 : midiCh[c];
       int key = std::clamp(s.note + 12, 0, 127);
       if (drum) key = s.note >= 84 ? 42 : 38;

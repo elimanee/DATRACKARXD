@@ -2,18 +2,25 @@
 
 Just a tracker (like keygen music lmao) for my needs. Un petit tracker dans l'esprit de
 [Furnace](https://github.com/tildearrow/furnace), en C++ avec Dear ImGui et SDL2 : sons chiptune,
-synthèse FM 4 opérateurs, synthèse façon SID, samples, effets master, clavier MIDI, et import de modules
-Furnace, DefleMask, FamiTracker, MOD, XM, IT, S3M et MIDI.
+vraies puces émulées (AY / YM2149, SN76489, Game Boy, OPL3), synthèse FM 4 opérateurs, synthèse façon
+SID, samples, effets par canal et master, clavier MIDI, et import de modules Furnace, DefleMask,
+FamiTracker, MOD, XM, IT, S3M et MIDI.
 
 ![layout](https://img.shields.io/badge/C%2B%2B17-ImGui%20%2B%20SDL2-6d5dfc)
 
 ## Fonctionnalités
 
 - 1 à 32 canaux, jusqu'à 8 colonnes d'effets par canal
-- Trois types d'instruments :
+- Types d'instruments :
   - **Puce** : pulse (4 duty), triangle 32 pas (NES), saw, noise LFSR (normal / métallique / périodique), sine, wavetable 32×16
   - **FM** 4 opérateurs façon Yamaha OPN (Mega Drive) : 8 algorithmes, feedback, enveloppes AR/DR/SL/D2R/RR, presets
-  - **Sample** : chargement de fichiers `.wav`, boucles (avant, ping-pong, arrière), multi-samples par note, fadeout
+  - **Sample** : fichiers `.wav`, `.flac`, `.mp3`, `.ogg` ou enregistrés au micro, boucles (avant, ping-pong, arrière), multi-samples par note, fadeout
+  - **Vraies puces émulées** : **AY-3-8910 / YM2149** (ZX Spectrum, CPC, Atari ST, avec l'enveloppe « buzzer »),
+    **SN76489** (Master System), **Game Boy** (pulse avec sweep, wave, noise) et **OPL3** (AdLib, 2 ou 4 opérateurs)
+- **Enveloppe ADSR**, deux **LFO** (pitch, volume, largeur de pulse, cutoff, panoramique) et **morphing de wavetable** sur les instruments
+- **Effets par canal** : bitcrusher, distorsion, chorus, EQ 3 bandes, compresseur
+- **Éditeur de samples** : sélection, zoom, couper / copier / coller, rogner, normaliser, fondus, inverser,
+  amplifier, rééchantillonner, dessin au crayon, boucle sur la sélection, enregistrement au micro
 - **Synthèse façon SID** (C64) : filtre résonant passe-bas / passe-bande / passe-haut sur n'importe quel instrument, ring mod, hard sync, largeur de pulse fine avec PWM
 - **Macros** façon Furnace sur tous les instruments : volume, arpège (relatif ou note fixe), duty, waveform, pitch, cutoff (avec loop `|` et release `/`)
 - **Mixer** : réverbération, delay ping-pong calé sur le tempo, filtre master, envois par canal
@@ -29,7 +36,7 @@ Furnace, DefleMask, FamiTracker, MOD, XM, IT, S3M et MIDI.
 - Liste d'orders par canal (comme Furnace), ajout / duplication / clonage
 - Oscilloscope par canal, mute / solo
 - Sauvegarde dans un format texte `.dtk`, export WAV (mix complet ou une piste par canal), OGG et MIDI
-- Une démo keygen intégrée qui se charge au démarrage
+- Une démo keygen intégrée qui se charge au démarrage, et `songs/chips.dtk` pour entendre les puces émulées
 
 ## Télécharger
 
@@ -53,8 +60,8 @@ GitHub Actions compile les trois systèmes, crée le tag si besoin et publie la 
 
 ## Compiler
 
-Il faut CMake ≥ 3.16 et un compilateur C++17. ImGui, RtMidi, libogg et libvorbis sont téléchargés
-automatiquement ; SDL2 aussi s'il n'est pas installé. Sous Linux, l'entrée MIDI utilise ALSA (`libasound2-dev`).
+Il faut CMake ≥ 3.16 et un compilateur C++17. ImGui, RtMidi, libogg, libvorbis, ymfm et dr_libs sont
+téléchargés automatiquement ; SDL2 aussi s'il n'est pas installé. Sous Linux, l'entrée MIDI utilise ALSA (`libasound2-dev`).
 
 ```sh
 cmake -S . -B build -DCMAKE_BUILD_TYPE=Release
@@ -121,8 +128,8 @@ Hors de l'éditeur de patterns, les touches de notes jouent l'instrument courant
 | `0Cxx` | Redéclencher la note tous les xx ticks |
 | `0Dxx` | Aller à la ligne xx de l'order suivant |
 | `0Fxx` | Vitesse (ticks par ligne) |
-| `10xx` | Forme d'onde (0 pulse … 5 wavetable ; numéro de wavetable sur un canal wavetable) |
-| `12xx` | Duty (0-3), ou largeur de pulse (01-FF) avec « Fine pulse width ». Noise : 1 = métallique, 3 = périodique |
+| `10xx` | Forme d'onde (0 pulse … 5 wavetable ; numéro de wavetable sur un canal wavetable). AY : mixer (1 tone, 2 noise, 4 enveloppe). OPL : forme d'onde 0-7 |
+| `12xx` | Duty (0-3), ou largeur de pulse (01-FF) avec « Fine pulse width ». Noise : 1 = métallique, 3 = périodique. AY : période du bruit. SN / Game Boy noise : mode |
 | `13xx` | Cutoff du filtre de l'instrument (00-FF) |
 | `80xx` | Panoramique linéaire : 00 gauche, 80 centre, FF droite |
 | `90xx`-`92xx` | Position de départ du sample (octets 0, 1, 2) |
@@ -216,6 +223,69 @@ La fenêtre **Mixer** contient la réverbération, le delay (temps en lignes, do
 option ping-pong), le filtre master et le volume général, puis pour chaque canal : niveau, panoramique,
 envoi vers la réverb et vers le delay. Tout est enregistré dans le morceau.
 
+Le bouton **FX** d'un canal ouvre la fenêtre **Channel FX** : une chaîne d'effets jouée de gauche à
+droite, avant le mixer (jusqu'à 8). Les flèches changent l'ordre, la case active ou coupe un effet, un
+double-clic sur un réglage le remet par défaut.
+
+| Effet | Réglages |
+|---|---|
+| Bitcrusher | bits (1-16), sous-échantillonnage, mix |
+| Distortion | drive, tone, mix, type (douce, écrêtage dur, repli) |
+| Chorus | vitesse, profondeur, mix, feedback |
+| EQ | graves (200 Hz), médiums (fréquence réglable), aigus (4 kHz), de -24 à +12 dB |
+| Compressor | seuil, ratio, attaque, relâchement (avec gain de compensation automatique) |
+
+## Puces émulées
+
+Le **Type** d'un instrument peut être une vraie puce. Chaque canal qui la joue a sa propre puce, émulée au
+niveau des registres : périodes entières (les notes aiguës sont un peu fausses, comme sur la vraie
+machine), volume en 16 pas, générateurs de bruit et enveloppes matérielles d'origine.
+
+| Puce | Réglages | Macros Duty / Waveform |
+|---|---|---|
+| **AY-3-8910 / YM2149** | horloge (ZX, CPC, Atari ST, MSX), modèle, tone / noise / enveloppe, période du bruit, forme et vitesse de l'enveloppe | période du bruit / mixer (1 tone, 2 noise, 4 enveloppe) |
+| **SN76489** | horloge (NTSC, PAL, BBC), tone, bruit blanc ou périodique | mode du bruit |
+| **Game Boy** | canal pulse (duty, enveloppe, sweep), wave (la wavetable de l'instrument, 4 volumes) ou noise (court ou long) | duty / — |
+| **OPL3** (AdLib) | 2 ou 4 opérateurs, algorithme, feedback, et par opérateur MULT, TL, AR, DR, SL, RR, KSL, forme d'onde (8), sustain, trémolo, vibrato, KSR | — / forme d'onde |
+
+Astuce AY : le **buzzer** de l'Atari ST s'obtient avec Tone et Noise décochés, Envelope cochée, une forme
+en dent de scie (8) ou triangle (10) et « Env. pitch » sur « Note x1 » : l'enveloppe devient la forme
+d'onde et suit la note. Sur Game Boy, une macro de volume remplace l'enveloppe matérielle.
+
+L'OPL3 est émulé par [ymfm](https://github.com/aaronsgiles/ymfm). Le filtre SID, l'ADSR, les LFO et
+les effets par canal marchent aussi sur les puces.
+
+## Enveloppe, LFO et morphing
+
+La section **Envelope & LFO** de l'éditeur d'instruments (tous les types) ajoute :
+
+- une enveloppe **ADSR** (attaque, déclin, maintien, relâchement en secondes) par-dessus le volume ; la
+  note continue de sonner pendant le relâchement après le note off ;
+- deux **LFO** relancés à chaque note : cible (pitch, volume, largeur de pulse, cutoff, panoramique),
+  forme (sinus, triangle, scie, carré, aléatoire), vitesse en Hz, profondeur et délai avant qu'ils
+  n'arrivent.
+
+Sur un instrument wavetable (et le canal wave du Game Boy), **Morph** fait passer la forme d'onde de la
+wavetable à une seconde wavetable, une fois, en boucle ou en aller-retour.
+
+## Éditeur de samples
+
+L'onglet **Samples** (à côté de Pattern) charge des `.wav`, `.flac`, `.mp3` et `.ogg` (mixés en mono)
+et **Record** enregistre depuis le micro ou l'entrée ligne choisie.
+
+| Action | Effet |
+|---|---|
+| Glisser sur la forme d'onde | Sélectionner (Shift+clic pour étendre) |
+| Molette / Shift+molette | Zoomer / défiler |
+| Cut, Copy, Paste, Delete, Crop | Couper, copier, coller (au curseur ou à la place de la sélection), effacer, ne garder que la sélection |
+| Silence, Normalize, Fade in/out, Reverse, Invert, Remove DC | Sur la sélection, ou tout le sample sans sélection |
+| Amplify | Multiplier par le pourcentage choisi |
+| Resample | Changer la fréquence d'échantillonnage sans changer la hauteur (plus bas = plus crade et plus léger) |
+| Loop selection | Boucler sur la sélection |
+| Pencil | Dessiner la forme d'onde à la souris (zoomer pour être précis) |
+
+Tout s'annule avec Ctrl+Z.
+
 ## Synthèse façon SID
 
 Dans l'éditeur d'instruments, la section **SID** ajoute :
@@ -301,7 +371,9 @@ La macro volume avec un point de release donne un vrai « release » (fondu apr�
 
 - `src/song.*` : modèle de données et format `.dtk`
 - `src/engine.*` : lecture des patterns, effets, macros, synthèse (puce, FM, samples, SID), export WAV
-- `src/effects.*` : filtre résonant, réverbération, delay
+- `src/effects.*` : filtre résonant, réverbération, delay, effets par canal
+- `src/chips.*` : puces émulées (AY / YM2149, SN76489, Game Boy, OPL3 via ymfm)
+- `src/audiofile.*`, `src/sampleops.*`, `src/recorder.*` : lecture WAV / FLAC / MP3 / OGG, outils de l'éditeur de samples, enregistrement
 - `src/export.cpp`, `src/midifile.cpp` : export OGG, import / export MIDI
 - `src/import*.cpp`, `src/fur_internal.h`, `src/inflate.cpp` : import FUR, DMF, FTM, MOD, S3M, XM, IT (et décompression zlib)
 - `src/midi.*` : entrée clavier MIDI (RtMidi)
@@ -313,3 +385,11 @@ La macro volume avec un point de release donne un vrai « release » (fondu apr�
 - `src/ui_instrument.cpp` : liste et éditeur d'instruments (puce, FM, sample), fenêtre Samples
 - `src/ui_windows.cpp` : orders, song, mixer, oscilloscope, scroller keygen, aide
 - `src/demo.cpp` : morceau de démo
+
+## Bibliothèques
+
+[Dear ImGui](https://github.com/ocornut/imgui) (MIT), [SDL2](https://libsdl.org) (zlib),
+[RtMidi](https://github.com/thestk/rtmidi), [libogg et libvorbis](https://xiph.org) (BSD),
+[ymfm](https://github.com/aaronsgiles/ymfm) (BSD-3-Clause, émulation OPL3) et
+[dr_flac / dr_mp3](https://github.com/mackron/dr_libs) (domaine public / MIT-0). Leurs licences sont
+dans le dossier `licenses` des archives publiées.

@@ -75,6 +75,9 @@ jobs:
           "$exe" --export songs/demo.dtk demo.ogg
           "$exe" --export-midi songs/demo.dtk demo.mid
           test -s demo.ogg && test -s demo.mid
+          # The emulated chips (AY, SN76489, Game Boy, OPL3) and channel effects.
+          "$exe" --export songs/chips.dtk chips.wav
+          test -s chips.wav
           # An exported keygen player must start and play on every OS.
           player=player
           [ "${{ runner.os }}" = "Windows" ] && player=player.exe
@@ -93,6 +96,13 @@ jobs:
           mkdir -p "$dir/songs"
           cp README.md "$dir/"
           cp songs/*.dtk "$dir/songs/"
+          # Licenses of the libraries built into the programs.
+          mkdir -p "$dir/licenses"
+          for pair in imgui:imgui-src/LICENSE.txt sdl2:sdl2-src/LICENSE.txt rtmidi:rtmidi-src/LICENSE \
+                      libogg:ogg-src/COPYING libvorbis:vorbis-src/COPYING ymfm:ymfm-src/LICENSE dr_libs:drlibs-src/LICENSE; do
+            file="build/_deps/${pair#*:}"
+            if [ -f "$file" ]; then cp "$file" "$dir/licenses/${pair%%:*}.txt"; else echo "::warning::missing $file"; fi
+          done
           if [ "${{ runner.os }}" = "Windows" ]; then
             cp datrackarxd.exe datrackarxd-keygen.exe "$dir/"
             7z a "$dir.zip" "$dir" > /dev/null
