@@ -74,6 +74,8 @@ void linearPan(int p, float& l, float& r) {
 
 Engine::Engine(const Song& song, int sampleRate) : song_(song), sampleRate_(sampleRate) {
   tables();
+  for (float& v : volSmooth_) v = 1;
+  clearAutomation();
   reverb_.init(sampleRate);
   delay_.init(sampleRate, 4.0f);
   reset();
@@ -111,7 +113,56 @@ int Engine::speed() const {
   return std::max(1, sp[grooveIdx_ % sp.size()]);
 }
 
-void Engine::play(int order, int row) {
+void Engine::clearAutomation() {
+  const float none = std::nanf("");
+  for (int c = 0; c < MAX_CHANNELS; c++) {
+    autoVol_[c] = autoPan_[c] = autoCut_[c] = autoRev_[c] = autoDel_[c] = none;
+    for (auto& slot : autoFx_[c])
+      for (float& v : slot) v = none;
+  }
+  autoMasterVol_ = autoMasterCut_ = none;
+}
+
+// Reads every automation lane at the playing position.
+void Engine::applyAutomation() {
+  clearAutomation();
+  if (!playing_ || countIn_ > 0 || song_.automation.empty()) return;
+  float pos = order_ + (row_ + tick_ / (float)std::max(1, speed())) / (float)std::max(1, song_.patternLength);
+  for (const AutomationLane& lane : song_.automation) {
+    if (!lane.on || lane.points.empty()) continue;
+    float v = lane.valueAt(pos);
+    int c = lane.channel;
+    if (!lane.isMaster() && (c < 0 || c >= song_.channelCount())) continue;
+    switch (lane.target) {
+      case AUTO_VOLUME: autoVol_[c] = v; break;
+      case AUTO_PAN: autoPan_[c] = v; break;
+      case AUTO_CUTOFF: autoCut_[c] = v; break;
+      case AUTO_REVERB: autoRev_[c] = v; break;
+      case AUTO_DELAY: autoDel_[c] = v; break;
+      case AUTO_FX: autoFx_[c][std::clamp(lane.fxSlot, 0, MAX_CHANNEL_FX - 1)][std::clamp(lane.fxParam, 0, 3)] = v; break;
+      case AUTO_MASTER_VOLUME: autoMasterVol_ = v; break;
+      case AUTO_MASTER_CUTOFF: autoMasterCut_ = v; break;
+      default: break;
+    }
+  }
+}
+
+void Engine::setLoopRange(int first, int last) {
+  if (first < 0 || last < first) {
+    loopFirst_ = loopLast_ = -1;
+  } else {
+    loopFirst_ = first;
+    loopLast_ = last;
+  }
+}
+
+void Engine::click(bool accent) {
+  clickEnv_ = accent ? 1.0f : 0.6f;
+  clickFreq_ = accent ? 1600.0f : 1000.0f;
+  clickPhase_ = 0;
+}
+
+void Engine::play(int order, int row, int countIn) {
   for (int c = 0; c < MAX_CHANNELS; c++) resetChannel(c);
   for (auto& chip : chips_) chip.reset();  // note counters restart, so do the chips
   order_ = std::clamp(order, 0, (int)song_.orders.size() - 1);
@@ -129,11 +180,16 @@ void Engine::play(int order, int row) {
   visited_.assign(MAX_ORDERS, false);
   visited_[order_] = true;
   samplesToTick_ = 0;
+  countIn_ = std::max(0, countIn);
+  countInRow_ = 0;
+  clearAutomation();
   playing_ = true;
 }
 
 void Engine::stop() {
   playing_ = false;
+  countIn_ = 0;
+  clearAutomation();
   for (int c = 0; c < MAX_CHANNELS; c++) releaseNote(c);
 }
 
@@ -650,6 +706,10 @@ void Engine::advanceRow() {
   }
   if (loopPattern) newOrder = order_;
   if (newOrder >= numOrders) newOrder = 0;
+  if (!loopPattern && loopFirst_ >= 0 && loopFirst_ < numOrders && (newOrder > loopLast_ || newOrder < loopFirst_)) {
+    newOrder = loopFirst_;
+    newRow = 0;
+  }
   if (newRow >= song_.patternLength) newRow = 0;
   if (newOrder != order_)
     for (auto& s : ch_) s.loopRow = 0;
@@ -670,14 +730,23 @@ void Engine::advanceRow() {
 void Engine::doTick() {
   int nch = song_.channelCount();
   if (!playing_) tickRate_ = song_.tickRate;
-  if (playing_) {
+  bool countingIn = playing_ && countIn_ > 0;
+  int hl1 = std::max(1, song_.highlight1), hl2 = std::max(1, song_.highlight2);
+  if (countingIn) {
+    // Count-in: clicks on the beats, the song starts after countIn_ rows.
+    if (tick_ == 0 && countInRow_ % hl1 == 0) click(countInRow_ == 0);
+  } else if (playing_) {
     if (song_.orders.empty()) {
       playing_ = false;
     } else {
       if (order_ >= (int)song_.orders.size()) order_ = 0;
-      if (tick_ == 0 && !skipRow_) processRow();
+      if (tick_ == 0 && !skipRow_) {
+        processRow();
+        if (metronome && row_ % hl1 == 0) click(row_ % hl2 == 0);
+      }
     }
   }
+  applyAutomation();
 
   for (int c = 0; c < nch; c++) {
     ChannelState& s = ch_[c];
@@ -737,7 +806,12 @@ void Engine::doTick() {
     s.tremPos = (s.tremPos + s.tremSpeed) & 63;
   }
 
-  if (playing_) {
+  if (countingIn) {
+    if (++tick_ >= speed()) {
+      tick_ = 0;
+      if (++countInRow_ >= countIn_) countIn_ = 0;
+    }
+  } else if (playing_) {
     tick_++;
     if (tick_ >= speed()) {
       tick_ = 0;
@@ -824,6 +898,7 @@ void Engine::updateChannel(int c) {
     int cut = ins->filter.cutoff;
     if (s.cutoffOverride >= 0) cut = s.cutoffOverride;
     if (s.macros[MACRO_CUTOFF].hasValue) cut = s.macros[MACRO_CUTOFF].value;
+    if (c < MAX_CHANNELS && !std::isnan(autoCut_[c])) cut = (int)std::lround(autoCut_[c] * 255);
     cut += (int)std::lround(lfo[LFO_CUTOFF]);
     float hz = 30.0f * std::pow(2.0f, std::clamp(cut, 0, 255) / 255.0f * 9.2f);
     s.filterMode = ins->filter.mode;
@@ -1093,6 +1168,12 @@ void Engine::render(float* out, int frames) {
     if (samplesToTick_ <= 0) {
       doTick();
       samplesToTick_ += sampleRate_ / std::max(tickRate_, 1.0f);
+      if (fx.filter && !std::isnan(autoMasterCut_)) {
+        float hz = 20.0f * std::pow(1000.0f, autoMasterCut_);
+        float q = 0.707f + fx.resonance * 9.3f;
+        filterL_.set(hz, q, (float)sampleRate_);
+        filterR_.set(hz, q, (float)sampleRate_);
+      }
     }
     samplesToTick_ -= 1.0;
 
@@ -1126,20 +1207,42 @@ void Engine::render(float* out, int frames) {
       }
       // Insert effects (they also run on silence, for the chorus tail).
       const std::vector<ChannelEffect>& effects = song_.channels[c].effects;
-      for (size_t k = 0; k < effects.size() && k < (size_t)MAX_CHANNEL_FX; k++)
-        if (effects[k].on) v = chanFx_[c][k].process(v, effects[k], (float)sampleRate_);
-      v *= song_.channels[c].mix;
+      for (size_t k = 0; k < effects.size() && k < (size_t)MAX_CHANNEL_FX; k++) {
+        if (!effects[k].on) continue;
+        const float* a = autoFx_[c][k];
+        if (std::isnan(a[0]) && std::isnan(a[1]) && std::isnan(a[2]) && std::isnan(a[3])) {
+          v = chanFx_[c][k].process(v, effects[k], (float)sampleRate_);
+        } else {
+          // Automated parameters, mapped onto each parameter's range.
+          ChannelEffect e = effects[k];
+          const ChanFxInfo& info = CHAN_FX_INFO[std::clamp(e.type, 0, CFX_COUNT - 1)];
+          for (int i = 0; i < info.count; i++) {
+            if (std::isnan(a[i])) continue;
+            const ChanFxParam& prm = info.params[i];
+            e.p[i] = prm.log && prm.min > 0 ? prm.min * std::pow(prm.max / prm.min, a[i]) : prm.min + (prm.max - prm.min) * a[i];
+            if (prm.choices) e.p[i] = std::round(e.p[i]);
+          }
+          v = chanFx_[c][k].process(v, e, (float)sampleRate_);
+        }
+      }
+      float autoVol = std::isnan(autoVol_[c]) ? 1.0f : autoVol_[c];
+      volSmooth_[c] += (autoVol - volSmooth_[c]) * smooth;
+      v *= song_.channels[c].mix * volSmooth_[c];
       s.scope[scopePos_] = v;
       const ChannelInfo& info = song_.channels[c];
       if (info.muted) continue;
-      float vl = v * s.panL, vr = v * s.panR;
+      float pl = s.panL, pr = s.panR;
+      if (!std::isnan(autoPan_[c])) linearPan((int)std::lround(autoPan_[c] * 255), pl, pr);
+      float vl = v * pl, vr = v * pr;
       if (s.lfoPan > 0) vl *= 1.0f - s.lfoPan;
       else if (s.lfoPan < 0) vr *= 1.0f + s.lfoPan;
       l += vl;
       r += vr;
-      rvIn += (vl + vr) * info.reverbSend;
-      dlL += vl * info.delaySend;
-      dlR += vr * info.delaySend;
+      float rvSend = std::isnan(autoRev_[c]) ? info.reverbSend : autoRev_[c];
+      float dlSend = std::isnan(autoDel_[c]) ? info.delaySend : autoDel_[c];
+      rvIn += (vl + vr) * rvSend;
+      dlL += vl * dlSend;
+      dlR += vr * dlSend;
     }
     if (fx.delay) {
       // The echo time follows the song: delayRows rows at the current speed.
@@ -1160,8 +1263,16 @@ void Engine::render(float* out, int frames) {
       l = filterL_.process(l, fx.filterType);
       r = filterR_.process(r, fx.filterType);
     }
-    l *= fx.volume;
-    r *= fx.volume;
+    float masterVol = std::isnan(autoMasterVol_) ? fx.volume : autoMasterVol_ * 2.0f;
+    l *= masterVol;
+    r *= masterVol;
+    if (clickEnv_ > 1e-4f) {
+      float cv = (float)std::sin(clickPhase_ * 2 * PI) * clickEnv_ * metronomeVolume * 0.6f;
+      clickPhase_ += clickFreq_ / sampleRate_;
+      clickEnv_ *= 1.0f - 150.0f / sampleRate_;  // about 25 ms
+      l += cv;
+      r += cv;
+    }
     // DC blocker, master gain and soft clip.
     float hl = l - dcPrevL_ + dcR * dcL_;
     float hr = r - dcPrevR_ + dcR * dcR_;

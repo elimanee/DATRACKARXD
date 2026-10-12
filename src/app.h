@@ -139,7 +139,21 @@ class App {
   bool showSamples_ = true;
   bool showMixer_ = true;
   bool showChanFx_ = false;
+  bool showArrangement_ = true;
+  // Arrangement view.
+  float arrZoom_ = 1.5f;          // pixels per row
+  float arrScrollX_ = 0, arrScrollReq_ = -1;
+  int arrSelA_ = 0, arrSelB_ = 0;  // selected order range
+  bool arrDragging_ = false, loopRange_ = false;
+  int arrMenuOrder_ = 0, arrMenuCh_ = 0;
+  int autoLane_ = -1, autoDrag_ = -1;
+  AutomationLane newLane_;
   int fxCh_ = 0;  // channel shown in the Channel FX window
+  // Recording options: count-in bars before recording, MIDI quantize grid
+  // (0 off, 1 row, 2 rows, 3 beat), metronome volume.
+  int countInBars_ = 1;
+  int midiQuantize_ = 0;
+  float metronomeVol_ = 0.5f;
   bool showScroller_ = false;
   KeygenScene keygen_;
   int curSample_ = 0;
@@ -258,6 +272,21 @@ class App {
   void deleteAtCursor();
   void insertRow(bool insert);
   void selectionBounds(int& ch0, int& col0, int& row0, int& ch1, int& col1, int& row1) const;
+  // Selection tools.
+  void toolBounds(int& ch0, int& f0, int& row0, int& ch1, int& f1, int& row1) const;
+  void interpolateSelection();
+  void volumeTool(float scale, int jitter);
+  void rowTool(int kind);  // 0 reverse, 1 expand x2, 2 shrink /2
+  void selectionToolsMenu();
+  struct FindReplace {
+    int note = -1;  // -1 anything, -2 any note, else that note
+    int ins = -1, fxCmd = -1;
+    int transpose = 0, newIns = -1, newVol = -1, newFxCmd = -1;
+    int scope = 0;  // 0 selection, 1 current pattern, 2 whole song
+  } findReplace_;
+  bool showFindReplace_ = false;
+  int findReplace(bool apply);  // number of matching cells
+  void findReplaceWindow();
   void copySelection(bool cut);
   void paste();
   void clearSelection();
@@ -286,6 +315,18 @@ class App {
   void songWindow();
   void mixerWindow();
   void channelFxWindow();
+  void arrangementWindow();
+  void automationEditor(float orderW, float leftW, float playPos);
+  // Order list edits (Orders and Arrangement windows); automation follows.
+  int firstUnusedPattern(int ch) const;
+  void orderInsertNew(int at);
+  void orderDuplicate(int first, int last);
+  void orderClone(int at);
+  void orderDelete(int first, int last);
+  void orderSwap(int a, int b);
+  std::string laneLabel(const AutomationLane& lane) const;
+  std::string laneValueText(const AutomationLane& lane, float v) const;
+  float laneDefault(const AutomationLane& lane) const;
   void scopeWindow();
   void scrollerWindow();
   void saveSettings();

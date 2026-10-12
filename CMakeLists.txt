@@ -1,5 +1,5 @@
 cmake_minimum_required(VERSION 3.16)
-project(DATRACKARXD VERSION 0.7.0 LANGUAGES CXX C)
+project(DATRACKARXD VERSION 0.8.0 LANGUAGES CXX C)
 
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
@@ -170,6 +170,7 @@ add_executable(datrackarxd
   src/ui_pianoroll.cpp
   src/ui_instrument.cpp
   src/ui_windows.cpp
+  src/ui_arrange.cpp
   src/audiofile.cpp
   src/recorder.cpp)
 target_include_directories(datrackarxd PRIVATE ${drlibs_SOURCE_DIR})

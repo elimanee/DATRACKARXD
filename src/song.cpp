@@ -46,6 +46,24 @@ ChannelEffect ChannelEffect::make(int type) {
   return e;
 }
 
+const char* const AUTO_TARGET_NAMES[AUTO_TARGET_COUNT] = {"Volume", "Pan",           "Cutoff",       "Reverb send",
+                                                          "Delay send", "Effect param", "Master volume", "Master cutoff"};
+
+float AutomationLane::valueAt(float pos) const {
+  if (points.empty()) return std::nanf("");
+  if (pos <= points.front().pos) return points.front().value;
+  if (pos >= points.back().pos) return points.back().value;
+  auto it = std::upper_bound(points.begin(), points.end(), pos, [](float p, const AutoPoint& a) { return p < a.pos; });
+  const AutoPoint& b = *it;
+  const AutoPoint& a = *(it - 1);
+  if (b.pos <= a.pos) return b.value;
+  return a.value + (b.value - a.value) * (pos - a.pos) / (b.pos - a.pos);
+}
+
+void AutomationLane::sort() {
+  std::stable_sort(points.begin(), points.end(), [](const AutoPoint& a, const AutoPoint& b) { return a.pos < b.pos; });
+}
+
 const char* const LFO_SHAPE_NAMES[LFO_SHAPE_COUNT] = {"Sine", "Triangle", "Saw", "Square", "Random"};
 
 bool Cell::empty() const {
@@ -115,6 +133,93 @@ void Song::reset(int channelCount) {
   instruments[0].name = "Pulse";
   samples.clear();
   wavetables.clear();
+  automation.clear();
+  subsongName.clear();
+  subsongs.assign(1, SubSong());
+  curSubsong = 0;
+}
+
+std::string Song::subsongNameAt(int i) const {
+  return i == curSubsong ? subsongName : (i >= 0 && i < (int)subsongs.size() ? subsongs[i].name : std::string());
+}
+
+void Song::selectSubsong(int i) {
+  if (subsongs.empty()) subsongs.resize(1);
+  if (i < 0 || i >= (int)subsongs.size() || i == curSubsong) return;
+  SubSong& cur = subsongs[curSubsong];
+  cur.name = subsongName;
+  cur.tickRate = tickRate;
+  cur.speeds = speeds;
+  cur.patternLength = patternLength;
+  cur.orders = std::move(orders);
+  cur.automation = std::move(automation);
+  cur.patterns.resize(channels.size());
+  for (size_t c = 0; c < channels.size(); c++) cur.patterns[c] = std::move(channels[c].patterns);
+
+  SubSong& next = subsongs[i];
+  subsongName = next.name;
+  tickRate = next.tickRate;
+  speeds = next.speeds.empty() ? std::vector<int>{6} : next.speeds;
+  patternLength = std::clamp(next.patternLength, 1, MAX_ROWS);
+  orders = std::move(next.orders);
+  if (orders.empty()) orders.assign(1, {});
+  automation = std::move(next.automation);
+  for (size_t c = 0; c < channels.size(); c++) {
+    channels[c].patterns = c < next.patterns.size() ? std::move(next.patterns[c]) : std::vector<Pattern>();
+    channels[c].patterns.resize(MAX_PATTERNS);
+  }
+  next = SubSong();
+  curSubsong = i;
+}
+
+int Song::addSubsong() {
+  if (subsongs.empty()) subsongs.resize(1);
+  SubSong sub;
+  sub.tickRate = tickRate;
+  sub.speeds = speeds;
+  sub.patternLength = patternLength;
+  sub.orders.assign(1, {});
+  subsongs.push_back(std::move(sub));
+  return (int)subsongs.size() - 1;
+}
+
+void Song::removeSubsong(int i) {
+  if ((int)subsongs.size() <= 1 || i < 0 || i >= (int)subsongs.size()) return;
+  if (i == curSubsong) selectSubsong(i == 0 ? 1 : i - 1);
+  subsongs.erase(subsongs.begin() + i);
+  if (curSubsong > i) curSubsong--;
+}
+
+Song Song::currentSubsongOnly() const {
+  Song copy = *this;
+  copy.subsongs.assign(1, SubSong());
+  copy.curSubsong = 0;
+  return copy;
+}
+
+void Song::insertOrderTime(int at) {
+  for (AutomationLane& lane : automation)
+    for (AutoPoint& p : lane.points)
+      if (p.pos >= at) p.pos += 1;
+}
+
+void Song::removeOrderTime(int at) {
+  for (AutomationLane& lane : automation) {
+    auto& pts = lane.points;
+    pts.erase(std::remove_if(pts.begin(), pts.end(), [&](const AutoPoint& p) { return p.pos >= at && p.pos < at + 1; }), pts.end());
+    for (AutoPoint& p : pts)
+      if (p.pos >= at + 1) p.pos -= 1;
+  }
+}
+
+void Song::swapOrderTime(int a, int b) {
+  for (AutomationLane& lane : automation) {
+    for (AutoPoint& p : lane.points) {
+      if (p.pos >= a && p.pos < a + 1) p.pos += (float)(b - a);
+      else if (p.pos >= b && p.pos < b + 1) p.pos -= (float)(b - a);
+    }
+    lane.sort();
+  }
 }
 
 void Song::cleanup() {
@@ -315,11 +420,14 @@ void Song::write(std::ostream& f) const {
       if (ch == '\n') ch = '\x1f';
     f << "comment " << c << '\n';
   }
-  f << "tickrate " << tickRate << '\n';
-  f << "speeds";
-  for (int v : speeds) f << ' ' << v;
-  f << '\n';
-  f << "patlen " << patternLength << '\n';
+  {
+    bool live0 = curSubsong == 0 || subsongs.empty();
+    f << "tickrate " << (live0 ? tickRate : subsongs[0].tickRate) << '\n';
+    f << "speeds";
+    for (int v : (live0 ? speeds : subsongs[0].speeds)) f << ' ' << v;
+    f << '\n';
+    f << "patlen " << (live0 ? patternLength : subsongs[0].patternLength) << '\n';
+  }
   f << "highlight " << highlight1 << ' ' << highlight2 << '\n';
   if (insResetsVolume) f << "insresetvol 1\n";
   f << "channels " << channelCount() << '\n';
@@ -420,25 +528,47 @@ void Song::write(std::ostream& f) const {
     f << '\n';
   }
 
-  for (const auto& o : orders) {
-    f << "order";
-    for (int c = 0; c < channelCount(); c++) f << ' ' << (int)o[c];
-    f << '\n';
-  }
-
-  for (int c = 0; c < channelCount(); c++) {
-    int cols = channels[c].effectCols;
-    for (int p = 0; p < MAX_PATTERNS; p++) {
-      const Pattern* pat = pattern(c, p);
-      if (!pat || pat->isEmpty()) continue;
-      f << "pattern " << c << ' ' << p << '\n';
-      for (int r = 0; r < MAX_ROWS; r++) {
-        const Cell& cell = pat->rows[r];
-        if (cell.empty()) continue;
-        f << "row " << r << ' ' << cell.note << ' ' << cell.ins << ' ' << cell.vol;
-        for (int e = 0; e < cols; e++) f << ' ' << cell.fx[e].cmd << ' ' << cell.fx[e].val;
-        f << '\n';
+  // Each subsong: its orders, patterns and automation (and its tempo after
+  // the first, whose tempo is in the header).
+  int nsub = subsongCount();
+  for (int i = 0; i < nsub; i++) {
+    bool live = i == curSubsong;
+    const SubSong* sub = live ? nullptr : &subsongs[i];
+    if (nsub > 1 || !subsongName.empty()) f << "subsong " << subsongNameAt(i) << '\n';
+    if (i > 0) {
+      f << "tickrate " << (live ? tickRate : sub->tickRate) << '\n';
+      f << "speeds";
+      for (int v : (live ? speeds : sub->speeds)) f << ' ' << v;
+      f << '\n';
+      f << "patlen " << (live ? patternLength : sub->patternLength) << '\n';
+    }
+    for (const auto& o : (live ? orders : sub->orders)) {
+      f << "order";
+      for (int c = 0; c < channelCount(); c++) f << ' ' << (int)o[c];
+      f << '\n';
+    }
+    for (int c = 0; c < channelCount(); c++) {
+      int cols = channels[c].effectCols;
+      const std::vector<Pattern>* pats = live ? &channels[c].patterns : (c < (int)sub->patterns.size() ? &sub->patterns[c] : nullptr);
+      if (!pats) continue;
+      for (int p = 0; p < (int)pats->size(); p++) {
+        const Pattern& pat = (*pats)[p];
+        if (!pat.allocated() || pat.isEmpty()) continue;
+        f << "pattern " << c << ' ' << p << '\n';
+        for (int r = 0; r < MAX_ROWS; r++) {
+          const Cell& cell = pat.rows[r];
+          if (cell.empty()) continue;
+          f << "row " << r << ' ' << cell.note << ' ' << cell.ins << ' ' << cell.vol;
+          for (int e = 0; e < cols; e++) f << ' ' << cell.fx[e].cmd << ' ' << cell.fx[e].val;
+          f << '\n';
+        }
       }
+    }
+    for (const AutomationLane& lane : (live ? automation : sub->automation)) {
+      f << "auto " << lane.target << ' ' << lane.channel << ' ' << lane.fxSlot << ' ' << lane.fxParam << ' ' << lane.on << ' '
+        << lane.points.size();
+      for (const AutoPoint& p : lane.points) f << ' ' << p.pos << ' ' << p.value;
+      f << '\n';
     }
   }
   f << "end\n";
@@ -472,6 +602,9 @@ bool Song::read(std::istream& f, const std::string& path, std::string& err) {
   Sample* curSmp = nullptr;
   Pattern* curPat = nullptr;
   int lineNo = 1;
+  // Subsongs read so far; the one being read lives in s's own fields.
+  std::vector<SubSong> doneSubsongs;
+  bool inSubsong = false;
 
   auto clampVal = [](int v, int lo, int hi) { return std::clamp(v, lo, hi); };
   auto clampF = [](float v, float lo, float hi) { return std::isfinite(v) ? std::clamp(v, lo, hi) : lo; };
@@ -808,6 +941,50 @@ bool Song::read(std::istream& f, const std::string& path, std::string& err) {
         o[c] = (uint8_t)clampVal(v, 0, MAX_PATTERNS - 1);
       }
       s.orders.push_back(o);
+    } else if (key == "subsong") {
+      std::string subName = restOfLine(ss);
+      if (inSubsong) {
+        // The previous subsong is complete: put it aside.
+        if ((int)doneSubsongs.size() >= 255) break;
+        SubSong done;
+        done.name = s.subsongName;
+        done.tickRate = s.tickRate;
+        done.speeds = s.speeds;
+        done.patternLength = s.patternLength;
+        done.orders = std::move(s.orders);
+        if (done.orders.empty()) done.orders.assign(1, {});
+        done.automation = std::move(s.automation);
+        done.patterns.resize(s.channels.size());
+        for (size_t c = 0; c < s.channels.size(); c++) {
+          done.patterns[c] = std::move(s.channels[c].patterns);
+          s.channels[c].patterns.assign(MAX_PATTERNS, Pattern());
+        }
+        doneSubsongs.push_back(std::move(done));
+        s.orders.clear();
+        s.automation.clear();
+        curPat = nullptr;
+      }
+      inSubsong = true;
+      s.subsongName = subName;
+    } else if (key == "auto") {
+      AutomationLane lane;
+      int on = 1, n = 0;
+      ss >> lane.target >> lane.channel >> lane.fxSlot >> lane.fxParam >> on >> n;
+      if (lane.target < 0 || lane.target >= AUTO_TARGET_COUNT) continue;
+      lane.channel = clampVal(lane.channel, 0, MAX_CHANNELS - 1);
+      lane.fxSlot = clampVal(lane.fxSlot, 0, MAX_CHANNEL_FX - 1);
+      lane.fxParam = clampVal(lane.fxParam, 0, 3);
+      lane.on = on != 0;
+      n = clampVal(n, 0, 100000);
+      for (int k = 0; k < n; k++) {
+        AutoPoint p{0, 0};
+        if (!(ss >> p.pos >> p.value)) break;
+        p.pos = clampF(p.pos, 0.0f, (float)MAX_ORDERS);
+        p.value = clampF(p.value, 0.0f, 1.0f);
+        lane.points.push_back(p);
+      }
+      lane.sort();
+      if (s.automation.size() < 256) s.automation.push_back(std::move(lane));
     } else if (key == "pattern") {
       int c = -1, p = -1;
       ss >> c >> p;
@@ -840,6 +1017,11 @@ bool Song::read(std::istream& f, const std::string& path, std::string& err) {
   if (s.channels.empty()) s.setChannelCount(8);
   if (s.orders.empty()) s.orders.push_back({});
   if (s.instruments.empty()) s.instruments.emplace_back();
+  // The last subsong read is live; the first one becomes the current one.
+  s.subsongs = std::move(doneSubsongs);
+  s.subsongs.emplace_back();
+  s.curSubsong = (int)s.subsongs.size() - 1;
+  s.selectSubsong(0);
   *this = std::move(s);
   return true;
 }

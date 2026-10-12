@@ -32,6 +32,10 @@ FamiTracker, MOD, XM, IT, S3M et MIDI.
 - Thèmes : Furnace, **Keygen** (néon, avec un scroller sinus, des barres copper et un champ d'étoiles), FastTracker, Amber CRT
 - Éditeur de patterns au clavier (disposition physique, fonctionne en AZERTY comme en QWERTY), sélection, copier/coller, transposition
 - Piano roll façon FL Studio, avec un mode accords (« Voices ») qui répartit les notes sur plusieurs canaux
+- **Vue arrangement** : le morceau en frise (canaux × orders) avec aperçu des notes, plusieurs **sous-morceaux** par fichier
+- **Automation** en courbes : volume, panoramique, cutoff, envois, réglages d'effets et master sur tout le morceau
+- **Outils de pattern** : interpoler, humaniser, mettre à l'échelle, inverser, étirer / compresser, chercher / remplacer, swing
+- **Métronome**, **boucle** sur une plage d'orders, **décompte** avant l'enregistrement, **quantification** de l'enregistrement MIDI
 - Annuler / refaire partout : notes, instruments, orders, réglages du morceau, samples
 - Liste d'orders par canal (comme Furnace), ajout / duplication / clonage
 - Oscilloscope par canal, mute / solo
@@ -104,6 +108,9 @@ datrackarxd --save-demo demo.dtk           # écrire la démo dans un fichier
 | `Ctrl+A` | Sélectionner le canal, puis tout le pattern |
 | `Ctrl+Z` / `Ctrl+Y` | Annuler / refaire |
 | `Ctrl+↑/↓` (+`Shift`) | Transposer de 1 (12) demi-tons |
+| `Ctrl+I` | Interpoler les volumes et valeurs d'effets de la sélection |
+| `Ctrl+H` | Chercher / remplacer |
+| Clic droit dans le pattern | Outils de sélection (voir plus bas) |
 | `Suppr` | Effacer |
 | `Inser` / `Retour arrière` | Insérer / supprimer une ligne |
 | Pavé num. `/` `*` | Octave - / + |
@@ -216,6 +223,58 @@ menu MIDI. Chaque note arrive sur son propre canal MIDI et reçoit son propre ca
 
 En mode Record pendant la lecture, tout s'écrit ligne par ligne sur le canal de la note, avec `E880` au
 note off si la note était bendée.
+
+## Arrangement et sous-morceaux
+
+L'onglet **Arrangement** (à côté de Pattern) montre l'order list comme une frise : une ligne par canal, une
+case par order avec le numéro de pattern et un aperçu des notes.
+
+| Action | Effet |
+|---|---|
+| Clic / Shift+clic / glisser | Choisir un order (et le canal), étendre la sélection d'orders |
+| Double-clic | Ouvrir la case dans l'éditeur de patterns |
+| Clic droit sur une case | Numéro de pattern +1 / -1, nouveau pattern vide, copie unique, effacer |
+| Alt+molette | Changer le numéro de pattern |
+| Ctrl+molette / Shift+molette | Zoomer / défiler |
+| New, Dup, Clone, Del, ◀ ▶ | Insérer, répéter, cloner, supprimer, déplacer les orders sélectionnés |
+| Loop | La lecture boucle sur les orders sélectionnés |
+
+En haut à gauche, la liste des **sous-morceaux** : chacun a ses orders, ses patterns, son tempo et son
+automation, et partage les instruments, les samples et les réglages des canaux (pratique pour une
+musique de jeu avec plusieurs morceaux, ou un intro et une boucle). `+` en ajoute un, `-` supprime
+celui affiché. Les exports et le lecteur keygen jouent le sous-morceau affiché.
+
+## Automation
+
+Sous la frise, **Add lane** ajoute une courbe : volume, panoramique, cutoff du filtre de l'instrument,
+envoi réverb, envoi delay ou réglage d'un effet de canal (Channel FX) d'un canal, ou bien volume et cutoff
+master. Clic : ajouter un point, glisser : le déplacer, clic droit : le supprimer. Les points s'alignent sur
+les lignes (Alt pour les placer librement). La courbe tient sa valeur avant le premier point et après le
+dernier, et suit les orders quand on les insère, duplique, déplace ou supprime.
+
+## Outils de pattern
+
+Dans le menu Edit et au clic droit dans le pattern, sur la sélection (ou sans sélection, sur tout le canal
+du curseur) :
+
+- **Interpolate** (`Ctrl+I`) : remplit les volumes et valeurs d'effets entre la première et la dernière valeur ;
+- **Scale volumes** (25 à 200 %), **Humanize volumes** (variation aléatoire de ±8) ;
+- **Reverse rows**, **Expand x2** (une ligne sur deux, deux fois plus lent), **Shrink /2** (deux fois plus rapide) ;
+- **Find & replace** (`Ctrl+H`) : chercher une note, un instrument ou une commande d'effet, et transposer,
+  changer d'instrument, de volume ou de commande, dans la sélection, le pattern ou tout le morceau.
+
+Dans la fenêtre Song, **Swing...** règle la vitesse et le swing (les lignes alternent entre une
+longue et une courte).
+
+## Métronome, décompte et quantification
+
+**Metronome** dans la barre du haut fait cliquer les temps pendant la lecture (accent sur chaque mesure,
+d'après Highlight 1 et 2) ; il ne s'entend jamais dans les exports. **Rec. options** règle :
+
+- **Count-in** : en mode Record, la lecture démarre après 1 à 4 mesures de clics ;
+- **MIDI quantize** : les notes jouées au clavier MIDI pendant la lecture vont sur la ligne la plus proche,
+  toutes les 2 lignes ou sur le temps, au lieu de la ligne en cours ;
+- le volume du métronome.
 
 ## Mixer et effets
 
@@ -384,6 +443,7 @@ La macro volume avec un point de release donne un vrai « release » (fondu apr�
 - `src/ui_pattern.cpp` : éditeur de patterns
 - `src/ui_instrument.cpp` : liste et éditeur d'instruments (puce, FM, sample), fenêtre Samples
 - `src/ui_windows.cpp` : orders, song, mixer, oscilloscope, scroller keygen, aide
+- `src/ui_arrange.cpp` : vue arrangement, sous-morceaux, éditeur d'automation
 - `src/demo.cpp` : morceau de démo
 
 ## Bibliothèques

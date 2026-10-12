@@ -58,6 +58,10 @@ void App::loadSettings() {
       if (k == "midibend") midiBendRange_ = std::clamp(std::stoi(v), 1, 24);
       if (k == "mpe") midiMpe_ = std::stoi(v) != 0;
       if (k == "mperange") midiMpeRange_ = std::clamp(std::stoi(v), 1, 96);
+      if (k == "metronome") engine_->metronome = std::stoi(v) != 0;
+      if (k == "metrovol") metronomeVol_ = std::clamp(std::stof(v), 0.0f, 1.0f);
+      if (k == "countin") countInBars_ = std::clamp(std::stoi(v), 0, 4);
+      if (k == "quantize") midiQuantize_ = std::clamp(std::stoi(v), 0, 3);
     } catch (...) {
     }
   }
@@ -77,6 +81,10 @@ void App::saveSettings() {
   f << "midibend=" << midiBendRange_ << "\n";
   f << "mpe=" << (midiMpe_ ? 1 : 0) << "\n";
   f << "mperange=" << midiMpeRange_ << "\n";
+  f << "metronome=" << (engine_->metronome ? 1 : 0) << "\n";
+  f << "metrovol=" << metronomeVol_ << "\n";
+  f << "countin=" << countInBars_ << "\n";
+  f << "quantize=" << midiQuantize_ << "\n";
 }
 
 void App::openAudio() {
@@ -153,7 +161,9 @@ void App::togglePlay(bool fromCursor) {
   if (engine_->playing()) {
     engine_->stop();
   } else {
-    engine_->play(curOrder_, fromCursor ? curRow_ : 0);
+    // Recording starts after a bar or two of clicks.
+    int countIn = editMode_ ? countInBars_ * std::max(1, song_.highlight2) : 0;
+    engine_->play(curOrder_, fromCursor ? curRow_ : 0, countIn);
   }
 }
 
@@ -416,7 +426,7 @@ void App::fileDialog() {
       }
     } else if (dialogMode_ == FileDialogMode::ExportPlayer) {
       PlayerPayload p;
-      p.song = song_.toText();
+      p.song = song_.currentSubsongOnly().toText();  // the subsong on screen
       p.logo = playerLogo_;
       p.title = playerTitle_;
       p.scroll = playerScroll_;
@@ -496,6 +506,9 @@ void App::menuBar() {
     if (ImGui::MenuItem("Transpose -1", "Ctrl+Down")) transpose(-1);
     if (ImGui::MenuItem("Transpose +12", "Ctrl+Shift+Up")) transpose(12);
     if (ImGui::MenuItem("Transpose -12", "Ctrl+Shift+Down")) transpose(-12);
+    ImGui::Separator();
+    ImGui::TextDisabled("Selection (or the channel)");
+    selectionToolsMenu();
     ImGui::EndMenu();
   }
   if (ImGui::BeginMenu("View")) {
@@ -508,6 +521,7 @@ void App::menuBar() {
     ImGui::MenuItem("Samples", nullptr, &showSamples_);
     ImGui::MenuItem("Mixer", nullptr, &showMixer_);
     ImGui::MenuItem("Channel FX", nullptr, &showChanFx_);
+    ImGui::MenuItem("Arrangement", nullptr, &showArrangement_);
     ImGui::MenuItem("Oscilloscope", nullptr, &showScope_);
     ImGui::MenuItem("Keygen scroller", nullptr, &showScroller_);
     ImGui::Separator();
@@ -543,6 +557,24 @@ void App::menuBar() {
   ImGui::PushStyleColor(ImGuiCol_Text, editMode_ ? ImVec4(1, 0.4f, 0.4f, 1) : ImGui::GetStyleColorVec4(ImGuiCol_Text));
   ImGui::MenuItem("Record", "Space", &editMode_);
   ImGui::PopStyleColor();
+  ImGui::MenuItem("Metronome", nullptr, &engine_->metronome);
+  if (ImGui::BeginMenu("Rec. options")) {
+    ImGui::SetNextItemWidth(140);
+    ImGui::Combo("Count-in", &countInBars_, "Off\0" "1 bar\0" "2 bars\0" "3 bars\0" "4 bars\0");
+    if (ImGui::IsItemHovered()) ImGui::SetTooltip("Clicks before playback starts in Record mode (a bar = Highlight 2 rows)");
+    ImGui::SetNextItemWidth(140);
+    ImGui::Combo("MIDI quantize", &midiQuantize_, "Off\0" "Nearest row\0" "2 rows\0" "Beat\0");
+    if (ImGui::IsItemHovered()) ImGui::SetTooltip("Live MIDI notes go to the nearest row of this grid instead of the row playing");
+    ImGui::SetNextItemWidth(140);
+    ImGui::SliderFloat("Metronome volume", &metronomeVol_, 0, 1, "%.2f");
+    ImGui::EndMenu();
+  }
+  engine_->metronomeVolume = metronomeVol_;
+  if (engine_->countingIn()) {
+    ImGui::PushStyleColor(ImGuiCol_Text, ImVec4(1, 0.8f, 0.3f, 1));
+    ImGui::TextUnformatted("count-in");
+    ImGui::PopStyleColor();
+  }
   ImGui::Separator();
   float bpm = song_.tickRate * 60.0f / (std::max(engine_->speed(), 1) * std::max(song_.highlight1, 1));
   ImGui::Text("Ord %02X  Row %02X  %.1f BPM", playing ? engine_->order() : curOrder_, playing ? engine_->row() : curRow_, bpm);
@@ -707,6 +739,16 @@ int App::midiNoteOn(int key, int velocity, int id) {
     bool live = engine_->playing();
     int order = live ? engine_->order() : curOrder_;
     int row = live ? engine_->row() : curRow_;
+    if (live && midiQuantize_ > 0 && !engine_->countingIn()) {
+      // Round the time the key was hit to the nearest grid row.
+      int grid = midiQuantize_ == 1 ? 1 : midiQuantize_ == 2 ? 2 : std::max(1, song_.highlight1);
+      double pos = row + engine_->currentTick() / (double)std::max(1, engine_->speed());
+      row = (int)std::lround(pos / grid) * grid;
+      if (row >= song_.patternLength) {
+        row = 0;
+        order = order + 1 < (int)song_.orders.size() ? order + 1 : 0;
+      }
+    }
     bool chordStep = !live && midiChord_ && !undo_.empty() && undo_.back().kind == UndoStep::Patterns;
     if (chordStep) {
       // Later notes of a chord join the undo step of the first one.
@@ -742,7 +784,7 @@ void App::midiNoteOff(int id) {
 
   if (h.row >= 0 && editMode_ && engine_->playing() && h.ch < song_.channelCount()) {
     int order = engine_->order(), row = engine_->row();
-    if (order == h.order && row == h.row) row++;  // released within its own row
+    if (order == h.order && row <= h.row) row = h.row + 1;  // released within its own (or a quantized later) row
     if (row < song_.patternLength && order < (int)song_.orders.size()) {
       Cell* c = song_.cell(h.ch, order, row, false);
       if (!c || c->note == NOTE_EMPTY) {
@@ -779,6 +821,7 @@ void App::defaultLayout(unsigned int dockId) {
   ImGui::DockBuilderDockWindow("Instruments", right);
   ImGui::DockBuilderDockWindow("Instrument editor", rightBottom);
   ImGui::DockBuilderDockWindow("Samples", center);
+  ImGui::DockBuilderDockWindow("Arrangement", center);
   ImGui::DockBuilderDockWindow("Oscilloscope", bottom);
   ImGui::DockBuilderDockWindow("Keygen", bottom);
   ImGui::DockBuilderDockWindow("Mixer", bottom);
@@ -865,6 +908,8 @@ void App::frame() {
   if (showSamples_) samplesWindow();
   if (showMixer_) mixerWindow();
   if (showChanFx_) channelFxWindow();
+  if (showArrangement_) arrangementWindow();
+  if (showFindReplace_) findReplaceWindow();
   if (showScope_) scopeWindow();
   if (showScroller_) scrollerWindow();
   if (showEffects_) effectsHelp();

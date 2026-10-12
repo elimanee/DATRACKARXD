@@ -1,5 +1,6 @@
 // Song data model: instruments, samples, patterns, orders, file I/O.
 #pragma once
+#include <algorithm>
 #include <array>
 #include <cstdint>
 #include <iosfwd>
@@ -272,6 +273,49 @@ struct MasterFx {
   float volume = 1.0f;
 };
 
+// Automation: a curve over the song's timeline for a channel or master setting.
+enum AutoTarget : int {
+  AUTO_VOLUME = 0,
+  AUTO_PAN,
+  AUTO_CUTOFF,
+  AUTO_REVERB,
+  AUTO_DELAY,
+  AUTO_FX,
+  AUTO_MASTER_VOLUME,
+  AUTO_MASTER_CUTOFF,
+  AUTO_TARGET_COUNT
+};
+extern const char* const AUTO_TARGET_NAMES[AUTO_TARGET_COUNT];
+
+struct AutoPoint {
+  float pos;    // in orders: 2.5 = halfway through order 2
+  float value;  // 0..1
+};
+
+struct AutomationLane {
+  int target = AUTO_VOLUME;
+  int channel = 0;              // channel targets
+  int fxSlot = 0, fxParam = 0;  // AUTO_FX: which insert effect parameter
+  bool on = true;
+  std::vector<AutoPoint> points;  // sorted by pos
+  bool isMaster() const { return target == AUTO_MASTER_VOLUME || target == AUTO_MASTER_CUTOFF; }
+  // Linear between points, held before the first and after the last; NaN without points.
+  float valueAt(float pos) const;
+  void sort();
+};
+
+// A song can hold several subsongs: each has its own orders, patterns, tempo
+// and automation; instruments, samples and channel settings are shared.
+struct SubSong {
+  std::string name;
+  float tickRate = 60.0f;
+  std::vector<int> speeds{6};
+  int patternLength = 64;
+  std::vector<std::array<uint8_t, MAX_CHANNELS>> orders;
+  std::vector<std::vector<Pattern>> patterns;  // per channel, MAX_PATTERNS entries
+  std::vector<AutomationLane> automation;
+};
+
 struct Song {
   std::string name = "Untitled";
   std::string author;
@@ -288,6 +332,23 @@ struct Song {
   std::vector<Sample> samples;
   std::vector<Wavetable> wavetables;
   MasterFx fx;
+  std::vector<AutomationLane> automation;  // of the current subsong
+
+  // Subsongs. The current one lives in the fields above (orders, patterns in
+  // the channels, tempo, automation); its entry in subsongs only keeps a slot.
+  std::string subsongName;
+  std::vector<SubSong> subsongs;
+  int curSubsong = 0;
+  int subsongCount() const { return std::max(1, (int)subsongs.size()); }
+  std::string subsongNameAt(int i) const;
+  void selectSubsong(int i);
+  int addSubsong();  // a new empty subsong after the others (not selected)
+  void removeSubsong(int i);
+  Song currentSubsongOnly() const;  // a copy with just the current subsong
+  // Keep the automation in place when orders are inserted or removed.
+  void insertOrderTime(int at);
+  void removeOrderTime(int at);
+  void swapOrderTime(int a, int b);
 
   Song();
   void reset(int channelCount = 8);
