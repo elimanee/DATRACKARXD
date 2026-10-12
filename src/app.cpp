@@ -14,6 +14,8 @@
 #include "demo.h"
 #include "import.h"
 #include "midifile.h"
+#include "modexport.h"
+#include "vgmexport.h"
 #include "payload.h"
 #include "theme.h"
 
@@ -240,6 +242,8 @@ void App::openFileDialog(FileDialogMode mode) {
   if (mode == FileDialogMode::ExportWav) base += ".wav";
   if (mode == FileDialogMode::ExportMidi) base += ".mid";
   if (mode == FileDialogMode::ExportOgg) base += ".ogg";
+  if (mode == FileDialogMode::ExportVgm) base += ".vgm";
+  if (mode == FileDialogMode::ExportModule) base += moduleFormat_ == 1 ? ".mod" : moduleFormat_ == 2 ? ".it" : ".xm";
 #ifdef _WIN32
   if (mode == FileDialogMode::ExportPlayer) base += ".exe";
 #endif
@@ -281,6 +285,8 @@ void App::fileDialog() {
                       : dialogMode_ == FileDialogMode::SaveInstrument ? "Save instrument###filedlg"
                       : dialogMode_ == FileDialogMode::ExportMidi ? "Export MIDI###filedlg"
                       : dialogMode_ == FileDialogMode::ExportOgg ? "Export OGG###filedlg"
+                      : dialogMode_ == FileDialogMode::ExportModule ? "Export module (XM, MOD, IT)###filedlg"
+                      : dialogMode_ == FileDialogMode::ExportVgm ? "Export VGM###filedlg"
                       : dialogMode_ == FileDialogMode::ExportPlayer ? "Export keygen player###filedlg"
                                                                  : "Export WAV###filedlg";
   if (dialogOpenRequest_) {
@@ -297,6 +303,11 @@ void App::fileDialog() {
   else if (dialogMode_ == FileDialogMode::SaveInstrument) exts = {".dti"};
   else if (dialogMode_ == FileDialogMode::ExportMidi) exts = {".mid"};
   else if (dialogMode_ == FileDialogMode::ExportOgg) exts = {".ogg"};
+  else if (dialogMode_ == FileDialogMode::ExportVgm) exts = {".vgm"};
+  else if (dialogMode_ == FileDialogMode::ExportModule)
+    exts = moduleFormat_ == 1 ? std::vector<std::string>{".mod", ".xm", ".it"}
+           : moduleFormat_ == 2 ? std::vector<std::string>{".it", ".xm", ".mod"}
+                                : std::vector<std::string>{".xm", ".mod", ".it"};
   else if (dialogMode_ == FileDialogMode::LoadSample) exts = {".wav", ".flac", ".mp3", ".ogg", ".oga"};
 #ifdef _WIN32
   else if (dialogMode_ == FileDialogMode::ExportPlayer) exts = {".exe"};
@@ -367,6 +378,25 @@ void App::fileDialog() {
     ImGui::InputInt("loops", &exportLoops_);
     exportLoops_ = std::clamp(exportLoops_, 1, 16);
   }
+  if (dialogMode_ == FileDialogMode::ExportModule) {
+    ImGui::SetNextItemWidth(120);
+    if (ImGui::Combo("Format", &moduleFormat_, "XM (FastTracker 2)\0MOD (ProTracker)\0IT (Impulse Tracker)\0")) {
+      // Follow the format in the file name.
+      fs::path p(dialogName_);
+      p.replace_extension(moduleFormat_ == 1 ? ".mod" : moduleFormat_ == 2 ? ".it" : ".xm");
+      std::snprintf(dialogName_, sizeof(dialogName_), "%s", p.string().c_str());
+    }
+    ImGui::SameLine();
+    ImGui::SetNextItemWidth(110);
+    ImGui::BeginDisabled(moduleFormat_ == 1);
+    ImGui::Combo("Rendered instruments", &moduleRate_, "11025 Hz\0" "22050 Hz\0" "44100 Hz\0");
+    ImGui::EndDisabled();
+    ImGui::SetNextItemWidth(120);
+    ImGui::SliderFloat("Note held", &moduleHold_, 0.2f, 4.0f, "%.1f s");
+    if (ImGui::IsItemHovered())
+      ImGui::SetTooltip("Instruments that aren't samples are rendered: one note held this long, then\n"
+                        "looped if it still sounds. MOD resamples everything to 8363 Hz, 8-bit.");
+  }
   if (dialogMode_ == FileDialogMode::ExportOgg) {
     ImGui::SetNextItemWidth(200);
     ImGui::SliderInt("Quality", &oggQuality_, 0, 10);
@@ -383,7 +413,9 @@ void App::fileDialog() {
   if (accept && dialogName_[0]) {
     fs::path p = fs::path(dialogName_);
     if (p.is_relative()) p = fs::path(dialogDir_) / p;
-    if (!opening && p.extension() != ext) p += ext;
+    std::string pe = p.extension().string();
+    std::transform(pe.begin(), pe.end(), pe.begin(), ::tolower);
+    if (!opening && std::find(exts.begin(), exts.end(), pe) == exts.end()) p += ext;
     std::string path = p.string();
     std::string err;
     if (dialogMode_ == FileDialogMode::Open) {
@@ -437,6 +469,30 @@ void App::fileDialog() {
       else
         setStatus("Player export failed: " + err);
       cancel = true;
+    } else if (dialogMode_ == FileDialogMode::ExportVgm) {
+      std::string report;
+      if (exportVGM(song_, path, err, report)) {
+        setStatus("Exported " + path);
+        exportReport_ = report;
+        showExportReport_ = !report.empty();
+      } else {
+        setStatus("VGM export failed: " + err);
+      }
+      cancel = true;
+    } else if (dialogMode_ == FileDialogMode::ExportModule) {
+      ModuleExportOptions opt;
+      opt.format = moduleFormatFromPath(path);
+      opt.bakeRate = moduleRate_ == 0 ? 11025 : moduleRate_ == 2 ? 44100 : 22050;
+      opt.holdSeconds = moduleHold_;
+      std::string report;
+      if (exportModule(song_, path, opt, err, report)) {
+        setStatus("Exported " + path);
+        exportReport_ = report;
+        showExportReport_ = !report.empty();
+      } else {
+        setStatus("Module export failed: " + err);
+      }
+      cancel = true;
     } else if (dialogMode_ == FileDialogMode::ExportOgg) {
       if (exportOgg(song_, path, 44100, exportLoops_, oggQuality_, err))
         setStatus("Exported " + path);
@@ -481,6 +537,9 @@ void App::menuBar() {
     if (ImGui::MenuItem("Export WAV...")) openFileDialog(FileDialogMode::ExportWav);
     if (ImGui::MenuItem("Export OGG...")) openFileDialog(FileDialogMode::ExportOgg);
     if (ImGui::MenuItem("Export MIDI...")) openFileDialog(FileDialogMode::ExportMidi);
+    if (ImGui::MenuItem("Export module (XM, MOD, IT)...")) openFileDialog(FileDialogMode::ExportModule);
+    if (ImGui::MenuItem("Export VGM...")) openFileDialog(FileDialogMode::ExportVgm);
+    if (ImGui::IsItemHovered()) ImGui::SetTooltip("Register log of the emulated chips (AY, SN76489, Game Boy, OPL3)");
     if (ImGui::MenuItem("Export keygen player...")) {
       std::snprintf(playerTitle_, sizeof(playerTitle_), "%s", song_.name.c_str());
       if (!playerScroll_[0]) {
@@ -918,6 +977,16 @@ void App::frame() {
   if (showAbout_) aboutWindow();
 
   playerExportPopup();
+  if (showExportReport_) {
+    ImGui::SetNextWindowSize(ImVec2(460, 0), ImGuiCond_Appearing);
+    if (ImGui::Begin("Export report", &showExportReport_)) {
+      ImGui::TextWrapped("Exported. These parts had no equivalent in the format and were left out:");
+      ImGui::Separator();
+      ImGui::TextUnformatted(exportReport_.c_str());
+      if (ImGui::Button("OK")) showExportReport_ = false;
+    }
+    ImGui::End();
+  }
   fileDialog();
   confirmPopup();
   handleKeys();

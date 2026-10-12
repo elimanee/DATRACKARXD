@@ -9,6 +9,7 @@
 struct PlayerPayload {
   std::string song;  // .dtk text
   std::string logo, scroll, title;
+  std::string greets;  // second scroller (empty = none)
   KeygenStyle style;
 };
 

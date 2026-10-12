@@ -12,7 +12,9 @@
 #include "demo.h"
 #include "import.h"
 #include "midifile.h"
+#include "modexport.h"
 #include "payload.h"
+#include "vgmexport.h"
 #include "player.h"
 
 static int usage() {
@@ -24,6 +26,9 @@ static int usage() {
       "  datrackarxd --convert module out.dtk        import a module (or .mid) and save it as .dtk\n"
       "  datrackarxd --export-midi song out.mid [n]  write the song as a MIDI file\n"
       "  datrackarxd --export-stems song prefix      one WAV per channel (prefix_01.wav...)\n"
+      "  datrackarxd --export-module song out.xm     XM, MOD or IT (by extension); instruments\n"
+      "                                              that aren't samples are rendered\n"
+      "  datrackarxd --export-vgm song out.vgm       chip register log (AY, SN76489, GB, OPL3)\n"
       "  datrackarxd --convert-instrument in out.dti instrument preset from .fui/.wav/.dti\n"
       "  datrackarxd --export-player song out [logo] [scroller text]\n"
       "                                              standalone keygen-style player\n"
@@ -84,6 +89,28 @@ static int commandLine(int argc, char** argv) {
       return 1;
     }
     std::printf("wrote %s\n", argv[3]);
+    return 0;
+  }
+  if (cmd == "--export-vgm" && argc >= 4) {
+    std::string report;
+    if (!loadAnySong(argv[2], song, err) || !exportVGM(song, argv[3], err, report)) {
+      std::fprintf(stderr, "%s\n", err.c_str());
+      return 1;
+    }
+    std::printf("wrote %s\n", argv[3]);
+    if (!report.empty()) std::printf("left out:\n%s", report.c_str());
+    return 0;
+  }
+  if (cmd == "--export-module" && argc >= 4) {
+    ModuleExportOptions opt;
+    opt.format = moduleFormatFromPath(argv[3]);
+    std::string report;
+    if (!loadAnySong(argv[2], song, err) || !exportModule(song, argv[3], opt, err, report)) {
+      std::fprintf(stderr, "%s\n", err.c_str());
+      return 1;
+    }
+    std::printf("wrote %s\n", argv[3]);
+    if (!report.empty()) std::printf("not converted:\n%s", report.c_str());
     return 0;
   }
   if (cmd == "--export" && argc >= 4) {

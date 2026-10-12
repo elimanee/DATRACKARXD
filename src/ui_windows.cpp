@@ -10,6 +10,7 @@
 #include <sstream>
 
 #include "app.h"
+#include "player.h"
 #include "theme.h"
 
 void App::ordersWindow() {
@@ -497,7 +498,7 @@ void App::scopeWindow() {
   ImGui::End();
 }
 
-// Keygen-style intro screen: starfield, copper bars, logo and sine scroller.
+// Keygen-style intro screen (the same scene as the exported players).
 void App::scrollerWindow() {
   if (!ImGui::Begin("Keygen", &showScroller_)) {
     ImGui::End();
@@ -515,6 +516,7 @@ void App::scrollerWindow() {
           std::to_string(song_.instruments.size()) + " INSTRUMENTS   ***   PRESS ENTER TO PLAY   ***   "
           "GREETINGS TO ALL TRACKER MUSICIANS, DEMOSCENERS AND FURNACE USERS   ***   ";
   keygen_.scroll = text;
+  channelLevels(*engine_, song_.channelCount(), keygen_.levels);
   keygen_.draw(ImGui::GetWindowDrawList(), p0, size, (float)ImGui::GetTime(), ImGui::GetIO().DeltaTime, peak);
   ImGui::Dummy(size);
   ImGui::End();

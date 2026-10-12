@@ -1,4 +1,6 @@
-// Minimal zlib/deflate decoder (RFC 1950/1951), enough for .fur files.
+// Minimal zlib/deflate decoder (RFC 1950/1951), enough for .fur files, and a
+// small encoder (LZ77 with the fixed Huffman codes) for the player payload.
+#include <algorithm>
 #include <cstring>
 
 #include "import.h"
@@ -190,4 +192,108 @@ bool zlibInflate(const uint8_t* src, size_t len, std::vector<uint8_t>& out) {
   out.reserve(len * 4);
   Inflater inf(src + 2, len - 2, out);
   return inf.run();
+}
+
+namespace {
+
+class BitWriter {
+ public:
+  std::vector<uint8_t>& out;
+  uint32_t acc = 0;
+  int n = 0;
+  explicit BitWriter(std::vector<uint8_t>& o) : out(o) {}
+  void bits(uint32_t v, int count) {  // least significant bit first
+    acc |= v << n;
+    n += count;
+    while (n >= 8) {
+      out.push_back((uint8_t)acc);
+      acc >>= 8;
+      n -= 8;
+    }
+  }
+  void code(uint32_t c, int len) {  // Huffman codes go most significant bit first
+    uint32_t r = 0;
+    for (int i = 0; i < len; i++) r |= ((c >> i) & 1) << (len - 1 - i);
+    bits(r, len);
+  }
+  void flush() {
+    if (n > 0) out.push_back((uint8_t)acc);
+    acc = 0;
+    n = 0;
+  }
+};
+
+const int LEN_BASE[29] = {3, 4, 5, 6, 7, 8, 9, 10, 11, 13, 15, 17, 19, 23, 27, 31, 35, 43, 51, 59, 67, 83, 99, 115, 131, 163, 195, 227, 258};
+const int LEN_EXTRA[29] = {0, 0, 0, 0, 0, 0, 0, 0, 1, 1, 1, 1, 2, 2, 2, 2, 3, 3, 3, 3, 4, 4, 4, 4, 5, 5, 5, 5, 0};
+const int DIST_BASE[30] = {1, 2, 3, 4, 5, 7, 9, 13, 17, 25, 33, 49, 65, 97, 129, 193, 257, 385, 513, 769, 1025, 1537, 2049, 3073,
+                           4097, 6145, 8193, 12289, 16385, 24577};
+const int DIST_EXTRA[30] = {0, 0, 0, 0, 1, 1, 2, 2, 3, 3, 4, 4, 5, 5, 6, 6, 7, 7, 8, 8, 9, 9, 10, 10, 11, 11, 12, 12, 13, 13};
+
+void literal(BitWriter& w, int sym) {
+  if (sym < 144) w.code(0x30 + sym, 8);
+  else if (sym < 256) w.code(0x190 + sym - 144, 9);
+  else if (sym < 280) w.code(sym - 256, 7);
+  else w.code(0xC0 + sym - 280, 8);
+}
+
+}  // namespace
+
+void zlibDeflate(const uint8_t* src, size_t len, std::vector<uint8_t>& out) {
+  out.clear();
+  out.push_back(0x78);
+  out.push_back(0x01);
+  BitWriter w(out);
+  w.bits(1, 1);  // final block
+  w.bits(1, 2);  // fixed Huffman codes
+  const int WINDOW = 32768, HASH = 1 << 15, MAX_CHAIN = 64;
+  std::vector<int> head(HASH, -1), prev(len, -1);
+  auto hash = [&](size_t i) { return ((src[i] << 10) ^ (src[i + 1] << 5) ^ src[i + 2]) & (HASH - 1); };
+  size_t i = 0;
+  while (i < len) {
+    int bestLen = 0, bestDist = 0;
+    if (i + 2 < len) {
+      int h = hash(i);
+      int cand = head[h], chain = 0;
+      while (cand >= 0 && (int)(i - cand) <= WINDOW && chain++ < MAX_CHAIN) {
+        int l = 0, maxL = (int)std::min<size_t>(258, len - i);
+        while (l < maxL && src[cand + l] == src[i + l]) l++;
+        if (l > bestLen) {
+          bestLen = l;
+          bestDist = (int)(i - cand);
+          if (l == maxL) break;
+        }
+        cand = prev[cand];
+      }
+    }
+    size_t step = bestLen >= 3 ? (size_t)bestLen : 1;
+    if (bestLen >= 3) {
+      int c = 28;
+      while (LEN_BASE[c] > bestLen) c--;
+      literal(w, 257 + c);
+      w.bits(bestLen - LEN_BASE[c], LEN_EXTRA[c]);
+      int d = 29;
+      while (DIST_BASE[d] > bestDist) d--;
+      w.code(d, 5);
+      w.bits(bestDist - DIST_BASE[d], DIST_EXTRA[d]);
+    } else {
+      literal(w, src[i]);
+    }
+    for (size_t k = 0; k < step; k++, i++) {
+      if (i + 2 < len) {
+        int h = hash(i);
+        prev[i] = head[h];
+        head[h] = (int)i;
+      }
+    }
+  }
+  literal(w, 256);
+  w.flush();
+  // Adler-32 of the data.
+  uint32_t a = 1, b = 0;
+  for (size_t k = 0; k < len; k++) {
+    a = (a + src[k]) % 65521;
+    b = (b + a) % 65521;
+  }
+  uint32_t ad = (b << 16) | a;
+  for (int k = 3; k >= 0; k--) out.push_back((uint8_t)(ad >> (8 * k)));
 }

@@ -27,7 +27,10 @@ FamiTracker, MOD, XM, IT, S3M et MIDI.
 - **Clavier MIDI** : jouer, faire des accords et enregistrer depuis un clavier MIDI (vélocité incluse)
 - **Presets d'instruments** : `.dti` (sauver / charger), import `.fui` (Furnace) et `.wav`
 - **Import** des formats `.fur` (Furnace), `.dmf` (DefleMask), `.ftm` / `.dnm` / `.0cc` (FamiTracker), `.mod`, `.xm`, `.it`, `.s3m` et `.mid`
-- **Export** WAV, OGG, MIDI, et **lecteur keygen** : un programme autonome qui joue le morceau avec logo, étoiles et scroller
+- **Export** WAV, OGG, MIDI, **modules XM / MOD / IT** (les instruments synthétiques sont rendus en samples)
+  et **VGM** (les registres des puces émulées, pour les lecteurs VGM et le vrai matériel)
+- **Lecteur keygen** : un programme autonome et compressé qui joue le morceau avec logo, fond animé (étoiles,
+  plasma, tunnel, rotozoom), objet 3D, scrollers, VU-mètres et flashs sur la musique
 - **DATRACKARXD Keygen** : une appli séparée pour fabriquer ces lecteurs, avec aperçu en direct
 - Thèmes : Furnace, **Keygen** (néon, avec un scroller sinus, des barres copper et un champ d'étoiles), FastTracker, Amber CRT
 - Éditeur de patterns au clavier (disposition physique, fonctionne en AZERTY comme en QWERTY), sélection, copier/coller, transposition
@@ -39,7 +42,7 @@ FamiTracker, MOD, XM, IT, S3M et MIDI.
 - Annuler / refaire partout : notes, instruments, orders, réglages du morceau, samples
 - Liste d'orders par canal (comme Furnace), ajout / duplication / clonage
 - Oscilloscope par canal, mute / solo
-- Sauvegarde dans un format texte `.dtk`, export WAV (mix complet ou une piste par canal), OGG et MIDI
+- Sauvegarde dans un format texte `.dtk`, export WAV (mix complet ou une piste par canal), OGG, MIDI, XM, MOD, IT et VGM
 - Une démo keygen intégrée qui se charge au démarrage, et `songs/chips.dtk` pour entendre les puces émulées
 
 ## Télécharger
@@ -83,6 +86,8 @@ datrackarxd --export song.xm out.wav 2     # rendu en WAV (2 boucles)
 datrackarxd --export song.ftm out.ogg      # rendu en OGG Vorbis
 datrackarxd --export-midi song.dtk out.mid # écrire un fichier MIDI
 datrackarxd --export-stems song.fur piste  # une piste WAV par canal : piste_01.wav, piste_02.wav...
+datrackarxd --export-module song.dtk out.xm   # module XM, MOD ou IT (d'après l'extension)
+datrackarxd --export-vgm song.dtk out.vgm     # registres des puces émulées en VGM
 datrackarxd --convert song.it song.dtk     # importer un module (ou un .mid) et l'enregistrer en .dtk
 datrackarxd --convert-instrument lead.fui lead.dti   # preset d'instrument depuis un .fui / .wav
 datrackarxd --export-player song.dtk intro "LOGO" "texte du scroller"   # lecteur keygen autonome
@@ -366,9 +371,45 @@ wavetables) et **Load...** ajoute un instrument depuis un `.dti`, un `.fui` de F
 Dans le menu Fichier :
 
 - **Export WAV** / **Export OGG** (qualité réglable) / **Export MIDI** (une piste par canal, bruit sur le canal batterie) ;
+- **Export module (XM, MOD, IT)** : voir plus bas ;
+- **Export VGM** : voir plus bas ;
 - **Export keygen player** : choisir le logo, le titre et le texte du scroller ; on obtient un programme
   autonome qui joue le morceau en boucle avec le champ d'étoiles, les barres copper, le logo et le
   scroller (Espace : pause, F : plein écran, Échap : quitter). Le programme n'a besoin de rien d'autre.
+
+Une fenêtre **Export report** liste ensuite ce qui n'a pas pu passer dans le format choisi.
+
+### Modules XM, MOD et IT
+
+Le morceau devient un module lisible par FastTracker 2, ProTracker, Impulse Tracker, OpenMPT, MilkyTracker,
+Schism Tracker ou libxmp :
+
+- les instruments samples gardent leurs samples (rééchantillonnés à 8363 Hz pour le MOD) ;
+- les autres (puce, FM, SID, puces émulées, avec leurs macros, ADSR et LFO) sont **rendus
+  en samples** : une note tenue est enregistrée, et si le son continue on y cherche une boucle propre ;
+  sinon le sample contient la note et son release. Réglages : la fréquence d'échantillonnage du rendu et
+  la durée de la note tenue ;
+- les effets (arpège, glissements, portamento, vibrato, trémolo, volume, panoramique, retrigger, sauts,
+  vitesse, tempo) sont traduits ; un deuxième effet va dans la colonne volume quand le format le permet ;
+- XM : 32 canaux maximum ; MOD : 4 à 32 canaux, notes de C-3 à B-5 (octaves ProTracker) ;
+  IT : 64 canaux, patterns de 200 lignes maximum (les plus longs sont coupés).
+
+Ne sont pas exportés, et signalés dans le rapport : les effets de canal, la réverbération / le delay /
+le filtre master, l'automation et les sous-morceaux autres que celui affiché.
+
+### VGM
+
+Le format VGM enregistre les écritures dans les registres des puces : le fichier se lit avec les lecteurs
+VGM (foobar2000 + VGMStream, VGMPlay, vgm2wav...) et peut être joué sur du vrai matériel. Seuls les canaux
+qui jouent un instrument **puce émulée** sont exportés :
+
+- AY-3-8910 / YM2149 : 6 voix (deux puces) ;
+- SN76489 : 3 voix carrées, ou 2 voix + le bruit ;
+- Game Boy : les deux pulses, la wave et le bruit ;
+- OPL3 : 18 voix 2 opérateurs ou 6 voix 4 opérateurs.
+
+Les effets de canal, le mixer et l'automation n'existent pas sur les puces et ne sont donc pas dans le
+VGM ; le rapport les signale, ainsi que les canaux laissés de côté.
 
 ## DATRACKARXD Keygen (appli séparée)
 
@@ -377,13 +418,19 @@ Dans le menu Fichier :
 1. ouvrir un morceau (bouton **Open song...** ou glisser-déposer un fichier : `.dtk`, `.fur`, `.dmf`,
    `.ftm`, `.mod`, `.xm`, `.it`, `.s3m`, `.mid`), il se joue tout de suite ;
 2. régler le logo, le titre de la fenêtre et le texte du scroller ;
-3. régler le look : couleurs arc-en-ciel ou une seule couleur, barres copper, champ d'étoiles et sa
-   vitesse, vitesse et hauteur de vague du scroller, oscilloscope ; l'aperçu montre exactement le
-   résultat ;
+3. régler le look ; l'aperçu montre exactement le résultat :
+   - fond : champ d'étoiles, plasma, tunnel, rotozoom ou noir, ou **un enchaînement** des quatre avec des
+     fondus (durée de chaque scène réglable) ;
+   - objet 3D en faces pleines : cube, pyramide ou octaèdre, qui grossit sur les coups ;
+   - logo : vague, pulsation avec la musique ou glitch ;
+   - scroller : sinus, rebond ou rouleau, avec sa vitesse et sa hauteur ; un deuxième scroller de
+     **greetings** en haut ;
+   - couleurs arc-en-ciel ou une seule couleur, barres copper, oscilloscope, **VU-mètres** par canal et
+     **flash** sur les coups forts ;
 4. **Export player...** écrit le lecteur autonome.
 
-Le lecteur est une copie de cette petite appli avec le morceau dedans, donc plus léger qu'avec le
-tracker. Si `datrackarxd-keygen` est à côté du tracker, l'export du tracker l'utilise aussi.
+Le lecteur est une copie de cette petite appli avec le morceau dedans, compressé (zlib), donc plus léger
+qu'avec le tracker. Si `datrackarxd-keygen` est à côté du tracker, l'export du tracker l'utilise aussi.
 
 ```sh
 datrackarxd-keygen                                    # ouvrir l'appli
@@ -434,7 +481,8 @@ La macro volume avec un point de release donne un vrai « release » (fondu apr�
 - `src/chips.*` : puces émulées (AY / YM2149, SN76489, Game Boy, OPL3 via ymfm)
 - `src/audiofile.*`, `src/sampleops.*`, `src/recorder.*` : lecture WAV / FLAC / MP3 / OGG, outils de l'éditeur de samples, enregistrement
 - `src/export.cpp`, `src/midifile.cpp` : export OGG, import / export MIDI
-- `src/import*.cpp`, `src/fur_internal.h`, `src/inflate.cpp` : import FUR, DMF, FTM, MOD, S3M, XM, IT (et décompression zlib)
+- `src/modexport.*`, `src/vgmexport.*` : export XM / MOD / IT et VGM
+- `src/import*.cpp`, `src/fur_internal.h`, `src/inflate.cpp` : import FUR, DMF, FTM, MOD, S3M, XM, IT (et compression / décompression zlib)
 - `src/midi.*` : entrée clavier MIDI (RtMidi)
 - `src/payload.*`, `src/player.cpp`, `src/keygen_fx.*` : lecteur keygen autonome et sa scène
 - `src/keygen_main.cpp`, `src/filebrowser.*` : l'appli DATRACKARXD Keygen

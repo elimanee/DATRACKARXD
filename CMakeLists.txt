@@ -1,5 +1,5 @@
 cmake_minimum_required(VERSION 3.16)
-project(DATRACKARXD VERSION 0.8.0 LANGUAGES CXX C)
+project(DATRACKARXD VERSION 0.9.0 LANGUAGES CXX C)
 
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
@@ -155,7 +155,9 @@ add_library(dtcore STATIC
   src/keygen_fx.cpp
   src/payload.cpp
   src/player.cpp
-  src/sampleops.cpp)
+  src/sampleops.cpp
+  src/modexport.cpp
+  src/vgmexport.cpp)
 target_include_directories(dtcore PUBLIC src)
 target_link_libraries(dtcore PUBLIC imgui ymfm)
 target_compile_definitions(dtcore PUBLIC DATRACKARXD_VERSION="${PROJECT_VERSION}")
@@ -189,6 +191,20 @@ foreach(t dtcore datrackarxd datrackarxd-keygen)
     target_compile_options(${t} PRIVATE -Wall -Wextra)
   endif()
 endforeach()
+# Smaller programs (the keygen players are copies of them): unused code
+# dropped and symbols stripped in release builds.
+if(NOT MSVC)
+  foreach(t imgui ymfm dtcore datrackarxd datrackarxd-keygen)
+    target_compile_options(${t} PRIVATE -ffunction-sections -fdata-sections)
+  endforeach()
+  foreach(t datrackarxd datrackarxd-keygen)
+    if(APPLE)
+      target_link_options(${t} PRIVATE "$<$<CONFIG:Release>:-Wl,-dead_strip>")
+    else()
+      target_link_options(${t} PRIVATE "$<$<CONFIG:Release>:-Wl,--gc-sections>" "$<$<CONFIG:Release>:-s>")
+    endif()
+  endforeach()
+endif()
 foreach(t datrackarxd datrackarxd-keygen)
   if(TARGET SDL2::SDL2main)
     target_link_libraries(${t} PRIVATE SDL2::SDL2main)

@@ -23,6 +23,35 @@ struct ChipFrame {
   float morph = -1;        // wavetable morph position (GB wave channel), -1 = off
 };
 
+// A voice's registers as the chip sees them (VGM export). Counters change
+// whenever the voice restarts something the chip only restarts on a write.
+struct ChipRegs {
+  int type = INS_STANDARD;
+  double clock = 0;
+  // AY / YM2149: period 12-bit, noise 5-bit, envelope period and shape,
+  // volume 0-15 or 16 for the envelope, mixer.
+  int ayPeriod = 1, ayNoise = 1, ayEnvPeriod = 1, ayEnvShape = 0, ayVol = 0;
+  bool ayTone = true, ayNoiseOn = false, ym = false;
+  uint32_t ayShapeWrites = 0;
+  // SN76489: 10-bit period, attenuation 0-15 (15 = off), noise mode.
+  int snPeriod = 1, snAtten = 15;
+  bool snNoise = false, snWhite = true;
+  uint32_t snNoiseResets = 0;
+  // Game Boy: channel kind, 11-bit frequency, duty, envelope at the
+  // trigger, sweep (NR10), noise clock, wave RAM and its volume code.
+  int gbKind = 0, gbFreq = 0, gbDuty = 2, gbEnvVol = 0, gbEnvDir = 0, gbEnvLen = 0, gbSweep = 0;
+  int gbNoiseShift = 0, gbNoiseDiv = 0, gbWaveVol = 1, gbSoftVol = -1;
+  bool gbShort = false;
+  int gbWave[WAVETABLE_LEN] = {};
+  uint32_t gbTriggers = 0;
+  // OPL3, laid out on channel 0 (and 3 in 4-op mode): per operator the
+  // 0x20, 0x40, 0x60, 0x80 and 0xE0 registers, then the channel registers.
+  int oplOp[4][5] = {};
+  int oplC0 = 0, oplC3 = 0, oplBD = 0, oplFnum = 0, oplBlock = 0;
+  bool oplKey = false, oplFour = false;
+  uint32_t oplRetriggers = 0;
+};
+
 class ChipVoice {
  public:
   explicit ChipVoice(int type) : type_(type) {}
@@ -33,6 +62,7 @@ class ChipVoice {
   // True when the voice can't make a sound until the next note
   // (OPL release done, Game Boy envelope down to 0).
   virtual bool finished() const { return false; }
+  virtual void regs(ChipRegs& out) const = 0;
 
  private:
   int type_;

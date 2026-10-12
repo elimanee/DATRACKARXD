@@ -1244,6 +1244,11 @@ void Engine::render(float* out, int frames) {
       dlL += vl * dlSend;
       dlR += vr * dlSend;
     }
+    if (bakeMode) {
+      out[i * 2] = l;
+      out[i * 2 + 1] = r;
+      continue;
+    }
     if (fx.delay) {
       // The echo time follows the song: delayRows rows at the current speed.
       int delay = (int)(fx.delayRows * speed() * sampleRate_ / std::max(tickRate_, 1.0f));
