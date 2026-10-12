@@ -21,20 +21,27 @@ std::vector<PRNote> readNotes(const Pattern* p, int len) {
     const Cell& c = p->rows[r];
     if (c.note == NOTE_EMPTY) continue;
     if (!out.empty() && out.back().start + out.back().len > r) out.back().len = r - out.back().start;
-    if (c.note >= 0) out.push_back({r, len - r, c.note, c.ins, c.vol});
+    if (c.note >= 0) {
+      PRNote n{r, len - r, c.note, c.ins, c.vol};
+      n.slide = cellEffect(c, 0x03) != -1;
+      out.push_back(n);
+    }
   }
   return out;
 }
 
-// Rewrites the note column. Instrument and volume move with their note;
-// effects stay on their rows. On equal start rows the later note wins.
-void writeNotes(Pattern* p, int len, std::vector<PRNote> notes) {
+// Rewrites the note column. Instrument, volume and the slide (03xx) move
+// with their note; other effects stay on their rows. On equal start rows the
+// later note wins. A slide note glides from the previous note over its own
+// length: its 03xx speed comes from the interval and the length.
+void writeNotes(Pattern* p, int len, std::vector<PRNote> notes, int ticksPerRow, int& effectCols) {
   for (int r = 0; r < len; r++) {
     Cell& c = p->rows[r];
     if (c.note != NOTE_EMPTY) {
       c.note = NOTE_EMPTY;
       c.ins = -1;
       c.vol = -1;
+      removeCellEffect(c, 0x03);
     }
   }
   std::stable_sort(notes.begin(), notes.end(), [](const PRNote& a, const PRNote& b) { return a.start < b.start; });
@@ -50,6 +57,12 @@ void writeNotes(Pattern* p, int len, std::vector<PRNote> notes) {
     c.note = (int16_t)std::clamp(n.note, 0, NOTE_COUNT - 1);
     c.ins = (int16_t)n.ins;
     c.vol = (int16_t)n.vol;
+    if (n.slide) {
+      int from = i > 0 ? uniq[i - 1].note : n.note;
+      int ticks = std::max(1, n.len) * std::max(1, ticksPerRow);
+      int speed = std::clamp((int)std::ceil(std::abs(n.note - from) * 32.0 / ticks), 1, 255);
+      putCellEffect(c, effectCols, 0x03, speed);
+    }
     int end = n.start + std::max(1, n.len);
     int next = i + 1 < uniq.size() ? uniq[i + 1].start : len;
     if (end < next && end < len) p->rows[end].note = NOTE_OFF;
@@ -155,6 +168,11 @@ void App::pianoRollWindow() {
     ImGui::SetTooltip("Chords: notes that overlap are spread over this channel and the next ones");
   ImGui::SameLine();
   ImGui::Checkbox("Ghosts", &prGhosts_);
+  ImGui::SameLine();
+  ImGui::Checkbox("Slide", &prSlide_);
+  if (ImGui::IsItemHovered())
+    ImGui::SetTooltip("New notes are slide notes: they glide from the previous note over their length.\n"
+                      "Alt+click or S toggles slide on notes.");
   ImGui::SameLine();
   curIns_ = std::clamp(curIns_, 0, std::max(0, (int)song_.instruments.size() - 1));
   char insLabel[128];
@@ -268,8 +286,21 @@ void App::pianoRollWindow() {
     const PRNote& n = notes[i];
     float x0 = rowX((float)n.start), x1 = rowX((float)(n.start + n.len)), y = noteY((float)n.note);
     bool sel = prSel_.count(noteKey(n)) > 0;
+    if (x1 >= g0.x && x0 <= g1.x && n.slide) {
+      // The glide: from the previous note of the same channel to this one.
+      int from = n.note, best = -1;
+      for (const PRNote& o : notes)
+        if (o.ch == n.ch && o.start < n.start && o.start > best) {
+          best = o.start;
+          from = o.note;
+        }
+      float ya = noteY((float)from) + zy / 2, yb = y + zy / 2;
+      dl->AddLine(ImVec2(x0, ya), ImVec2(x1, yb), IM_COL32(255, 255, 255, 200), 2.0f);
+      dl->AddTriangleFilled(ImVec2(x0 + 1, y + 1), ImVec2(x0 + 1, y + zy - 1), ImVec2(x0 + std::min(10.0f, zy), y + zy / 2),
+                            IM_COL32(255, 255, 255, 230));
+    }
     if (x1 >= g0.x && x0 <= g1.x) {
-      dl->AddRectFilled(ImVec2(x0 + 1, y + 1), ImVec2(x1 - 1, y + zy - 1), insColor(n.ins, sel ? 255 : 210), 3);
+      dl->AddRectFilled(ImVec2(x0 + 1, y + 1), ImVec2(x1 - 1, y + zy - 1), insColor(n.ins, n.slide ? (sel ? 170 : 110) : sel ? 255 : 210), 3);
       dl->AddRect(ImVec2(x0 + 1, y + 1), ImVec2(x1 - 1, y + zy - 1), sel ? IM_COL32(255, 255, 255, 255) : IM_COL32(0, 0, 0, 120), 3, 0,
                   sel ? 2.0f : 1.0f);
       if (x1 - x0 > 30 && zy >= 10) {
@@ -329,19 +360,68 @@ void App::pianoRollWindow() {
   }
   dl->PopClipRect();
 
-  // Velocity lane (the volume column).
+  // Lane under the notes: velocity (volume column) or pitch bend (E8xx).
   dl->AddRectFilled(v0, v1, T.scopeBg);
-  dl->AddText(ImVec2(p0.x + 4, v0.y + 2), T.rowNum, "Vol");
+  ImVec2 lk0(p0.x, v0.y);
+  auto laneLabel = [&](int i, const char* label) {
+    ImVec2 a(lk0.x + 2, v0.y + 2 + i * 17.0f);
+    bool on = (i == 0 && prLane_ == 0) || (i == 1 && prLane_ == 1);
+    if (on) dl->AddRectFilled(a, ImVec2(g0.x - 3, a.y + 16), T.header, 3);
+    dl->AddText(ImVec2(a.x + 3, a.y + 1), on ? T.headerText : T.rowNum, label);
+  };
+  laneLabel(0, "Vol");
+  laneLabel(1, "Pitch");
+  char rangeLabel[16];
+  std::snprintf(rangeLabel, sizeof(rangeLabel), "+-%d", prBendView_);
+  if (prLane_ == 1) laneLabel(2, rangeLabel);
   dl->PushClipRect(v0, v1, true);
   float vh = v1.y - v0.y - 4;
-  for (const PRNote& n : notes) {
-    float x = rowX((float)n.start) + 2;
-    if (x > v1.x || x < v0.x - zx) continue;
-    int v = n.vol < 0 ? 0x7f : n.vol;
-    float top = v1.y - 2 - vh * v / 127.0f;
-    ImU32 col = insColor(n.ins, n.vol < 0 ? 110 : 255);
-    dl->AddLine(ImVec2(x, v1.y - 2), ImVec2(x, top), col, 2.0f);
-    dl->AddCircleFilled(ImVec2(x, top), 3.5f, col);
+  float mid = (v0.y + v1.y) / 2, half = (v1.y - v0.y) / 2 - 3;
+  auto bendY = [&](double semis) {
+    return mid - (float)(std::clamp(semis, (double)-prBendView_, (double)prBendView_) / prBendView_) * half;
+  };
+  if (prLane_ == 0) {
+    for (const PRNote& n : notes) {
+      float x = rowX((float)n.start) + 2;
+      if (x > v1.x || x < v0.x - zx) continue;
+      int v = n.vol < 0 ? 0x7f : n.vol;
+      float top = v1.y - 2 - vh * v / 127.0f;
+      ImU32 col = insColor(n.ins, n.vol < 0 ? 110 : 255);
+      dl->AddLine(ImVec2(x, v1.y - 2), ImVec2(x, top), col, 2.0f);
+      dl->AddCircleFilled(ImVec2(x, top), 3.5f, col);
+    }
+  } else {
+    // Semitone lines, the zero line, then the bend as the engine plays it:
+    // each E8xx glides over its row and the value stays.
+    for (int k = -prBendView_; k <= prBendView_; k++) {
+      ImU32 col = k == 0 ? T.rowNum : (T.rowHi2 & 0x80FFFFFF);
+      if (prBendView_ <= 4 || k % 2 == 0) dl->AddLine(ImVec2(v0.x, bendY(k)), ImVec2(v1.x, bendY(k)), col);
+    }
+    double cur = 0;
+    for (int o = 0; o < curOrder_; o++)
+      if (const Pattern* pp = song_.pattern(ch, song_.orders[o][ch]))
+        for (int r = 0; r < len; r++) {
+          int v = cellEffect(pp->rows[r], 0xE8);
+          if (v != -1) cur = ((v < 0 ? 0x80 : v) - 0x80) / 16.0;
+        }
+    const Pattern* pp = song_.pattern(ch, song_.orders[curOrder_][ch]);
+    ImU32 lineCol = IM_COL32(120, 220, 255, 255);
+    for (int r = 0; r < len; r++) {
+      int v = pp ? cellEffect(pp->rows[r], 0xE8) : -1;
+      double target = v == -1 ? cur : ((v < 0 ? 0x80 : v) - 0x80) / 16.0;
+      float x0 = rowX((float)r), x1 = rowX((float)(r + 1));
+      if (x1 >= v0.x && x0 <= v1.x) {
+        dl->AddLine(ImVec2(x0, bendY(cur)), ImVec2(x1, bendY(target)), lineCol, 2.0f);
+        if (v != -1) dl->AddCircleFilled(ImVec2(x0, bendY(target)), 3.0f, lineCol);
+      }
+      cur = target;
+    }
+    if (hovered && m.x >= v0.x && m.y >= v0.y) {
+      double semis = std::clamp((double)(mid - m.y) / half * prBendView_, -8.0, 7.9375);
+      char buf[32];
+      std::snprintf(buf, sizeof(buf), "%+.2f", io.KeyCtrl ? std::round(semis) : std::round(semis * 16) / 16);
+      dl->AddText(ImVec2(m.x + 10, std::max(v0.y, m.y - 16)), T.headerText, buf);
+    }
   }
   dl->PopClipRect();
   dl->PopClipRect();
@@ -354,12 +434,13 @@ void App::pianoRollWindow() {
       prUndone_ = true;
     }
     if (voices == 1) {
-      writeNotes(song_.pattern(ch, song_.orders[curOrder_][ch], true), len, std::move(out));
+      writeNotes(song_.pattern(ch, song_.orders[curOrder_][ch], true), len, std::move(out), song_.speed(),
+                 song_.channels[ch].effectCols);
     } else {
       auto perVoice = allocateVoices(std::move(out), ch, voices);
       for (int v = 0; v < voices; v++) {
         Pattern* p = song_.pattern(ch + v, song_.orders[curOrder_][ch + v], !perVoice[v].empty());
-        if (p) writeNotes(p, len, perVoice[v]);
+        if (p) writeNotes(p, len, perVoice[v], song_.speed(), song_.channels[ch + v].effectCols);
       }
     }
     dirty_ = true;
@@ -383,6 +464,7 @@ void App::pianoRollWindow() {
 
   bool inKeys = hovered && m.x < g0.x && m.y >= g0.y && m.y < g1.y;
   bool inVel = hovered && m.x >= v0.x && m.y >= v0.y;
+  bool inLaneKeys = hovered && m.x < g0.x && m.y >= v0.y;
   bool inRuler = hovered && m.x >= g0.x && m.y < g0.y;
 
   if (hovered && io.MouseWheel != 0) {
@@ -410,10 +492,21 @@ void App::pianoRollWindow() {
         engine_->stop();
         engine_->play(curOrder_, curRow_);
       }
+    } else if (inLaneKeys) {
+      int i = (int)((m.y - v0.y - 2) / 17);
+      if (i == 0 || i == 1) prLane_ = i;
+      if (i == 2 && prLane_ == 1) prBendView_ = prBendView_ >= 8 ? 1 : prBendView_ * 2;
     } else if (inVel) {
-      beginDrag(PRDrag::Velocity, notes, -1);
+      beginDrag(prLane_ == 0 ? PRDrag::Velocity : PRDrag::Pitch, notes, -1);
+      prLastRow_ = -1;
     } else if (inGrid) {
-      if (hoverNote >= 0) {
+      if (hoverNote >= 0 && io.KeyAlt) {
+        // Alt+click: turn the note into a slide note, or back.
+        std::vector<PRNote> out = notes;
+        out[hoverNote].slide = !out[hoverNote].slide;
+        prUndone_ = false;
+        writeBack(out);
+      } else if (hoverNote >= 0) {
         int start = notes[hoverNote].start, key = noteKey(notes[hoverNote]);
         if (io.KeyShift) {
           prSel_.insert(key);
@@ -433,6 +526,7 @@ void App::pianoRollWindow() {
         std::vector<PRNote> base = notes;
         PRNote added{row, prLength_, note, curIns_, -1};
         added.ch = -1;  // any free voice
+        added.slide = prSlide_;
         base.push_back(added);
         prUndone_ = false;
         writeBack(base);
@@ -452,6 +546,10 @@ void App::pianoRollWindow() {
   if (ImGui::IsMouseClicked(ImGuiMouseButton_Right) && inGrid) {
     prDrag_ = PRDrag::Erase;
     prUndone_ = false;
+  } else if (ImGui::IsMouseClicked(ImGuiMouseButton_Right) && inVel && prLane_ == 1) {
+    prDrag_ = PRDrag::PitchErase;
+    prUndone_ = false;
+    prLastRow_ = -1;
   }
 
   if (prDrag_ != PRDrag::None && (ImGui::IsMouseDown(ImGuiMouseButton_Left) || ImGui::IsMouseDown(ImGuiMouseButton_Right))) {
@@ -519,6 +617,34 @@ void App::pianoRollWindow() {
         if (hit) writeBack(out);
         break;
       }
+      case PRDrag::Pitch:
+      case PRDrag::PitchErase: {
+        // Draw E8xx on every row the mouse crosses, interpolating between
+        // the previous row and this one. Ctrl snaps to semitones.
+        int row = std::clamp(xRow(m.x), 0, len - 1);
+        double semis = std::clamp((double)(mid - m.y) / half * prBendView_, -8.0, 7.9375);
+        if (io.KeyCtrl) semis = std::round(semis);
+        int val = std::clamp((int)std::lround(semis * 16) + 0x80, 0, 0xff);
+        int r0 = prLastRow_ < 0 ? row : prLastRow_, v0v = prLastRow_ < 0 ? val : prLastVal_;
+        if (!prUndone_) {
+          pushUndo(ch, chLast);
+          prUndone_ = true;
+        }
+        int lo = std::min(r0, row), hi = std::max(r0, row);
+        for (int r = lo; r <= hi; r++) {
+          int v = hi == lo ? val : v0v + (val - v0v) * (r - r0) / (row - r0);
+          for (int c = ch; c <= chLast; c++) {
+            Cell* cell = song_.cell(c, curOrder_, r, prDrag_ == PRDrag::Pitch);
+            if (!cell) continue;
+            if (prDrag_ == PRDrag::Pitch) putCellEffect(*cell, song_.channels[c].effectCols, 0xE8, v);
+            else removeCellEffect(*cell, 0xE8);
+          }
+        }
+        prLastRow_ = row;
+        prLastVal_ = val;
+        dirty_ = true;
+        break;
+      }
       case PRDrag::Select: {
         float x0 = std::min(prMx0_, m.x), x1 = std::max(prMx0_, m.x), y0 = std::min(prMy0_, m.y), y1 = std::max(prMy0_, m.y);
         std::set<int> sel;
@@ -572,6 +698,17 @@ void App::pianoRollWindow() {
     if (ImGui::IsKeyPressed(ImGuiKey_LeftArrow)) transform(-1, 0, false);
     if (ImGui::IsKeyPressed(ImGuiKey_RightArrow)) transform(1, 0, false);
     if (ImGui::IsKeyPressed(ImGuiKey_Escape)) prSel_.clear();
+    if (ImGui::IsKeyPressed(ImGuiKey_S) && !io.KeyCtrl && !prSel_.empty()) {
+      // S: toggle slide on the selected notes.
+      std::vector<PRNote> out = notes;
+      bool any = false;
+      for (PRNote& n : out)
+        if (prSel_.count(noteKey(n))) any |= !n.slide;
+      for (PRNote& n : out)
+        if (prSel_.count(noteKey(n))) n.slide = any;
+      prUndone_ = false;
+      writeBack(out);
+    }
     if (io.KeyCtrl && ImGui::IsKeyPressed(ImGuiKey_A)) {
       prSel_.clear();
       for (const PRNote& n : notes) prSel_.insert(noteKey(n));

@@ -209,5 +209,13 @@ struct Song {
 
 std::string noteName(int note);  // "C-4", "OFF", "---"
 
+// Sets effect cmd in a cell: reuses a column with that command, else the
+// first free one (widening effectCols if needed). False if all are taken.
+bool putCellEffect(Cell& cell, int& effectCols, int cmd, int val);
+// Clears every column holding effect cmd.
+void removeCellEffect(Cell& cell, int cmd);
+// The value of effect cmd in the cell, or -1 (-2 if present without a value).
+int cellEffect(const Cell& cell, int cmd);
+
 // Reads a WAV file into a sample. Returns false and sets err on failure.
 bool loadWavSample(const std::string& path, Sample& out, std::string& err);

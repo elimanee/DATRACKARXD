@@ -37,6 +37,8 @@ struct ChannelState {
   int volFrac = 0;  // 1/256 fraction for slow volume slides
 
   double pitch = 0;  // semitones, before arp/vibrato/macros
+  double bend = 0, bendTarget = 0, bendStep = 0;  // E8xx / MIDI pitch wheel, semitones
+  double fine = 0;                                // E5xx fine pitch, semitones
   double portaTarget = -1;
   int portaSpeed = 0;
   int pitchSlide = 0;
@@ -112,9 +114,11 @@ class Engine {
   // vol: 00..7F for the channel volume, -1 to keep it.
   void noteOn(int ch, int note, int ins, int vol = -1);
   void noteOff(int ch);
-  void resetPan(int ch);
+  void resetPan(int ch);  // back to the channel's default panning
+  // Pitch bend in semitones, applied at once (MIDI pitch wheel).
+  void setBend(int ch, double semitones);
   // Runs one tick without rendering audio (MIDI export).
-  void tick() { doTick(); }  // back to the channel's default panning
+  void tick() { doTick(); }
 
   // Renders interleaved stereo float frames.
   void render(float* out, int frames);

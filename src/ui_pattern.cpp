@@ -175,6 +175,10 @@ void App::moveCursor(int dRow, int dCol) {
 // Undo
 // ---------------------------------------------------------------------------
 
+bool App::putEffect(int ch, Cell& cell, int cmd, int val) {
+  return putCellEffect(cell, song_.channels[ch].effectCols, cmd, val);
+}
+
 void App::pushUndo(int ch0, int ch1, int order) {
   commitMetaEdit();
   if (order < 0) order = curOrder_;
