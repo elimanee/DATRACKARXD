@@ -12,6 +12,7 @@
 #include "keygen_fx.h"
 #include "midi.h"
 #include "recorder.h"
+#include "shortcuts.h"
 #include "song.h"
 
 struct KeyEvent {
@@ -60,7 +61,7 @@ struct PRNote {
 enum class PRDrag { None, Move, Resize, Select, Erase, Velocity, Pitch, PitchErase, Bend, BendErase, Lane, LaneErase, Key };
 
 enum class FileDialogMode { None, Open, Save, ExportWav, LoadSample, LoadInstrument, SaveInstrument, ExportMidi, ExportOgg, ExportPlayer, ExportModule, ExportVgm };
-enum class PendingAction { None, New, Open, Demo, Quit };
+enum class PendingAction { None, New, Open, Demo, Quit, OpenPath };
 
 class App {
  public:
@@ -68,6 +69,9 @@ class App {
   ~App();
 
   void openAudio();
+  void beforeFrame();  // call before ImGui's NewFrame, without the engine mutex
+  void dropFile(const std::string& path);  // a file dropped on the window
+  void checkRecovery();  // at startup: an autosave left by a session that didn't save
   void queueKey(const KeyEvent& ev) { keys_.push_back(ev); }
   void requestQuit();
   void loadSettings();
@@ -224,6 +228,29 @@ class App {
   char playerTitle_[128] = {};
   char playerScroll_[2048] = {};
 
+  // Settings (Settings window, saved in datrackarxd.cfg).
+  std::string audioDevice_;  // "" = system default
+  int audioBuffer_ = 512;    // frames per audio callback
+  float audioLatencyMs_ = 0;
+  bool audioReopen_ = false;
+  std::vector<std::string> audioDevices_;
+  float uiScale_ = 1.0f;
+  bool fontDirty_ = true;
+  int language_ = 0;         // 0 English, 1 French
+  int autosaveMinutes_ = 2;  // 0 = off
+  static constexpr size_t MAX_RECENT = 10;
+  std::vector<std::string> recent_;
+  // Autosave and crash recovery.
+  double lastAutosave_ = 0;
+  bool autosaved_ = false;   // the autosave file holds this song
+  size_t autosaveHash_ = 0;  // of the text last autosaved
+  bool recoverRequest_ = false;
+  std::string recoverFrom_;  // original path of the recovered song
+  std::string droppedPath_;  // song dropped on the window, waiting for "discard changes?"
+  Shortcuts shortcuts_;
+  bool showSettings_ = false, showManual_ = false;
+  int capturing_ = -1;  // action waiting for a key in the Settings window
+
   PendingAction pending_ = PendingAction::None;
   bool confirmRequest_ = false;
 
@@ -232,6 +259,9 @@ class App {
   void menuBar();
   void handleKeys();
   void globalShortcut(const KeyEvent& ev);
+  bool runAction(Action a, bool inPattern);
+  // Menu shortcut label of an action ("" if unbound).
+  std::string keyLabel(Action a) const { return bindingText(shortcuts_.bind[(int)a]); }
   void doAction(PendingAction a);
   void askAction(PendingAction a);
   void confirmPopup();
@@ -297,6 +327,7 @@ class App {
   void clearSelection();
   void transpose(int semitones);
   void startSelection();
+  void selectChannelOrAll();
 
   // ui_pianoroll.cpp
   void pianoRollWindow();
@@ -335,6 +366,13 @@ class App {
   void scopeWindow();
   void scrollerWindow();
   void saveSettings();
+  // ui_settings.cpp
+  void settingsWindow();
+  void manualWindow();
+  void recoveryPopup();
+  void addRecent(const std::string& path);
+  void autosaveTick();
+  void clearAutosave();
   void effectsHelp();
   void keysHelp();
   void aboutWindow();

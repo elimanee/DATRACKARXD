@@ -716,7 +716,7 @@ void App::findReplaceWindow() {
   ImGui::TextUnformatted("Find cells with");
   char noteBuf[16];
   std::snprintf(noteBuf, sizeof(noteBuf), "%s", fr.note == -1 ? "anything" : fr.note == -2 ? "any note" : noteName(fr.note).c_str());
-  ImGui::SetNextItemWidth(120);
+  ImGui::SetNextItemWidth(S(120));
   if (ImGui::BeginCombo("Note", noteBuf)) {
     if (ImGui::Selectable("anything", fr.note == -1)) fr.note = -1;
     if (ImGui::Selectable("any note", fr.note == -2)) fr.note = -2;
@@ -724,7 +724,7 @@ void App::findReplaceWindow() {
       if (ImGui::Selectable(noteName(n).c_str(), fr.note == n)) fr.note = n;
     ImGui::EndCombo();
   }
-  ImGui::SetNextItemWidth(120);
+  ImGui::SetNextItemWidth(S(120));
   ImGui::InputInt("Instrument (-1 any)", &fr.ins);
   fr.ins = std::clamp(fr.ins, -1, MAX_INSTRUMENTS - 1);
   auto hexField = [](const char* check, const char* id, int& v) {
@@ -733,19 +733,19 @@ void App::findReplaceWindow() {
     if (on) {
       ImGui::SameLine();
       uint8_t b = (uint8_t)v;
-      ImGui::SetNextItemWidth(40);
+      ImGui::SetNextItemWidth(S(40));
       if (ImGui::InputScalar(id, ImGuiDataType_U8, &b, nullptr, nullptr, "%02X", ImGuiInputTextFlags_CharsHexadecimal)) v = b;
     }
   };
   hexField("Effect command", "##fxfind", fr.fxCmd);
   ImGui::Separator();
   ImGui::TextUnformatted("Replace with");
-  ImGui::SetNextItemWidth(120);
+  ImGui::SetNextItemWidth(S(120));
   ImGui::SliderInt("Transpose", &fr.transpose, -24, 24);
-  ImGui::SetNextItemWidth(120);
+  ImGui::SetNextItemWidth(S(120));
   ImGui::InputInt("Instrument (-1 keep)", &fr.newIns);
   fr.newIns = std::clamp(fr.newIns, -1, MAX_INSTRUMENTS - 1);
-  ImGui::SetNextItemWidth(120);
+  ImGui::SetNextItemWidth(S(120));
   ImGui::InputInt("Volume (-1 keep)", &fr.newVol);
   fr.newVol = std::clamp(fr.newVol, -1, 0x7f);
   ImGui::BeginDisabled(fr.fxCmd < 0);
@@ -764,37 +764,11 @@ void App::findReplaceWindow() {
 // ---------------------------------------------------------------------------
 
 void App::patternKey(const KeyEvent& ev) {
-  bool ctrl = ev.mod & KMOD_CTRL, shift = ev.mod & KMOD_SHIFT;
-
-  if (ctrl) {
-    switch (ev.sc) {
-      case SDL_SCANCODE_UP: transpose(shift ? 12 : 1); return;
-      case SDL_SCANCODE_DOWN: transpose(shift ? -12 : -1); return;
-      default: break;
-    }
-    switch (ev.key) {
-      case SDLK_c: copySelection(false); return;
-      case SDLK_x: copySelection(true); return;
-      case SDLK_v: paste(); return;
-      case SDLK_h: showFindReplace_ = true; return;
-      case SDLK_i: interpolateSelection(); return;
-      case SDLK_a: {
-        bool wholeChannel = hasSel_ && selCh0_ == selCh1_ && selRow0_ == 0 && selRow1_ == song_.patternLength - 1 &&
-                            colToField(std::min(selCol0_, selCol1_)) == 0;
-        hasSel_ = true;
-        selRow0_ = 0;
-        selRow1_ = song_.patternLength - 1;
-        selCh0_ = wholeChannel ? 0 : curCh_;
-        selCh1_ = wholeChannel ? song_.channelCount() - 1 : curCh_;
-        selCol0_ = 0;
-        selCol1_ = colCount(selCh1_) - 1;
-        return;
-      }
-      default: break;
-    }
-    globalShortcut(ev);
-    return;
-  }
+  bool shift = ev.mod & KMOD_SHIFT;
+  Action a = shortcuts_.match(ev.key, ev.mod);
+  if (a != Action::Count && runAction(a, true)) return;
+  // An unbound Ctrl / Alt combination never types a note.
+  if (bindingMods(ev.mod) & (MOD_CTRL | MOD_ALT)) return;
 
   // Navigation (Shift extends the selection).
   int dRow = 0, dCol = 0;
@@ -822,18 +796,11 @@ void App::patternKey(const KeyEvent& ev) {
     return;
   }
 
-  switch (ev.sc) {
-    case SDL_SCANCODE_TAB:
-      if (shift) curCh_ = std::max(0, curCh_ - 1);
-      else curCh_ = std::min(song_.channelCount() - 1, curCh_ + 1);
-      curCol_ = 0;
-      return;
-    case SDL_SCANCODE_SPACE: editMode_ = !editMode_; return;
-    case SDL_SCANCODE_ESCAPE: hasSel_ = false; return;
-    case SDL_SCANCODE_DELETE: deleteAtCursor(); return;
-    case SDL_SCANCODE_BACKSPACE: insertRow(false); return;
-    case SDL_SCANCODE_INSERT: insertRow(true); return;
-    default: break;
+  if (ev.sc == SDL_SCANCODE_TAB) {
+    if (shift) curCh_ = std::max(0, curCh_ - 1);
+    else curCh_ = std::min(song_.channelCount() - 1, curCh_ + 1);
+    curCol_ = 0;
+    return;
   }
 
   if (curCol_ == 0) {
@@ -864,6 +831,19 @@ void App::patternKey(const KeyEvent& ev) {
   globalShortcut(ev);
 }
 
+// Ctrl+A: the channel, then the whole pattern.
+void App::selectChannelOrAll() {
+  bool wholeChannel = hasSel_ && selCh0_ == selCh1_ && selRow0_ == 0 && selRow1_ == song_.patternLength - 1 &&
+                      colToField(std::min(selCol0_, selCol1_)) == 0;
+  hasSel_ = true;
+  selRow0_ = 0;
+  selRow1_ = song_.patternLength - 1;
+  selCh0_ = wholeChannel ? 0 : curCh_;
+  selCh1_ = wholeChannel ? song_.channelCount() - 1 : curCh_;
+  selCol0_ = 0;
+  selCol1_ = colCount(selCh1_) - 1;
+}
+
 // ---------------------------------------------------------------------------
 // Drawing
 // ---------------------------------------------------------------------------
@@ -884,15 +864,15 @@ void App::patternWindow() {
   curIns_ = std::clamp(curIns_, 0, std::max(0, (int)song_.instruments.size() - 1));
 
   // Toolbar.
-  ImGui::SetNextItemWidth(80);
+  ImGui::SetNextItemWidth(S(80));
   ImGui::InputInt("Octave", &octave_);
   octave_ = std::clamp(octave_, 0, 8);
   ImGui::SameLine();
-  ImGui::SetNextItemWidth(80);
+  ImGui::SetNextItemWidth(S(80));
   ImGui::InputInt("Step", &editStep_);
   editStep_ = std::clamp(editStep_, 0, 64);
   ImGui::SameLine();
-  ImGui::SetNextItemWidth(200);
+  ImGui::SetNextItemWidth(S(200));
   char insLabel[128];
   std::snprintf(insLabel, sizeof(insLabel), "%02X: %s", curIns_,
                 song_.instruments.empty() ? "" : song_.instruments[curIns_].name.c_str());

@@ -2,6 +2,7 @@
 
 #include <imgui.h>
 #include <imgui_internal.h>
+#include <imgui_impl_sdlrenderer2.h>
 
 #include <cctype>
 #include <algorithm>
@@ -12,10 +13,12 @@
 
 #include "audiofile.h"
 #include "demo.h"
+#include "i18n.h"
 #include "import.h"
 #include "midifile.h"
 #include "modexport.h"
 #include "vgmexport.h"
+#include "paths.h"
 #include "payload.h"
 #include "theme.h"
 
@@ -38,16 +41,19 @@ App::App() {
 App::~App() {
   if (audioDev_) SDL_CloseAudioDevice(audioDev_);
   saveSettings();
+  // Quitting means the song was saved or its changes were given up.
+  if (!recoverRequest_) clearAutosave();
 }
 
 // Small key=value settings file next to the ImGui layout file.
 static const char* SETTINGS_FILE = "datrackarxd.cfg";
 
 void App::loadSettings() {
-  std::ifstream f(SETTINGS_FILE);
+  std::ifstream f(configPath(SETTINGS_FILE));
   std::string line;
   int th = 0;
   while (std::getline(f, line)) {
+    if (!line.empty() && line.back() == '\r') line.pop_back();
     size_t eq = line.find('=');
     if (eq == std::string::npos) continue;
     std::string k = line.substr(0, eq), v = line.substr(eq + 1);
@@ -65,16 +71,31 @@ void App::loadSettings() {
       if (k == "metrovol") metronomeVol_ = std::clamp(std::stof(v), 0.0f, 1.0f);
       if (k == "countin") countInBars_ = std::clamp(std::stoi(v), 0, 4);
       if (k == "quantize") midiQuantize_ = std::clamp(std::stoi(v), 0, 3);
+      if (k == "audiodevice") audioDevice_ = v;
+      if (k == "audiobuffer") audioBuffer_ = std::clamp(std::stoi(v), 64, 8192);
+      if (k == "uiscale") uiScale_ = std::clamp(std::stof(v), 0.5f, 3.0f);
+      if (k == "language") language_ = std::clamp(std::stoi(v), 0, 1);
+      if (k == "autosave") autosaveMinutes_ = std::clamp(std::stoi(v), 0, 60);
+      if (k == "recent" && !v.empty() && recent_.size() < MAX_RECENT) recent_.push_back(v);
+      if (k.rfind("key.", 0) == 0) {
+        for (int i = 0; i < ACTION_COUNT; i++) {
+          KeyBinding b;
+          if (k.compare(4, std::string::npos, actionId((Action)i)) == 0 && parseBinding(v, b)) shortcuts_.bind[i] = b;
+        }
+      }
     } catch (...) {
     }
   }
+  setThemeScale(uiScale_);
   setTheme(th);
+  setLanguage(language_);
+  fontDirty_ = true;
   // The keyboard may be unplugged: keep the name so it reconnects next time.
   if (!midiPort_.empty() && midi_.open(midiPort_)) setStatus("MIDI input: " + midiPort_);
 }
 
 void App::saveSettings() {
-  std::ofstream f(SETTINGS_FILE);
+  std::ofstream f(configPath(SETTINGS_FILE));
   f << "theme=" << themeIndex() << "\n";
   f << "scroller=" << (showScroller_ ? 1 : 0) << "\n";
   f << "octave=" << octave_ << "\n";
@@ -88,25 +109,61 @@ void App::saveSettings() {
   f << "metrovol=" << metronomeVol_ << "\n";
   f << "countin=" << countInBars_ << "\n";
   f << "quantize=" << midiQuantize_ << "\n";
+  f << "audiodevice=" << audioDevice_ << "\n";
+  f << "audiobuffer=" << audioBuffer_ << "\n";
+  f << "uiscale=" << uiScale_ << "\n";
+  f << "language=" << language_ << "\n";
+  f << "autosave=" << autosaveMinutes_ << "\n";
+  for (const std::string& r : recent_) f << "recent=" << r << "\n";
+  // Only the keys changed from the defaults, so new defaults still arrive.
+  for (int i = 0; i < ACTION_COUNT; i++)
+    if (!(shortcuts_.bind[i] == defaultBinding((Action)i)))
+      f << "key." << actionId((Action)i) << "=" << bindingText(shortcuts_.bind[i]) << "\n";
 }
 
 void App::openAudio() {
+  if (audioDev_) SDL_CloseAudioDevice(audioDev_);
+  audioDev_ = 0;
   SDL_AudioSpec want{}, have{};
   want.freq = 44100;
   want.format = AUDIO_F32SYS;
   want.channels = 2;
-  want.samples = 512;
+  want.samples = (Uint16)std::clamp(audioBuffer_, 64, 8192);
   want.callback = audioCallback;
   want.userdata = engine_.get();
-  // No ALLOW_* flags: SDL converts to whatever the device really uses.
-  audioDev_ = SDL_OpenAudioDevice(nullptr, 0, &want, &have, 0);
+  // No ALLOW_* flags: SDL converts to whatever the device really uses. An
+  // unplugged device falls back to the default one.
+  const char* dev = audioDevice_.empty() ? nullptr : audioDevice_.c_str();
+  audioDev_ = SDL_OpenAudioDevice(dev, 0, &want, &have, 0);
+  if (!audioDev_ && dev) audioDev_ = SDL_OpenAudioDevice(nullptr, 0, &want, &have, 0);
   if (!audioDev_) {
     audioStatus_ = std::string("No audio: ") + SDL_GetError();
     setStatus(audioStatus_);
     return;
   }
-  audioStatus_ = "Audio: " + std::to_string(have.freq) + " Hz";
+  audioLatencyMs_ = have.samples * 1000.0f / std::max(have.freq, 1);
+  audioStatus_ = "Audio: " + std::to_string(have.freq) + " Hz, " + std::to_string(have.samples) + " frames";
   SDL_PauseAudioDevice(audioDev_, 0);
+}
+
+// Things that can't happen while the UI holds the engine mutex (the audio
+// callback waits on it) or in the middle of an ImGui frame.
+void App::beforeFrame() {
+  if (audioReopen_) {
+    audioReopen_ = false;
+    openAudio();
+  }
+  if (fontDirty_) {
+    fontDirty_ = false;
+    ImGuiIO& io = ImGui::GetIO();
+    io.Fonts->Clear();
+    ImFontConfig cfg;
+    cfg.SizePixels = std::round(13.0f * uiScale_);
+    io.Fonts->AddFontDefault(&cfg);
+    io.Fonts->Build();
+    ImGui_ImplSDLRenderer2_DestroyFontsTexture();  // rebuilt by the next NewFrame
+  }
+  autosaveTick();
 }
 
 void App::setStatus(const std::string& s) {
@@ -142,6 +199,7 @@ bool App::loadFile(const std::string& path) {
   filePath_ = fs::path(path).extension() == ".dtk" ? path : "";
   dialogDir_ = fs::path(path).parent_path().string();
   if (dialogDir_.empty()) dialogDir_ = ".";
+  addRecent(path);
   setStatus("Loaded " + path);
   return true;
 }
@@ -154,6 +212,7 @@ void App::saveSong(bool forceDialog) {
   std::string err;
   if (song_.save(filePath_, err)) {
     dirty_ = false;
+    addRecent(filePath_);
     setStatus("Saved " + filePath_);
   } else {
     setStatus("Save failed: " + err);
@@ -193,6 +252,10 @@ void App::doAction(PendingAction a) {
     case PendingAction::Open:
       openFileDialog(FileDialogMode::Open);
       break;
+    case PendingAction::OpenPath:
+      engine_->stop();
+      loadFile(droppedPath_);
+      break;
     case PendingAction::Demo:
       engine_->stop();
       loadDemoSong(song_);
@@ -215,13 +278,13 @@ void App::confirmPopup() {
   }
   if (ImGui::BeginPopupModal("Unsaved changes", nullptr, ImGuiWindowFlags_AlwaysAutoResize)) {
     ImGui::Text("The song has unsaved changes. Discard them?");
-    if (ImGui::Button("Discard", ImVec2(120, 0))) {
+    if (ImGui::Button("Discard", ImVec2(S(120), 0))) {
       ImGui::CloseCurrentPopup();
       doAction(pending_);
       pending_ = PendingAction::None;
     }
     ImGui::SameLine();
-    if (ImGui::Button("Cancel", ImVec2(120, 0)) || ImGui::IsKeyPressed(ImGuiKey_Escape)) {
+    if (ImGui::Button("Cancel", ImVec2(S(120), 0)) || ImGui::IsKeyPressed(ImGuiKey_Escape)) {
       ImGui::CloseCurrentPopup();
       pending_ = PendingAction::None;
     }
@@ -258,7 +321,7 @@ void App::playerExportPopup() {
     ImGui::OpenPopup("Export keygen player");
     playerPopupRequest_ = false;
   }
-  ImGui::SetNextWindowSize(ImVec2(520, 0), ImGuiCond_Appearing);
+  ImGui::SetNextWindowSize(ImVec2(S(520), 0), ImGuiCond_Appearing);
   if (!ImGui::BeginPopupModal("Export keygen player", nullptr)) return;
   ImGui::TextWrapped("A standalone program that plays this song with the keygen intro: starfield, logo and scroller. "
                      "It runs on its own, without DATRACKARXD.");
@@ -267,13 +330,13 @@ void App::playerExportPopup() {
   ImGui::InputText("Logo", playerLogo_, sizeof(playerLogo_));
   ImGui::InputText("Window title", playerTitle_, sizeof(playerTitle_));
   ImGui::TextUnformatted("Scroller text");
-  ImGui::InputTextMultiline("##scroll", playerScroll_, sizeof(playerScroll_), ImVec2(-1, 90));
-  if (ImGui::Button("Export...", ImVec2(120, 0))) {
+  ImGui::InputTextMultiline("##scroll", playerScroll_, sizeof(playerScroll_), ImVec2(-1, S(90)));
+  if (ImGui::Button("Export...", ImVec2(S(120), 0))) {
     ImGui::CloseCurrentPopup();
     openFileDialog(FileDialogMode::ExportPlayer);
   }
   ImGui::SameLine();
-  if (ImGui::Button("Cancel", ImVec2(120, 0)) || ImGui::IsKeyPressed(ImGuiKey_Escape)) ImGui::CloseCurrentPopup();
+  if (ImGui::Button("Cancel", ImVec2(S(120), 0)) || ImGui::IsKeyPressed(ImGuiKey_Escape)) ImGui::CloseCurrentPopup();
   ImGui::EndPopup();
 }
 
@@ -293,7 +356,7 @@ void App::fileDialog() {
     ImGui::OpenPopup("###filedlg");
     dialogOpenRequest_ = false;
   }
-  ImGui::SetNextWindowSize(ImVec2(560, 420), ImGuiCond_Appearing);
+  ImGui::SetNextWindowSize(ImVec2(S(560), S(420)), ImGuiCond_Appearing);
   if (!ImGui::BeginPopupModal(title, nullptr)) return;
 
   std::vector<std::string> exts;
@@ -368,18 +431,18 @@ void App::fileDialog() {
   ImGui::EndChild();
   if (!newDir.empty()) dialogDir_ = newDir;
 
-  ImGui::SetNextItemWidth(-200);
+  ImGui::SetNextItemWidth(S(-200));
   if (ImGui::IsWindowAppearing()) ImGui::SetKeyboardFocusHere();
   if (ImGui::InputText("##name", dialogName_, sizeof(dialogName_), ImGuiInputTextFlags_EnterReturnsTrue)) accept = true;
   if (dialogMode_ == FileDialogMode::ExportWav || dialogMode_ == FileDialogMode::ExportMidi ||
       dialogMode_ == FileDialogMode::ExportOgg) {
     ImGui::SameLine();
-    ImGui::SetNextItemWidth(80);
+    ImGui::SetNextItemWidth(S(80));
     ImGui::InputInt("loops", &exportLoops_);
     exportLoops_ = std::clamp(exportLoops_, 1, 16);
   }
   if (dialogMode_ == FileDialogMode::ExportModule) {
-    ImGui::SetNextItemWidth(120);
+    ImGui::SetNextItemWidth(S(120));
     if (ImGui::Combo("Format", &moduleFormat_, "XM (FastTracker 2)\0MOD (ProTracker)\0IT (Impulse Tracker)\0")) {
       // Follow the format in the file name.
       fs::path p(dialogName_);
@@ -387,18 +450,18 @@ void App::fileDialog() {
       std::snprintf(dialogName_, sizeof(dialogName_), "%s", p.string().c_str());
     }
     ImGui::SameLine();
-    ImGui::SetNextItemWidth(110);
+    ImGui::SetNextItemWidth(S(110));
     ImGui::BeginDisabled(moduleFormat_ == 1);
     ImGui::Combo("Rendered instruments", &moduleRate_, "11025 Hz\0" "22050 Hz\0" "44100 Hz\0");
     ImGui::EndDisabled();
-    ImGui::SetNextItemWidth(120);
+    ImGui::SetNextItemWidth(S(120));
     ImGui::SliderFloat("Note held", &moduleHold_, 0.2f, 4.0f, "%.1f s");
     if (ImGui::IsItemHovered())
       ImGui::SetTooltip("Instruments that aren't samples are rendered: one note held this long, then\n"
                         "looped if it still sounds. MOD resamples everything to 8363 Hz, 8-bit.");
   }
   if (dialogMode_ == FileDialogMode::ExportOgg) {
-    ImGui::SetNextItemWidth(200);
+    ImGui::SetNextItemWidth(S(200));
     ImGui::SliderInt("Quality", &oggQuality_, 0, 10);
     ImGui::SameLine();
     static const int kbps[11] = {64, 80, 96, 112, 128, 160, 192, 224, 256, 320, 500};
@@ -406,9 +469,9 @@ void App::fileDialog() {
   }
   bool opening = dialogMode_ == FileDialogMode::Open || dialogMode_ == FileDialogMode::LoadSample ||
                  dialogMode_ == FileDialogMode::LoadInstrument;
-  if (ImGui::Button(opening ? "Open" : "Save", ImVec2(100, 0))) accept = true;
+  if (ImGui::Button(opening ? "Open" : "Save", ImVec2(S(100), 0))) accept = true;
   ImGui::SameLine();
-  bool cancel = ImGui::Button("Cancel", ImVec2(100, 0)) || ImGui::IsKeyPressed(ImGuiKey_Escape);
+  bool cancel = ImGui::Button("Cancel", ImVec2(S(100), 0)) || ImGui::IsKeyPressed(ImGuiKey_Escape);
 
   if (accept && dialogName_[0]) {
     fs::path p = fs::path(dialogName_);
@@ -529,10 +592,20 @@ void App::fileDialog() {
 void App::menuBar() {
   if (!ImGui::BeginMainMenuBar()) return;
   if (ImGui::BeginMenu("File")) {
-    if (ImGui::MenuItem("New", "Ctrl+N")) askAction(PendingAction::New);
-    if (ImGui::MenuItem("Open / import...", "Ctrl+O")) askAction(PendingAction::Open);
-    if (ImGui::MenuItem("Save", "Ctrl+S")) saveSong(false);
-    if (ImGui::MenuItem("Save as...", "Ctrl+Shift+S")) saveSong(true);
+    if (ImGui::MenuItem("New", keyLabel(Action::New).c_str())) askAction(PendingAction::New);
+    if (ImGui::MenuItem("Open / import...", keyLabel(Action::Open).c_str())) askAction(PendingAction::Open);
+    if (ImGui::BeginMenu("Open recent", !recent_.empty())) {
+      for (const std::string& r : std::vector<std::string>(recent_))
+        if (ImGui::MenuItem(r.c_str())) {
+          droppedPath_ = r;
+          askAction(PendingAction::OpenPath);
+        }
+      ImGui::Separator();
+      if (ImGui::MenuItem("Clear the list")) recent_.clear();
+      ImGui::EndMenu();
+    }
+    if (ImGui::MenuItem("Save", keyLabel(Action::Save).c_str())) saveSong(false);
+    if (ImGui::MenuItem("Save as...", keyLabel(Action::SaveAs).c_str())) saveSong(true);
     ImGui::Separator();
     if (ImGui::MenuItem("Export WAV...")) openFileDialog(FileDialogMode::ExportWav);
     if (ImGui::MenuItem("Export OGG...")) openFileDialog(FileDialogMode::ExportOgg);
@@ -551,21 +624,23 @@ void App::menuBar() {
     }
     if (ImGui::MenuItem("Load demo song")) askAction(PendingAction::Demo);
     ImGui::Separator();
+    if (ImGui::MenuItem("Settings...", keyLabel(Action::Settings).c_str())) showSettings_ = true;
+    ImGui::Separator();
     if (ImGui::MenuItem("Quit")) requestQuit();
     ImGui::EndMenu();
   }
   if (ImGui::BeginMenu("Edit")) {
-    if (ImGui::MenuItem("Undo", "Ctrl+Z", false, !undo_.empty())) applyUndo(undo_, redo_);
-    if (ImGui::MenuItem("Redo", "Ctrl+Y", false, !redo_.empty())) applyUndo(redo_, undo_);
+    if (ImGui::MenuItem("Undo", keyLabel(Action::Undo).c_str(), false, !undo_.empty())) applyUndo(undo_, redo_);
+    if (ImGui::MenuItem("Redo", keyLabel(Action::Redo).c_str(), false, !redo_.empty())) applyUndo(redo_, undo_);
     ImGui::Separator();
-    if (ImGui::MenuItem("Cut", "Ctrl+X")) copySelection(true);
-    if (ImGui::MenuItem("Copy", "Ctrl+C")) copySelection(false);
-    if (ImGui::MenuItem("Paste", "Ctrl+V")) paste();
+    if (ImGui::MenuItem("Cut", keyLabel(Action::Cut).c_str())) copySelection(true);
+    if (ImGui::MenuItem("Copy", keyLabel(Action::Copy).c_str())) copySelection(false);
+    if (ImGui::MenuItem("Paste", keyLabel(Action::Paste).c_str())) paste();
     ImGui::Separator();
-    if (ImGui::MenuItem("Transpose +1", "Ctrl+Up")) transpose(1);
-    if (ImGui::MenuItem("Transpose -1", "Ctrl+Down")) transpose(-1);
-    if (ImGui::MenuItem("Transpose +12", "Ctrl+Shift+Up")) transpose(12);
-    if (ImGui::MenuItem("Transpose -12", "Ctrl+Shift+Down")) transpose(-12);
+    if (ImGui::MenuItem("Transpose +1", keyLabel(Action::TransposeUp).c_str())) transpose(1);
+    if (ImGui::MenuItem("Transpose -1", keyLabel(Action::TransposeDown).c_str())) transpose(-1);
+    if (ImGui::MenuItem("Transpose +12", keyLabel(Action::TransposeOctUp).c_str())) transpose(12);
+    if (ImGui::MenuItem("Transpose -12", keyLabel(Action::TransposeOctDown).c_str())) transpose(-12);
     ImGui::Separator();
     ImGui::TextDisabled("Selection (or the channel)");
     selectionToolsMenu();
@@ -598,6 +673,7 @@ void App::menuBar() {
   }
   midiMenu();
   if (ImGui::BeginMenu("Help")) {
+    ImGui::MenuItem("Manual", keyLabel(Action::Manual).c_str(), &showManual_);
     ImGui::MenuItem("Effects", nullptr, &showEffects_);
     ImGui::MenuItem("Keyboard", nullptr, &showKeys_);
     ImGui::MenuItem("About", nullptr, &showAbout_);
@@ -615,17 +691,17 @@ void App::menuBar() {
   ImGui::MenuItem("Loop pattern", nullptr, &engine_->loopPattern);
   ImGui::MenuItem("Follow", nullptr, &follow_);
   ImGui::PushStyleColor(ImGuiCol_Text, editMode_ ? ImVec4(1, 0.4f, 0.4f, 1) : ImGui::GetStyleColorVec4(ImGuiCol_Text));
-  ImGui::MenuItem("Record", "Space", &editMode_);
+  ImGui::MenuItem("Record", keyLabel(Action::RecordToggle).c_str(), &editMode_);
   ImGui::PopStyleColor();
   ImGui::MenuItem("Metronome", nullptr, &engine_->metronome);
   if (ImGui::BeginMenu("Rec. options")) {
-    ImGui::SetNextItemWidth(140);
+    ImGui::SetNextItemWidth(S(140));
     ImGui::Combo("Count-in", &countInBars_, "Off\0" "1 bar\0" "2 bars\0" "3 bars\0" "4 bars\0");
     if (ImGui::IsItemHovered()) ImGui::SetTooltip("Clicks before playback starts in Record mode (a bar = Highlight 2 rows)");
-    ImGui::SetNextItemWidth(140);
+    ImGui::SetNextItemWidth(S(140));
     ImGui::Combo("MIDI quantize", &midiQuantize_, "Off\0" "Nearest row\0" "2 rows\0" "Beat\0");
     if (ImGui::IsItemHovered()) ImGui::SetTooltip("Live MIDI notes go to the nearest row of this grid instead of the row playing");
-    ImGui::SetNextItemWidth(140);
+    ImGui::SetNextItemWidth(S(140));
     ImGui::SliderFloat("Metronome volume", &metronomeVol_, 0, 1, "%.2f");
     ImGui::EndMenu();
   }
@@ -670,7 +746,7 @@ void App::midiMenu() {
   ImGui::Separator();
   if (ImGui::MenuItem("Rescan")) midiPorts_ = midi_.ports();
   ImGui::MenuItem("Velocity -> volume", nullptr, &midiVelocity_);
-  ImGui::SetNextItemWidth(120);
+  ImGui::SetNextItemWidth(S(120));
   ImGui::SliderInt("Pitch wheel range", &midiBendRange_, 1, 24, "%d semitones");
   if (ImGui::IsItemHovered()) ImGui::SetTooltip("In Record mode, while playing, the wheel is written as E8xx bends.");
   ImGui::Separator();
@@ -681,7 +757,7 @@ void App::midiMenu() {
                       "Notes use the piano roll's Voices channels (8 if Voices is 1).\n"
                       "In Record mode while playing, all of it is written to the pattern.");
   ImGui::BeginDisabled(!midiMpe_);
-  ImGui::SetNextItemWidth(120);
+  ImGui::SetNextItemWidth(S(120));
   ImGui::SliderInt("MPE pitch range", &midiMpeRange_, 1, 96, "%d semitones");
   ImGui::EndDisabled();
   ImGui::EndMenu();
@@ -891,37 +967,58 @@ void App::defaultLayout(unsigned int dockId) {
   ImGui::DockBuilderFinish(dockId);
 }
 
-void App::globalShortcut(const KeyEvent& ev) {
-  bool ctrl = ev.mod & KMOD_CTRL, shift = ev.mod & KMOD_SHIFT;
-  if (ctrl) {
-    switch (ev.sc) {
-      case SDL_SCANCODE_N: askAction(PendingAction::New); return;
-      case SDL_SCANCODE_O: askAction(PendingAction::Open); return;
-      case SDL_SCANCODE_S: saveSong(shift); return;
-      default: break;
-    }
-    // Undo/redo follow the keyboard layout (Ctrl+Z is on W in AZERTY).
-    if (ev.key == SDLK_z) applyUndo(undo_, redo_);
-    if (ev.key == SDLK_y) applyUndo(redo_, undo_);
-    return;
+// Runs a shortcut's action. Editing actions only work in the pattern;
+// returns false when the action doesn't apply here.
+bool App::runAction(Action a, bool inPattern) {
+  switch (a) {
+    case Action::New: askAction(PendingAction::New); return true;
+    case Action::Open: askAction(PendingAction::Open); return true;
+    case Action::Save: saveSong(false); return true;
+    case Action::SaveAs: saveSong(true); return true;
+    case Action::Undo: applyUndo(undo_, redo_); return true;
+    case Action::Redo: applyUndo(redo_, undo_); return true;
+    case Action::PlayStop: togglePlay(false); return true;
+    case Action::PlayFromCursor: togglePlay(true); return true;
+    case Action::PlaySong: engine_->stop(); engine_->play(0, 0); return true;
+    case Action::PlayRow: engine_->stop(); togglePlay(true); return true;
+    case Action::Stop: engine_->stop(); return true;
+    case Action::OctaveDown: octave_ = std::max(0, octave_ - 1); return true;
+    case Action::OctaveUp: octave_ = std::min(8, octave_ + 1); return true;
+    case Action::Settings: showSettings_ = true; return true;
+    case Action::Manual: showManual_ = true; return true;
+    default: break;
   }
-  switch (ev.sc) {
-    case SDL_SCANCODE_RETURN: togglePlay(shift); break;
-    case SDL_SCANCODE_F5: engine_->stop(); engine_->play(0, 0); break;
-    case SDL_SCANCODE_F6: engine_->stop(); togglePlay(true); break;
-    case SDL_SCANCODE_F8: engine_->stop(); break;
-    case SDL_SCANCODE_KP_DIVIDE: octave_ = std::max(0, octave_ - 1); break;
-    case SDL_SCANCODE_KP_MULTIPLY: octave_ = std::min(8, octave_ + 1); break;
-    default: {
-      // Play the current instrument from the keyboard.
-      int n = scancodeToNote(ev.sc);
-      if (n >= 0 && !ev.repeat) {
-        int note = std::clamp(octave_ * 12 + n, 0, 119);
-        engine_->noteOn(curCh_, note, curIns_);
-        jamming_[ev.sc] = curCh_;
-      }
-      break;
-    }
+  if (!inPattern) return false;
+  switch (a) {
+    case Action::Cut: copySelection(true); return true;
+    case Action::Copy: copySelection(false); return true;
+    case Action::Paste: paste(); return true;
+    case Action::SelectAll: selectChannelOrAll(); return true;
+    case Action::FindReplace: showFindReplace_ = true; return true;
+    case Action::Interpolate: interpolateSelection(); return true;
+    case Action::TransposeUp: transpose(1); return true;
+    case Action::TransposeDown: transpose(-1); return true;
+    case Action::TransposeOctUp: transpose(12); return true;
+    case Action::TransposeOctDown: transpose(-12); return true;
+    case Action::RecordToggle: editMode_ = !editMode_; return true;
+    case Action::ClearSelection: hasSel_ = false; return true;
+    case Action::Delete: deleteAtCursor(); return true;
+    case Action::InsertRow: insertRow(true); return true;
+    case Action::DeleteRow: insertRow(false); return true;
+    default: return false;
+  }
+}
+
+void App::globalShortcut(const KeyEvent& ev) {
+  Action a = shortcuts_.match(ev.key, ev.mod);
+  if (a != Action::Count && runAction(a, false)) return;
+  if (bindingMods(ev.mod) & (MOD_CTRL | MOD_ALT)) return;
+  // Play the current instrument from the keyboard.
+  int n = scancodeToNote(ev.sc);
+  if (n >= 0 && !ev.repeat) {
+    int note = std::clamp(octave_ * 12 + n, 0, 119);
+    engine_->noteOn(curCh_, note, curIns_);
+    jamming_[ev.sc] = curCh_;
   }
 }
 
@@ -936,6 +1033,18 @@ void App::handleKeys() {
         engine_->noteOff(it->second);
         jamming_.erase(it);
       }
+      continue;
+    }
+    // The Settings window waits for a new shortcut.
+    if (capturing_ >= 0 && capturing_ < ACTION_COUNT) {
+      if (isModifierKey(ev.key)) continue;
+      if (ev.sc == SDL_SCANCODE_ESCAPE && !ev.mod) {
+      } else if (ev.sc == SDL_SCANCODE_BACKSPACE && !bindingMods(ev.mod)) {
+        shortcuts_.bind[capturing_] = KeyBinding{};
+      } else {
+        shortcuts_.bind[capturing_] = KeyBinding{ev.key, bindingMods(ev.mod)};
+      }
+      capturing_ = -1;
       continue;
     }
     if (io.WantTextInput || ImGui::IsPopupOpen("", ImGuiPopupFlags_AnyPopupId)) continue;
@@ -975,10 +1084,13 @@ void App::frame() {
   if (showEffects_) effectsHelp();
   if (showKeys_) keysHelp();
   if (showAbout_) aboutWindow();
+  if (showSettings_) settingsWindow();
+  else capturing_ = -1;
+  if (showManual_) manualWindow();
 
   playerExportPopup();
   if (showExportReport_) {
-    ImGui::SetNextWindowSize(ImVec2(460, 0), ImGuiCond_Appearing);
+    ImGui::SetNextWindowSize(ImVec2(S(460), 0), ImGuiCond_Appearing);
     if (ImGui::Begin("Export report", &showExportReport_)) {
       ImGui::TextWrapped("Exported. These parts had no equivalent in the format and were left out:");
       ImGui::Separator();
@@ -989,6 +1101,7 @@ void App::frame() {
   }
   fileDialog();
   confirmPopup();
+  recoveryPopup();
   handleKeys();
   // A settings edit becomes one undo step once the mouse/text gesture ends.
   if (shadowStale_ || (metaTouched_ && !ImGui::IsAnyItemActive())) commitMetaEdit();

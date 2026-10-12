@@ -179,7 +179,7 @@ void App::pianoRollWindow() {
   }
 
   // Toolbar.
-  ImGui::SetNextItemWidth(160);
+  ImGui::SetNextItemWidth(S(160));
   if (ImGui::BeginCombo("Channel", song_.channels[ch].name.c_str())) {
     for (int c = 0; c < nch; c++) {
       char buf[96];
@@ -192,11 +192,11 @@ void App::pianoRollWindow() {
     ImGui::EndCombo();
   }
   ImGui::SameLine();
-  ImGui::SetNextItemWidth(80);
+  ImGui::SetNextItemWidth(S(80));
   ImGui::InputInt("Length", &prLength_);
   prLength_ = std::clamp(prLength_, 1, MAX_ROWS);
   ImGui::SameLine();
-  ImGui::SetNextItemWidth(80);
+  ImGui::SetNextItemWidth(S(80));
   ImGui::InputInt("Voices", &prVoices_);
   prVoices_ = std::clamp(prVoices_, 1, 8);
   if (ImGui::IsItemHovered())
@@ -214,7 +214,7 @@ void App::pianoRollWindow() {
   curIns_ = std::clamp(curIns_, 0, std::max(0, (int)song_.instruments.size() - 1));
   char insLabel[128];
   std::snprintf(insLabel, sizeof(insLabel), "%02X: %s", curIns_, song_.instruments.empty() ? "" : song_.instruments[curIns_].name.c_str());
-  ImGui::SetNextItemWidth(170);
+  ImGui::SetNextItemWidth(S(170));
   if (ImGui::BeginCombo("Instrument##pr", insLabel)) {
     for (int i = 0; i < (int)song_.instruments.size(); i++) {
       char buf[128];
@@ -247,7 +247,7 @@ void App::pianoRollWindow() {
     ImGui::End();
     return;
   }
-  const float keyW = 46, rulerH = 18, velH = std::min(100.0f, avail.y * 0.25f), gap = 4;
+  const float keyW = S(46), rulerH = S(18), velH = std::min(S(100), avail.y * 0.25f), gap = S(4);
   ImVec2 g0(p0.x + keyW, p0.y + rulerH), g1(p0.x + avail.x, p0.y + avail.y - velH - gap);
   ImVec2 v0(g0.x, g1.y + gap), v1(g1.x, p0.y + avail.y);
   float zx = prZoomX_, zy = prZoomY_;
@@ -397,7 +397,7 @@ void App::pianoRollWindow() {
     dl->AddLine(ImVec2(p0.x, y + zy), ImVec2(g0.x - 1, y + zy), IM_COL32(90, 90, 100, 255));
     if (n % 12 == 0 && zy >= 9) {
       std::string label = noteName(n);
-      dl->AddText(ImVec2(g0.x - 26, y + (zy - ImGui::GetFontSize()) / 2), IM_COL32(40, 40, 50, 255), label.c_str());
+      dl->AddText(ImVec2(g0.x - ImGui::CalcTextSize(label.c_str()).x - S(3), y + (zy - ImGui::GetFontSize()) / 2), IM_COL32(40, 40, 50, 255), label.c_str());
     }
   }
   dl->PopClipRect();
@@ -455,8 +455,8 @@ void App::pianoRollWindow() {
         if (set) dl->AddCircleFilled(ImVec2(x0 + 2, y), 3.0f, col);
       }
     }
-    dl->AddText(ImVec2(v1.x - 330, v0.y + 2), T.rowNum,
-                press ? "Pressure: each note's volume over time" : "Slide: each note's filter cutoff (13xx, filter on)");
+    const char* hint = press ? "Pressure: each note's volume over time" : "Slide: each note's filter cutoff (13xx, filter on)";
+    dl->AddText(ImVec2(v1.x - ImGui::CalcTextSize(hint).x - S(6), v0.y + 2), T.rowNum, hint);
   } else {
     // Semitone lines, the zero line, then the bend as the engine plays it:
     // each E8xx glides over its row and the value stays.

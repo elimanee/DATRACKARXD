@@ -128,7 +128,7 @@ void App::songWindow() {
     song_.author = buf;
     changed = true;
   }
-  ImGui::SetNextItemWidth(120);
+  ImGui::SetNextItemWidth(S(120));
   if (ImGui::InputFloat("Tick rate (Hz)", &song_.tickRate, 1, 10, "%.2f")) {
     song_.tickRate = std::clamp(song_.tickRate, 1.0f, 1000.0f);
     changed = true;
@@ -143,7 +143,7 @@ void App::songWindow() {
       if (!t.empty()) t.pop_back();
       std::snprintf(speedBuf, sizeof(speedBuf), "%s", t.c_str());
     }
-    ImGui::SetNextItemWidth(120);
+    ImGui::SetNextItemWidth(S(120));
     ImGui::InputText("Speed (ticks/row)", speedBuf, sizeof(speedBuf));
     editingSpeed = ImGui::IsItemActive();
     if (ImGui::IsItemHovered()) ImGui::SetTooltip("Ticks per row. Several values (e.g. \"6 5\") alternate row by row for swing.");
@@ -164,9 +164,9 @@ void App::songWindow() {
       for (int v : song_.speeds) total += v;
       int base = std::max(1, (int)std::lround(total / (float)std::max<size_t>(1, song_.speeds.size())));
       int amount = song_.speeds.size() == 2 ? std::abs(song_.speeds[0] - song_.speeds[1]) / 2 : 0;
-      ImGui::SetNextItemWidth(140);
+      ImGui::SetNextItemWidth(S(140));
       bool c1 = ImGui::SliderInt("Speed", &base, 1, 32);
-      ImGui::SetNextItemWidth(140);
+      ImGui::SetNextItemWidth(S(140));
       bool c2 = ImGui::SliderInt("Swing", &amount, 0, std::max(0, base - 1));
       if (c1 || c2) {
         amount = std::min(amount, base - 1);
@@ -177,17 +177,17 @@ void App::songWindow() {
       ImGui::EndPopup();
     }
   }
-  ImGui::SetNextItemWidth(120);
+  ImGui::SetNextItemWidth(S(120));
   if (ImGui::InputInt("Pattern length", &song_.patternLength)) {
     song_.patternLength = std::clamp(song_.patternLength, 1, MAX_ROWS);
     changed = true;
   }
-  ImGui::SetNextItemWidth(120);
+  ImGui::SetNextItemWidth(S(120));
   if (ImGui::InputInt("Highlight 1", &song_.highlight1)) {
     song_.highlight1 = std::clamp(song_.highlight1, 0, MAX_ROWS);
     changed = true;
   }
-  ImGui::SetNextItemWidth(120);
+  ImGui::SetNextItemWidth(S(120));
   if (ImGui::InputInt("Highlight 2", &song_.highlight2)) {
     song_.highlight2 = std::clamp(song_.highlight2, 0, MAX_ROWS);
     changed = true;
@@ -200,7 +200,7 @@ void App::songWindow() {
 
   ImGui::Separator();
   int nch = song_.channelCount();
-  ImGui::SetNextItemWidth(120);
+  ImGui::SetNextItemWidth(S(120));
   if (ImGui::InputInt("Channels", &nch) && nch != song_.channelCount()) {
     pushFullUndo();
     engine_->stop();
@@ -255,7 +255,7 @@ void App::mixerWindow() {
   }
   bool changed = false;
   MasterFx& fx = song_.fx;
-  const float w = 150;
+  const float w = S(150);
   if (ImGui::BeginTable("master", 3, ImGuiTableFlags_SizingStretchSame | ImGuiTableFlags_BordersInnerV)) {
     ImGui::TableNextRow();
     ImGui::TableNextColumn();
@@ -366,7 +366,7 @@ void App::channelFxWindow() {
   bool changed = false;
   char label[96];
   std::snprintf(label, sizeof(label), "%d %s", fxCh_ + 1, nch ? song_.channels[fxCh_].name.c_str() : "");
-  ImGui::SetNextItemWidth(220);
+  ImGui::SetNextItemWidth(S(220));
   if (ImGui::BeginCombo("Channel", label)) {
     for (int c = 0; c < nch; c++) {
       std::snprintf(label, sizeof(label), "%d %s (%zu)", c + 1, song_.channels[c].name.c_str(), song_.channels[c].effects.size());
@@ -384,7 +384,7 @@ void App::channelFxWindow() {
   std::vector<ChannelEffect>& fx = song_.channels[fxCh_].effects;
   ImGui::SameLine();
   ImGui::BeginDisabled((int)fx.size() >= MAX_CHANNEL_FX);
-  ImGui::SetNextItemWidth(150);
+  ImGui::SetNextItemWidth(S(150));
   if (ImGui::BeginCombo("##add", "Add effect...")) {
     for (int t = 0; t < CFX_COUNT; t++)
       if (ImGui::Selectable(CHAN_FX_INFO[t].name)) {
@@ -397,7 +397,7 @@ void App::channelFxWindow() {
   if (fx.empty()) ImGui::TextDisabled("No effect on this channel. The chain runs top to bottom, before the mixer.");
 
   int moveFrom = -1, moveTo = -1, remove = -1;
-  const float w = 170;
+  const float w = S(170);
   if (ImGui::BeginTable("chain", std::max(1, (int)fx.size()), ImGuiTableFlags_BordersInnerV | ImGuiTableFlags_ScrollX)) {
     for (int k = 0; k < (int)fx.size(); k++) ImGui::TableSetupColumn("", ImGuiTableColumnFlags_WidthFixed, w + 90);
     ImGui::TableNextRow();
@@ -623,7 +623,7 @@ void App::keysHelp() {
 }
 
 void App::aboutWindow() {
-  ImGui::SetNextWindowSize(ImVec2(380, 0), ImGuiCond_Appearing);
+  ImGui::SetNextWindowSize(ImVec2(S(380), 0), ImGuiCond_Appearing);
   if (ImGui::Begin("About", &showAbout_, ImGuiWindowFlags_NoDocking)) {
     ImGui::Text("DATRACKARXD %s", DATRACKARXD_VERSION);
     ImGui::TextWrapped("A small tracker in the spirit of Furnace: chip waves (pulse, triangle, saw, noise, sine, "

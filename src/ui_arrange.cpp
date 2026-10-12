@@ -7,6 +7,7 @@
 #include <cstdio>
 
 #include "app.h"
+#include "theme.h"
 
 // ---------------------------------------------------------------------------
 // Order list edits, shared with the Orders window. The automation follows.
@@ -187,7 +188,7 @@ void App::arrangementWindow() {
       std::snprintf(label, sizeof(label), "%d: %s", i + 1, n.empty() ? "(untitled)" : n.c_str());
       return label;
     };
-    ImGui::SetNextItemWidth(180);
+    ImGui::SetNextItemWidth(S(180));
     if (ImGui::BeginCombo("##subsong", subLabel(song_.curSubsong))) {
       for (int i = 0; i < song_.subsongCount(); i++)
         if (ImGui::Selectable(subLabel(i), i == song_.curSubsong) && i != song_.curSubsong) {
@@ -235,7 +236,7 @@ void App::arrangementWindow() {
     ImGui::SameLine();
     char name[128];
     std::snprintf(name, sizeof(name), "%s", song_.subsongName.c_str());
-    ImGui::SetNextItemWidth(150);
+    ImGui::SetNextItemWidth(S(150));
     if (ImGui::InputTextWithHint("##subname", "subsong name", name, sizeof(name))) {
       song_.subsongName = name;
       dirty_ = metaTouched_ = true;
@@ -293,11 +294,11 @@ void App::arrangementWindow() {
   selB = std::clamp(std::max(arrSelA_, arrSelB_), 0, numOrders - 1);
   engine_->setLoopRange(loopRange_ ? selA : -1, loopRange_ ? selB : -1);
   ImGui::SameLine();
-  ImGui::SetNextItemWidth(90);
+  ImGui::SetNextItemWidth(S(90));
   ImGui::SliderFloat("##zoom", &arrZoom_, 0.25f, 8.0f, "zoom %.2f", ImGuiSliderFlags_Logarithmic);
 
   // Layout.
-  const float leftW = 130, headerH = 18, rowH = 22;
+  const float leftW = S(130), headerH = S(18), rowH = S(22);
   float orderW = std::max(6.0f, song_.patternLength * arrZoom_);
   float avail = ImGui::GetContentRegionAvail().y;
   float autoH = std::max(120.0f, avail * 0.4f);
@@ -501,7 +502,7 @@ void App::automationEditor(float orderW, float leftW, float playPos) {
 
   ImGui::TextUnformatted("Automation");
   ImGui::SameLine();
-  ImGui::SetNextItemWidth(220);
+  ImGui::SetNextItemWidth(S(220));
   std::string cur = autoLane_ >= 0 ? laneLabel(lanes[autoLane_]) : std::string("(no lane)");
   if (ImGui::BeginCombo("##lane", cur.c_str())) {
     for (int i = 0; i < (int)lanes.size(); i++) {
@@ -514,13 +515,13 @@ void App::automationEditor(float orderW, float leftW, float playPos) {
   if (ImGui::SmallButton("Add lane")) ImGui::OpenPopup("addlane");
   if (ImGui::BeginPopup("addlane")) {
     AutomationLane& n = newLane_;
-    ImGui::SetNextItemWidth(160);
+    ImGui::SetNextItemWidth(S(160));
     ImGui::Combo("Target", &n.target, AUTO_TARGET_NAMES, AUTO_TARGET_COUNT);
     if (!n.isMaster()) {
       n.channel = std::clamp(n.channel, 0, nch - 1);
       char buf[64];
       std::snprintf(buf, sizeof(buf), "%d %s", n.channel + 1, song_.channels[n.channel].name.c_str());
-      ImGui::SetNextItemWidth(160);
+      ImGui::SetNextItemWidth(S(160));
       if (ImGui::BeginCombo("Channel", buf)) {
         for (int c = 0; c < nch; c++) {
           std::snprintf(buf, sizeof(buf), "%d %s", c + 1, song_.channels[c].name.c_str());
@@ -540,7 +541,7 @@ void App::automationEditor(float orderW, float leftW, float playPos) {
         const ChanFxInfo& fx = CHAN_FX_INFO[effects[n.fxSlot].type];
         char buf[64];
         std::snprintf(buf, sizeof(buf), "%d %s", n.fxSlot + 1, fx.name);
-        ImGui::SetNextItemWidth(160);
+        ImGui::SetNextItemWidth(S(160));
         if (ImGui::BeginCombo("Effect", buf)) {
           for (int k = 0; k < (int)effects.size(); k++) {
             std::snprintf(buf, sizeof(buf), "%d %s", k + 1, CHAN_FX_INFO[effects[k].type].name);
@@ -550,7 +551,7 @@ void App::automationEditor(float orderW, float leftW, float playPos) {
         }
         const ChanFxInfo& fx2 = CHAN_FX_INFO[effects[n.fxSlot].type];
         n.fxParam = std::clamp(n.fxParam, 0, fx2.count - 1);
-        ImGui::SetNextItemWidth(160);
+        ImGui::SetNextItemWidth(S(160));
         if (ImGui::BeginCombo("Parameter", fx2.params[n.fxParam].name)) {
           for (int i = 0; i < fx2.count; i++)
             if (ImGui::Selectable(fx2.params[i].name, i == n.fxParam)) n.fxParam = i;

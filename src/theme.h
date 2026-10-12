@@ -21,3 +21,7 @@ extern const Theme THEMES[THEME_COUNT];
 const Theme& theme();
 int themeIndex();
 void setTheme(int index);  // also restyles ImGui
+// Interface scale: widget sizes follow it (the font is the caller's job).
+float themeScale();
+void setThemeScale(float scale);
+inline float S(float px) { return px * themeScale(); }  // a size in pixels at 100%

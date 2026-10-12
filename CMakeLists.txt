@@ -152,6 +152,7 @@ add_library(dtcore STATIC
   src/inflate.cpp
   src/midifile.cpp
   src/theme.cpp
+  src/i18n.cpp
   src/keygen_fx.cpp
   src/payload.cpp
   src/player.cpp
@@ -173,6 +174,10 @@ add_executable(datrackarxd
   src/ui_instrument.cpp
   src/ui_windows.cpp
   src/ui_arrange.cpp
+  src/ui_settings.cpp
+  src/ui_manual.cpp
+  src/paths.cpp
+  src/shortcuts.cpp
   src/audiofile.cpp
   src/recorder.cpp)
 target_include_directories(datrackarxd PRIVATE ${drlibs_SOURCE_DIR})

@@ -2,6 +2,7 @@
 
 #include <algorithm>
 #include <cmath>
+#include <filesystem>
 #include <fstream>
 #include <cstring>
 #include <sstream>
@@ -384,15 +385,31 @@ static void writeMacro(std::ostream& f, int type, const Macro& mac) {
   f << '\n';
 }
 
+// Written next to the file first, then moved over it: a crash or a full
+// disk in the middle never leaves a half-written song.
 bool Song::save(const std::string& path, std::string& err) const {
-  std::ofstream f(path);
-  if (!f) {
-    err = "Cannot open " + path + " for writing";
-    return false;
+  std::string tmp = path + ".tmp";
+  {
+    std::ofstream f(tmp);
+    if (!f) {
+      err = "Cannot open " + path + " for writing";
+      return false;
+    }
+    write(f);
+    f.flush();
+    if (!f) {
+      err = "Write error on " + path;
+      f.close();
+      std::error_code ec;
+      std::filesystem::remove(tmp, ec);
+      return false;
+    }
   }
-  write(f);
-  if (!f) {
-    err = "Write error on " + path;
+  std::error_code ec;
+  std::filesystem::rename(tmp, path, ec);
+  if (ec) {
+    err = "Cannot replace " + path + ": " + ec.message();
+    std::filesystem::remove(tmp, ec);
     return false;
   }
   return true;

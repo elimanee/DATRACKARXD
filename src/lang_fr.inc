@@ -1,0 +1,1 @@
+TR("Settings", "Réglages"),

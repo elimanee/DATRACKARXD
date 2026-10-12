@@ -7,6 +7,7 @@
 #include <sstream>
 
 #include "app.h"
+#include "theme.h"
 #include "chips.h"
 #include "sampleops.h"
 
@@ -220,7 +221,7 @@ bool App::macroEditor(Instrument& ins, int type) {
     ImGui::SameLine();
     if (ImGui::GetContentRegionAvail().x < width) ImGui::NewLine();
   };
-  const float fieldW = 90, labelW = 70;
+  const float fieldW = S(90), labelW = S(70);
   int len = (int)m.values.size();
   ImGui::SetNextItemWidth(fieldW);
   if (ImGui::InputInt("Length", &len)) {
@@ -447,7 +448,7 @@ bool App::sampleInsEditor(Instrument& ins) {
     ImGui::SetWindowFocus("Samples");
   }
   float fade = ins.fadeout * 1000;
-  ImGui::SetNextItemWidth(160);
+  ImGui::SetNextItemWidth(S(160));
   if (ImGui::SliderFloat("Fadeout", &fade, 0, 100, "%.1f")) {
     ins.fadeout = fade / 1000;
     changed = true;
@@ -795,7 +796,7 @@ bool App::morphEditor(Instrument& ins) {
   if (ImGui::IsItemHovered()) ImGui::SetTooltip("Each note morphs from the wavetable above to this one.");
   if (!ins.morph.on) return changed;
   ImGui::SameLine();
-  ImGui::SetNextItemWidth(110);
+  ImGui::SetNextItemWidth(S(110));
   changed |= ImGui::Combo("##mmode", &ins.morph.mode, "Once\0Loop\0Ping-pong\0");
   ImGui::SameLine();
   ImGui::SetNextItemWidth(std::max(80.0f, ImGui::GetContentRegionAvail().x - 60));
@@ -962,28 +963,28 @@ void App::sampleEditor(Sample& smp) {
 
   char name[128];
   std::snprintf(name, sizeof(name), "%s", smp.name.c_str());
-  ImGui::SetNextItemWidth(220);
+  ImGui::SetNextItemWidth(S(220));
   if (ImGui::InputText("Name", name, sizeof(name))) {
     smp.name = name;
     changed = true;
   }
   ImGui::SameLine();
   wrapFor(220);
-  ImGui::SetNextItemWidth(120);
+  ImGui::SetNextItemWidth(S(120));
   changed |= ImGui::InputInt("Rate at C-5", &smp.rate, 100, 1000);
   smp.rate = std::clamp(smp.rate, 1, 1000000);
-  ImGui::SetNextItemWidth(160);
+  ImGui::SetNextItemWidth(S(160));
   changed |= ImGui::SliderInt("Volume", &smp.volume, 0, 64);
   ImGui::SameLine();
   wrapFor(160);
-  ImGui::SetNextItemWidth(120);
+  ImGui::SetNextItemWidth(S(120));
   changed |= ImGui::Combo("Loop", &smp.loopMode, LOOP_NAMES, 4);
   if (smp.loopMode) {
-    ImGui::SetNextItemWidth(160);
+    ImGui::SetNextItemWidth(S(160));
     changed |= ImGui::SliderInt("Loop start", &smp.loopStart, 0, std::max(0, len - 1));
     ImGui::SameLine();
     wrapFor(230);
-    ImGui::SetNextItemWidth(160);
+    ImGui::SetNextItemWidth(S(160));
     changed |= ImGui::SliderInt("Loop end", &smp.loopEnd, 0, len);
     smp.loopStart = std::clamp(smp.loopStart, 0, len);
     smp.loopEnd = std::clamp(smp.loopEnd, smp.loopStart, len);
@@ -1046,13 +1047,13 @@ void App::sampleEditor(Sample& smp) {
   edit("Invert", "Flip the polarity", [&] { sampleops::invert(smp, a, b); });
   edit("Remove DC", "Center the waveform on zero", [&] { sampleops::removeDc(smp, a, b); });
   ImGui::NewLine();
-  ImGui::SetNextItemWidth(90);
+  ImGui::SetNextItemWidth(S(90));
   ImGui::DragFloat("##gain", &smpGainPct_, 1, 0, 1000, "%.0f %%");
   ImGui::SameLine();
   edit("Amplify", (t = std::string("Multiply ") + scope + " by this amount").c_str(),
        [&] { sampleops::amplify(smp, a, b, smpGainPct_ / 100.0f); });
   wrapFor(90 + buttonWidth("Resample"));
-  ImGui::SetNextItemWidth(90);
+  ImGui::SetNextItemWidth(S(90));
   ImGui::InputInt("##rate", &smpNewRate_, 0, 0);
   smpNewRate_ = std::clamp(smpNewRate_, 1000, 192000);
   ImGui::SameLine();
@@ -1293,7 +1294,7 @@ void App::samplesWindow() {
     }
   }
 
-  ImGui::BeginChild("smplist", ImVec2(0, 120), ImGuiChildFlags_Borders | ImGuiChildFlags_ResizeY);
+  ImGui::BeginChild("smplist", ImVec2(0, S(120)), ImGuiChildFlags_Borders | ImGuiChildFlags_ResizeY);
   for (int i = 0; i < (int)song_.samples.size(); i++) {
     char buf[160];
     std::snprintf(buf, sizeof(buf), "%02X  %s  (%zu)", i, song_.samples[i].name.c_str(), song_.samples[i].data.size());
