@@ -30,6 +30,16 @@ std::string upper(std::string s) {
 
 }  // namespace
 
+void channelLevels(const Engine& engine, int channels, std::vector<float>& out) {
+  out.assign(channels, 0.0f);
+  for (int c = 0; c < channels; c++) {
+    const auto& sc = engine.channel(c).scope;
+    float peak = 0;
+    for (int i = 0; i < 512; i++) peak = std::max(peak, std::abs(sc[(engine.scopePos() - i + SCOPE_LEN) % SCOPE_LEN]));
+    out[c] = std::min(1.0f, peak * 1.5f);
+  }
+}
+
 void drawPlayerScreen(ImDrawList* dl, ImVec2 p0, ImVec2 size, KeygenScene& scene, const float* scope, int scopeLen,
                       int scopePos, float t, float dt, const std::string& info) {
   float peak = 0;
@@ -118,6 +128,7 @@ int runPlayer(const PlayerPayload& payload, int argc, char** argv) {
   std::string scroll = payload.scroll;
   if (scroll.empty()) scroll = "NOW PLAYING: " + song.name + (song.author.empty() ? "" : "  BY " + song.author);
   scene.scroll = "      " + upper(scroll) + "      ***      ";
+  scene.greets = payload.greets;
 
   bool quit = false, paused = false, fullscreen = false;
   Uint64 start = SDL_GetPerformanceCounter();
@@ -157,6 +168,7 @@ int runPlayer(const PlayerPayload& payload, int argc, char** argv) {
       std::lock_guard<std::mutex> lock(engine.mutex);
       scope = engine.masterScope();
       scopePos = engine.scopePos();
+      channelLevels(engine, song.channelCount(), scene.levels);
     }
     if (paused) scope.fill(0);
 

@@ -35,6 +35,8 @@ bool importFUI(const std::vector<uint8_t>& data, Song& out, std::string& err);
 
 // zlib decompression (used by .fur files). Returns false on corrupt data.
 bool zlibInflate(const uint8_t* src, size_t len, std::vector<uint8_t>& out);
+// zlib compression (the keygen player's payload).
+void zlibDeflate(const uint8_t* src, size_t len, std::vector<uint8_t>& out);
 
 // ---------------------------------------------------------------------------
 // Helpers shared by the importers.

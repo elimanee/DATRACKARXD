@@ -78,6 +78,18 @@ jobs:
           # The emulated chips (AY, SN76489, Game Boy, OPL3) and channel effects.
           "$exe" --export songs/chips.dtk chips.wav
           test -s chips.wav
+          # Module and VGM exports, and the modules read back by the importers.
+          for f in xm mod it; do
+            "$exe" --export-module songs/demo.dtk "demo.$f"
+            "$exe" --export-module songs/chips.dtk "chips.$f"
+            test -s "demo.$f" && test -s "chips.$f"
+            "$exe" --convert "demo.$f" "back-$f.dtk"
+            test -s "back-$f.dtk"
+          done
+          [ "$(head -c 17 demo.xm)" = "Extended Module: " ]
+          [ "$(head -c 4 demo.it)" = "IMPM" ]
+          "$exe" --export-vgm songs/chips.dtk chips.vgm
+          [ "$(head -c 4 chips.vgm)" = "Vgm " ]
           # An exported keygen player must start and play on every OS.
           player=player
           [ "${{ runner.os }}" = "Windows" ] && player=player.exe

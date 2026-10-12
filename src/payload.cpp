@@ -7,6 +7,8 @@
 #include <sstream>
 #include <vector>
 
+#include "import.h"
+
 #if defined(_WIN32)
 #include <windows.h>
 #elif defined(__APPLE__)
@@ -21,7 +23,8 @@ namespace fs = std::filesystem;
 
 namespace {
 
-const char MAGIC[8] = {'D', 'T', 'K', 'P', 'L', 'A', 'Y', '1'};
+const char MAGIC[8] = {'D', 'T', 'K', 'P', 'L', 'A', 'Y', '1'};   // plain payload
+const char MAGIC2[8] = {'D', 'T', 'K', 'P', 'L', 'A', 'Y', '2'};  // zlib-compressed payload
 const size_t TRAILER = 8 + 8;  // payload length, magic
 
 fs::path selfPath() {
@@ -81,7 +84,7 @@ bool split(const std::vector<char>& data, size_t& exeSize, std::string& payload)
   payload.clear();
   if (data.size() < TRAILER) return false;
   const char* t = data.data() + data.size() - TRAILER;
-  if (std::memcmp(t + 8, MAGIC, 8) != 0) return false;
+  if (std::memcmp(t + 8, MAGIC, 8) != 0 && std::memcmp(t + 8, MAGIC2, 8) != 0) return false;
   uint64_t len = get64(t);
   if (len > data.size() - TRAILER) return false;
   exeSize = data.size() - TRAILER - (size_t)len;
@@ -110,13 +113,19 @@ bool readOwnPayload(PlayerPayload& out) {
   char t[TRAILER];
   f.seekg(size - (std::streamoff)TRAILER);
   f.read(t, TRAILER);
-  if (!f || std::memcmp(t + 8, MAGIC, 8) != 0) return false;
+  bool compressed = f && std::memcmp(t + 8, MAGIC2, 8) == 0;
+  if (!f || (!compressed && std::memcmp(t + 8, MAGIC, 8) != 0)) return false;
   uint64_t len = get64(t);
   if (len > (uint64_t)size - TRAILER) return false;
   std::string payload((size_t)len, '\0');
   f.seekg(size - (std::streamoff)TRAILER - (std::streamoff)len);
   f.read(payload.data(), (std::streamsize)len);
   if (!f) return false;
+  if (compressed) {
+    std::vector<uint8_t> plain;
+    if (!zlibInflate((const uint8_t*)payload.data(), payload.size(), plain)) return false;
+    payload.assign(plain.begin(), plain.end());
+  }
 
   // Header lines "key=value" up to an empty line, then the song.
   std::istringstream ss(payload);
@@ -128,6 +137,7 @@ bool readOwnPayload(PlayerPayload& out) {
     if (k == "logo") out.logo = v;
     else if (k == "scroll") out.scroll = v;
     else if (k == "title") out.title = v;
+    else if (k == "greets") out.greets = v;
     else out.style.set(k, v);
   }
   out.song.assign(std::istreambuf_iterator<char>(ss), std::istreambuf_iterator<char>());
@@ -158,7 +168,11 @@ bool writePlayer(const std::string& path, const PlayerPayload& payload, std::str
   split(exe, exeSize, old);  // a player exporting again drops its own song
 
   std::string body = "logo=" + esc(payload.logo) + "\ntitle=" + esc(payload.title) + "\nscroll=" + esc(payload.scroll) +
+                     "\ngreets=" + esc(payload.greets) +
                      "\n" + payload.style.toText() + "\n" + payload.song;
+  std::vector<uint8_t> packed;
+  zlibDeflate((const uint8_t*)body.data(), body.size(), packed);
+  body.assign(packed.begin(), packed.end());
   fs::path out(path);
   {
     std::ofstream f(out, std::ios::binary | std::ios::trunc);
@@ -171,7 +185,7 @@ bool writePlayer(const std::string& path, const PlayerPayload& payload, std::str
     uint64_t len = body.size();
     char t[TRAILER];
     for (int i = 0; i < 8; i++) t[i] = (char)((len >> (8 * i)) & 0xff);
-    std::memcpy(t + 8, MAGIC, 8);
+    std::memcpy(t + 8, MAGIC2, 8);
     f.write(t, TRAILER);
     if (!f) {
       err = "Write error on " + path;

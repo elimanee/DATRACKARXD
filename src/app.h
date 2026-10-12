@@ -59,7 +59,7 @@ struct PRNote {
 
 enum class PRDrag { None, Move, Resize, Select, Erase, Velocity, Pitch, PitchErase, Bend, BendErase, Lane, LaneErase, Key };
 
-enum class FileDialogMode { None, Open, Save, ExportWav, LoadSample, LoadInstrument, SaveInstrument, ExportMidi, ExportOgg, ExportPlayer };
+enum class FileDialogMode { None, Open, Save, ExportWav, LoadSample, LoadInstrument, SaveInstrument, ExportMidi, ExportOgg, ExportPlayer, ExportModule, ExportVgm };
 enum class PendingAction { None, New, Open, Demo, Quit };
 
 class App {
@@ -213,6 +213,11 @@ class App {
   char dialogName_[256] = {};
   int exportLoops_ = 1;
   int oggQuality_ = 6;
+  int moduleFormat_ = 0;  // 0 XM, 1 MOD, 2 IT
+  int moduleRate_ = 1;    // rendered instruments: 0 11025, 1 22050, 2 44100 Hz
+  float moduleHold_ = 1.0f;
+  std::string exportReport_;  // what the last module export couldn't convert
+  bool showExportReport_ = false;
   // Keygen player export.
   bool playerPopupRequest_ = false;
   char playerLogo_[64] = "DATRACKARXD";

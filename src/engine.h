@@ -152,11 +152,15 @@ class Engine {
   int loopFirst() const { return loopFirst_; }
   int loopLast() const { return loopLast_; }
   bool metronome = false;   // clicks on the beats while playing (never in exports)
+  // Outputs the plain channel mix (no master effects, DC filter or soft clip):
+  // used to render instruments into samples.
+  bool bakeMode = false;
   float metronomeVolume = 0.5f;
   bool countingIn() const { return playing_ && countIn_ > 0; }
   int currentTick() const { return tick_; }
 
   const ChannelState& channel(int c) const { return ch_[c]; }
+  const ChipVoice* chipVoice(int c) const { return c >= 0 && c < MAX_CHANNELS ? chips_[c].get() : nullptr; }
   int scopePos() const { return scopePos_; }
   const std::array<float, SCOPE_LEN>& masterScope() const { return master_; }
 

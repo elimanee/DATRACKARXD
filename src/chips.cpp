@@ -73,6 +73,20 @@ class AYVoice : public ChipVoice {
     }
   }
 
+  void regs(ChipRegs& r) const override {
+    r.type = INS_AY;
+    r.clock = clock_;
+    r.ym = ym_;
+    r.ayPeriod = period_;
+    r.ayNoise = noisePeriod_;
+    r.ayEnvPeriod = envPeriod_;
+    r.ayEnvShape = shape_;
+    r.ayVol = useEnv_ ? 16 : vol_;
+    r.ayTone = tone_;
+    r.ayNoiseOn = noise_;
+    r.ayShapeWrites = shapeWrites_;
+  }
+
   float render() override {
     acc_ += clock_ / 8.0 / sr_;
     float sum = 0;
@@ -90,6 +104,7 @@ class AYVoice : public ChipVoice {
 
  private:
   void writeShape(int shape) {
+    shapeWrites_++;
     shape_ = shape & 15;
     envAttack_ = (shape_ & 4) != 0;
     envPos_ = 0;
@@ -153,7 +168,7 @@ class AYVoice : public ChipVoice {
   uint32_t lfsr_ = 1;
   int shape_ = 0, envPos_ = 0, envLevel_ = 0;
   bool envAttack_ = false, envHold_ = true;
-  uint32_t lastTrigger_ = 0;
+  uint32_t lastTrigger_ = 0, shapeWrites_ = 0;
   float last_ = 0;
   DcBlock dc_;
 };
@@ -191,8 +206,21 @@ class SNVoice : public ChipVoice {
     vol_ = std::clamp(f.vol, 0, 15);
     if (f.trigger != lastTrigger_) {
       lastTrigger_ = f.trigger;
-      if (noise_) lfsr_ = 0x8000;  // writing the noise register resets it
+      if (noise_) {
+        lfsr_ = 0x8000;  // writing the noise register resets it
+        noiseResets_++;
+      }
     }
+  }
+
+  void regs(ChipRegs& r) const override {
+    r.type = INS_SN;
+    r.clock = clock_;
+    r.snPeriod = period_;
+    r.snAtten = 15 - vol_;
+    r.snNoise = noise_;
+    r.snWhite = white_;
+    r.snNoiseResets = noiseResets_;
   }
 
   float render() override {
@@ -224,7 +252,7 @@ class SNVoice : public ChipVoice {
   double clock_ = 3579545, acc_ = 0;
   bool noise_ = false, white_ = true, out_ = false;
   int period_ = 1, cnt_ = 1, vol_ = 0;
-  uint32_t lfsr_ = 0x8000, lastTrigger_ = 0;
+  uint32_t lfsr_ = 0x8000, lastTrigger_ = 0, noiseResets_ = 0;
   float last_ = 0;
   DcBlock dc_;
 };
@@ -252,6 +280,9 @@ class GBVoice : public ChipVoice {
       envVol_ = std::clamp(ins.volume, 0, 15);
       envDir_ = c.gbEnvDir;
       envLen_ = c.gbEnvLen;
+      startVol_ = envVol_;
+      startDir_ = envDir_;
+      startLen_ = envLen_;
       envCnt_ = 0;
       sweepTime_ = c.gbSweepTime;
       sweepDir_ = c.gbSweepDir;
@@ -261,6 +292,7 @@ class GBVoice : public ChipVoice {
       muted_ = false;
       lfsr_ = 0x7FFF;
       phase_ = 0;
+      triggers_++;
     }
     // A running sweep owns the frequency; otherwise it follows the note.
     if (!(kind_ == 0 && sweepTime_ > 0)) shadow_ = reg;
@@ -279,6 +311,8 @@ class GBVoice : public ChipVoice {
           if (d < best) {
             best = d;
             noiseRate_ = rate;
+            noiseShift_ = s;
+            noiseDiv_ = r;
           }
         }
     }
@@ -333,6 +367,25 @@ class GBVoice : public ChipVoice {
     return dc_.run(sum / OS) * 2.0f;
   }
 
+  void regs(ChipRegs& r) const override {
+    r.type = INS_GB;
+    r.clock = 4194304;
+    r.gbKind = kind_;
+    r.gbFreq = shadow_;
+    r.gbDuty = duty_;
+    r.gbEnvVol = std::clamp((int)std::lround(startVol_ * chanScale_), 0, 15);
+    r.gbEnvDir = startDir_;
+    r.gbEnvLen = startLen_;
+    r.gbSweep = (sweepTime_ << 4) | (sweepDir_ << 3) | sweepShift_;
+    r.gbNoiseShift = noiseShift_;
+    r.gbNoiseDiv = noiseDiv_;
+    r.gbShort = shortNoise_;
+    r.gbWaveVol = waveShift_ >= 4 ? 0 : waveShift_ + 1;
+    r.gbSoftVol = macroVol_ >= 0 ? volume() : -1;
+    for (int i = 0; i < WAVETABLE_LEN; i++) r.gbWave[i] = wave_[i];
+    r.gbTriggers = triggers_;
+  }
+
   bool finished() const override {
     if (muted_) return true;
     if (kind_ == 1 || macroVol_ >= 0) return false;
@@ -374,6 +427,8 @@ class GBVoice : public ChipVoice {
   uint32_t lfsr_ = 0x7FFF, lastTrigger_ = 0;
   int wave_[WAVETABLE_LEN] = {};
   int waveShift_ = 0;
+  int startVol_ = 0, startDir_ = 0, startLen_ = 0, noiseShift_ = 0, noiseDiv_ = 0;
+  uint32_t triggers_ = 0;
   float chanScale_ = 1;
   int macroVol_ = -1;
   DcBlock dc_;
@@ -441,6 +496,7 @@ class OPLVoice : public ChipVoice, public ymfm::ymfm_interface {
         write(0xB0, (block << 2) | (fnum >> 8));
         generate();
         keyOn_ = false;
+        retriggers_++;
       }
     }
     keyOn_ = f.gate;
@@ -459,6 +515,24 @@ class OPLVoice : public ChipVoice, public ymfm::ymfm_interface {
   }
 
   bool finished() const override { return !keyOn_ && quiet_ > 4096; }
+
+  void regs(ChipRegs& r) const override {
+    static const int SLOT[4] = {0x00, 0x03, 0x08, 0x0B};
+    static const int BASE[5] = {0x20, 0x40, 0x60, 0x80, 0xE0};
+    r.type = INS_OPL;
+    r.clock = OPL3_CLOCK;
+    for (int k = 0; k < 4; k++)
+      for (int j = 0; j < 5; j++) r.oplOp[k][j] = std::max(0, regs_[BASE[j] + SLOT[k]]);
+    r.oplC0 = std::max(0, regs_[0xC0]);
+    r.oplC3 = std::max(0, regs_[0xC3]);
+    r.oplBD = std::max(0, regs_[0xBD]);
+    int a0 = std::max(0, regs_[0xA0]), b0 = std::max(0, regs_[0xB0]);
+    r.oplFnum = a0 | ((b0 & 3) << 8);
+    r.oplBlock = (b0 >> 2) & 7;
+    r.oplKey = keyOn_;
+    r.oplFour = regs_[0x104] > 0;
+    r.oplRetriggers = retriggers_;
+  }
 
  private:
   void write(int reg, int val) {
@@ -483,7 +557,7 @@ class OPLVoice : public ChipVoice, public ymfm::ymfm_interface {
   int regs_[0x200];
   bool keyOn_ = false;
   int quiet_ = 1 << 20;
-  uint32_t lastTrigger_ = 0;
+  uint32_t lastTrigger_ = 0, retriggers_ = 0;
 };
 
 struct ClockInfo {

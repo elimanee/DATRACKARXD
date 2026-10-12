@@ -132,6 +132,7 @@ class Maker {
   char logo_[64] = "DATRACKARXD";
   char title_[128] = {};
   char scroll_[2048] = {};
+  char greets_[512] = {};
   bool playing_ = true;
   FileBrowser browser_;
   int browserMode_ = 0;  // 0 open song, 1 export
@@ -154,6 +155,7 @@ class Maker {
     p.logo = logo_;
     p.title = title_;
     p.scroll = scroll_;
+    p.greets = greets_;
     p.style = scene_.style;
     std::string err;
     if (writePlayer(path, p, err)) setStatus("Exported " + path);
@@ -193,6 +195,8 @@ class Maker {
     ImGui::InputText("Title", title_, sizeof(title_));
     ImGui::TextUnformatted("Scroller");
     ImGui::InputTextMultiline("##scroll", scroll_, sizeof(scroll_), ImVec2(-1, 80));
+    ImGui::SetNextItemWidth(-90);
+    ImGui::InputTextWithHint("Greetings", "small scroller at the top", greets_, sizeof(greets_));
     if (ImGui::SmallButton("Default texts")) resetTexts();
 
     ImGui::SeparatorText("Look");
@@ -207,9 +211,31 @@ class Maker {
     ImGui::Checkbox("Copper bars", &st.copper);
     ImGui::SameLine();
     ImGui::Checkbox("Oscilloscope", &st.scope);
-    ImGui::Checkbox("Starfield", &st.stars);
+    int bg = st.background == 0 && !st.stars ? 4 : st.background;
     ImGui::SetNextItemWidth(-110);
-    ImGui::SliderFloat("Star speed", &st.starSpeed, 0.0f, 5.0f, "%.1fx");
+    if (ImGui::Combo("Background", &bg, "Starfield\0Plasma\0Tunnel\0Rotozoom\0Black\0")) {
+      st.background = bg;
+      st.stars = bg == 0;
+    }
+    ImGui::Checkbox("Cycle backgrounds", &st.cycle);
+    if (st.cycle) {
+      ImGui::SameLine();
+      ImGui::SetNextItemWidth(-1);
+      ImGui::SliderFloat("##scenetime", &st.sceneTime, 2.0f, 60.0f, "%.0f s each");
+    }
+    if (bg == 0 || st.cycle) {
+      ImGui::SetNextItemWidth(-110);
+      ImGui::SliderFloat("Star speed", &st.starSpeed, 0.0f, 5.0f, "%.1fx");
+    }
+    ImGui::SetNextItemWidth(-110);
+    ImGui::Combo("3D object", &st.object, "None\0Cube\0Pyramid\0Octahedron\0");
+    ImGui::SetNextItemWidth(-110);
+    ImGui::Combo("Logo effect", &st.logoFx, "Wave\0Pulse\0Glitch\0");
+    ImGui::SetNextItemWidth(-110);
+    ImGui::Combo("Scroller effect", &st.scrollFx, "Sine\0Bounce\0Roller\0");
+    ImGui::Checkbox("VU meters", &st.vu);
+    ImGui::SameLine();
+    ImGui::Checkbox("Flash on hits", &st.flash);
     ImGui::SetNextItemWidth(-110);
     ImGui::SliderFloat("Scroll speed", &st.scrollSpeed, 0.0f, 5.0f, "%.1fx");
     ImGui::SetNextItemWidth(-110);
@@ -237,6 +263,8 @@ class Maker {
     scene_.logo = logo_[0] ? logo_ : "DATRACKARXD";
     std::string text = scroll_[0] ? scroll_ : song_.name;
     scene_.scroll = "      " + text + "      ***      ";
+    scene_.greets = greets_;
+    channelLevels(engine_, song_.channelCount(), scene_.levels);  // frame() runs with the engine mutex held
     const std::array<float, SCOPE_LEN>& scope = engine_.masterScope();
     float t = (float)ImGui::GetTime();
     int secs = (int)t;
