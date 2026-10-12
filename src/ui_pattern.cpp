@@ -2,6 +2,7 @@
 #include <imgui.h>
 
 #include <algorithm>
+#include <cmath>
 #include <cstdio>
 
 #include "app.h"
@@ -227,6 +228,8 @@ Song App::metaSnapshot() {
   m.instruments = song_.instruments;
   m.wavetables = song_.wavetables;
   m.fx = song_.fx;
+  m.automation = song_.automation;
+  m.subsongName = song_.subsongName;
   m.channels.clear();
   for (auto& c : song_.channels) {
     std::vector<Pattern> pats = std::move(c.patterns);
@@ -256,6 +259,8 @@ void App::restoreMeta(const Song& m) {
   song_.instruments = m.instruments;
   song_.wavetables = m.wavetables;
   song_.fx = m.fx;
+  song_.automation = m.automation;
+  song_.subsongName = m.subsongName;
   for (size_t c = 0; c < m.channels.size() && c < song_.channels.size(); c++) {
     std::vector<Pattern> pats = std::move(song_.channels[c].patterns);
     song_.channels[c] = m.channels[c];
@@ -534,6 +539,227 @@ void App::transpose(int semitones) {
 }
 
 // ---------------------------------------------------------------------------
+// Selection tools (Edit menu and the pattern's right-click menu). Without a
+// selection they work on the cursor's channel over the whole pattern.
+// ---------------------------------------------------------------------------
+
+void App::toolBounds(int& ch0, int& f0, int& row0, int& ch1, int& f1, int& row1) const {
+  if (hasSel_) {
+    selectionBounds(ch0, f0, row0, ch1, f1, row1);
+  } else {
+    ch0 = ch1 = curCh_;
+    f0 = 0;
+    f1 = 2 + song_.channels[curCh_].effectCols;
+    row0 = 0;
+    row1 = song_.patternLength - 1;
+  }
+  row1 = std::min(row1, song_.patternLength - 1);
+}
+
+// Fills the volume and effect values between the first and last ones set.
+void App::interpolateSelection() {
+  int ch0, f0, row0, ch1, f1, row1;
+  toolBounds(ch0, f0, row0, ch1, f1, row1);
+  pushUndo(ch0, ch1);
+  for (int c = ch0; c <= ch1; c++) {
+    int maxField = 2 + song_.channels[c].effectCols;
+    for (int f = (c == ch0 ? f0 : 0); f <= (c == ch1 ? std::min(f1, maxField) : maxField); f++) {
+      if (f < 2) continue;
+      Pattern* p = song_.pattern(c, song_.orders[curOrder_][c], true);
+      auto value = [&](int r) { return f == 2 ? p->rows[r].vol : p->rows[r].fx[f - 3].val; };
+      int a = -1, b = -1;
+      for (int r = row0; r <= row1; r++)
+        if (value(r) >= 0) {
+          if (a < 0) a = r;
+          b = r;
+        }
+      if (a < 0 || b <= a) continue;
+      int va = value(a), vb = value(b);
+      int cmd = f == 2 ? -1 : p->rows[a].fx[f - 3].cmd;
+      for (int r = a + 1; r < b; r++) {
+        int v = (int)std::lround(va + (vb - va) * (r - a) / (double)(b - a));
+        if (f == 2) {
+          p->rows[r].vol = (int16_t)std::clamp(v, 0, 0x7f);
+        } else {
+          p->rows[r].fx[f - 3].cmd = (int16_t)cmd;
+          p->rows[r].fx[f - 3].val = (int16_t)std::clamp(v, 0, 0xff);
+        }
+      }
+    }
+  }
+  dirty_ = true;
+  setStatus("Interpolated");
+}
+
+// Volumes of the notes (and set volumes) scaled, or randomly nudged.
+void App::volumeTool(float scale, int jitter) {
+  int ch0, f0, row0, ch1, f1, row1;
+  toolBounds(ch0, f0, row0, ch1, f1, row1);
+  pushUndo(ch0, ch1);
+  for (int c = ch0; c <= ch1; c++) {
+    int fa = c == ch0 ? f0 : 0, fb = c == ch1 ? f1 : 2 + song_.channels[c].effectCols;
+    if (fa > 2 || fb < 2) continue;  // the volume column isn't selected here
+    for (int r = row0; r <= row1; r++) {
+      Cell* cell = song_.cell(c, curOrder_, r, false);
+      if (!cell || (cell->note < 0 && cell->vol < 0)) continue;
+      int v = cell->vol >= 0 ? cell->vol : 0x7f;
+      v = (int)std::lround(v * scale);
+      if (jitter > 0) v += std::rand() % (2 * jitter + 1) - jitter;
+      cell->vol = (int16_t)std::clamp(v, 1, 0x7f);
+    }
+  }
+  dirty_ = true;
+}
+
+// Reverse, expand (x2) or shrink (/2) the rows of the selection.
+void App::rowTool(int kind) {
+  int ch0, f0, row0, ch1, f1, row1;
+  toolBounds(ch0, f0, row0, ch1, f1, row1);
+  if (row1 <= row0) return;
+  pushUndo(ch0, ch1);
+  int n = row1 - row0 + 1;
+  for (int c = ch0; c <= ch1; c++) {
+    Pattern* p = song_.pattern(c, song_.orders[curOrder_][c], true);
+    int maxField = 2 + song_.channels[c].effectCols;
+    int fa = c == ch0 ? f0 : 0, fb = c == ch1 ? std::min(f1, maxField) : maxField;
+    std::vector<Cell> src(p->rows.begin() + row0, p->rows.begin() + row1 + 1);
+    for (int i = 0; i < n; i++) {
+      Cell from;
+      if (kind == 0) from = src[n - 1 - i];                       // reverse
+      else if (kind == 1) from = i % 2 == 0 ? src[i / 2] : Cell();  // expand: every other row
+      else from = i * 2 < n ? src[i * 2] : Cell();                 // shrink: keep one row in two
+      for (int f = fa; f <= fb; f++) copyField(p->rows[row0 + i], from, f);
+    }
+  }
+  dirty_ = true;
+}
+
+// Find & replace over the selection, the current patterns or the whole song.
+int App::findReplace(bool apply) {
+  FindReplace& fr = findReplace_;
+  int count = 0;
+  int ch0 = 0, ch1 = song_.channelCount() - 1, row0 = 0, row1 = song_.patternLength - 1, f0, f1;
+  if (fr.scope == 0) toolBounds(ch0, f0, row0, ch1, f1, row1);
+  if (fr.scope == 1) ch0 = ch1 = curCh_;
+  if (apply) {
+    if (fr.scope == 2) pushFullUndo();
+    else pushUndo(ch0, ch1);
+  }
+  auto visit = [&](Cell& cell) {
+    if (fr.note >= 0 && cell.note != fr.note) return;
+    if (fr.note == -2 && cell.note < 0) return;  // any note
+    if (fr.ins >= 0 && cell.ins != fr.ins) return;
+    int fxCol = -1;
+    if (fr.fxCmd >= 0) {
+      for (int e = 0; e < MAX_EFFECTS && fxCol < 0; e++)
+        if (cell.fx[e].cmd == fr.fxCmd) fxCol = e;
+      if (fxCol < 0) return;
+    }
+    if (fr.note == -1 && fr.ins < 0 && fr.fxCmd < 0 && cell.empty()) return;
+    count++;
+    if (!apply) return;
+    if (fr.transpose && cell.note >= 0) cell.note = (int16_t)std::clamp(cell.note + fr.transpose, 0, 119);
+    if (fr.newIns >= 0 && cell.ins >= 0) cell.ins = (int16_t)fr.newIns;
+    if (fr.newVol >= 0 && (cell.note >= 0 || cell.vol >= 0)) cell.vol = (int16_t)fr.newVol;
+    if (fxCol >= 0 && fr.newFxCmd >= 0) cell.fx[fxCol].cmd = (int16_t)fr.newFxCmd;
+  };
+  if (fr.scope == 2) {
+    // Every pattern used in the order list, once each.
+    for (int c = 0; c < song_.channelCount(); c++) {
+      std::vector<bool> seen(MAX_PATTERNS, false);
+      for (auto& o : song_.orders) {
+        if (seen[o[c]]) continue;
+        seen[o[c]] = true;
+        Pattern* p = song_.pattern(c, o[c], false);
+        if (!p) continue;
+        for (int r = 0; r < song_.patternLength; r++) visit(p->rows[r]);
+      }
+    }
+  } else {
+    for (int c = ch0; c <= ch1; c++) {
+      Pattern* p = song_.pattern(c, song_.orders[curOrder_][c], false);
+      if (!p) continue;
+      for (int r = row0; r <= row1; r++) visit(p->rows[r]);
+    }
+  }
+  if (apply && count) dirty_ = true;
+  return count;
+}
+
+void App::selectionToolsMenu() {
+  if (ImGui::MenuItem("Interpolate", "Ctrl+I")) interpolateSelection();
+  if (ImGui::IsItemHovered()) ImGui::SetTooltip("Fill the volumes and effect values between the first and last ones");
+  if (ImGui::BeginMenu("Scale volumes")) {
+    for (int pct : {25, 50, 75, 125, 150, 200}) {
+      std::string l = std::to_string(pct) + "%";
+      if (ImGui::MenuItem(l.c_str())) volumeTool(pct / 100.0f, 0);
+    }
+    ImGui::EndMenu();
+  }
+  if (ImGui::MenuItem("Humanize volumes")) volumeTool(1.0f, 8);
+  if (ImGui::IsItemHovered()) ImGui::SetTooltip("Nudge each note's volume randomly (+-8)");
+  if (ImGui::MenuItem("Reverse rows")) rowTool(0);
+  if (ImGui::MenuItem("Expand x2")) rowTool(1);
+  if (ImGui::IsItemHovered()) ImGui::SetTooltip("Spread the rows out to every other row (half speed)");
+  if (ImGui::MenuItem("Shrink /2")) rowTool(2);
+  if (ImGui::IsItemHovered()) ImGui::SetTooltip("Keep one row in two, packed together (double speed)");
+  ImGui::Separator();
+  if (ImGui::MenuItem("Find & replace...", "Ctrl+H")) showFindReplace_ = true;
+}
+
+void App::findReplaceWindow() {
+  if (!ImGui::Begin("Find & replace", &showFindReplace_, ImGuiWindowFlags_AlwaysAutoResize)) {
+    ImGui::End();
+    return;
+  }
+  FindReplace& fr = findReplace_;
+  ImGui::TextUnformatted("Find cells with");
+  char noteBuf[16];
+  std::snprintf(noteBuf, sizeof(noteBuf), "%s", fr.note == -1 ? "anything" : fr.note == -2 ? "any note" : noteName(fr.note).c_str());
+  ImGui::SetNextItemWidth(120);
+  if (ImGui::BeginCombo("Note", noteBuf)) {
+    if (ImGui::Selectable("anything", fr.note == -1)) fr.note = -1;
+    if (ImGui::Selectable("any note", fr.note == -2)) fr.note = -2;
+    for (int n = 0; n < NOTE_COUNT; n++)
+      if (ImGui::Selectable(noteName(n).c_str(), fr.note == n)) fr.note = n;
+    ImGui::EndCombo();
+  }
+  ImGui::SetNextItemWidth(120);
+  ImGui::InputInt("Instrument (-1 any)", &fr.ins);
+  fr.ins = std::clamp(fr.ins, -1, MAX_INSTRUMENTS - 1);
+  auto hexField = [](const char* check, const char* id, int& v) {
+    bool on = v >= 0;
+    if (ImGui::Checkbox(check, &on)) v = on ? 0 : -1;
+    if (on) {
+      ImGui::SameLine();
+      uint8_t b = (uint8_t)v;
+      ImGui::SetNextItemWidth(40);
+      if (ImGui::InputScalar(id, ImGuiDataType_U8, &b, nullptr, nullptr, "%02X", ImGuiInputTextFlags_CharsHexadecimal)) v = b;
+    }
+  };
+  hexField("Effect command", "##fxfind", fr.fxCmd);
+  ImGui::Separator();
+  ImGui::TextUnformatted("Replace with");
+  ImGui::SetNextItemWidth(120);
+  ImGui::SliderInt("Transpose", &fr.transpose, -24, 24);
+  ImGui::SetNextItemWidth(120);
+  ImGui::InputInt("Instrument (-1 keep)", &fr.newIns);
+  fr.newIns = std::clamp(fr.newIns, -1, MAX_INSTRUMENTS - 1);
+  ImGui::SetNextItemWidth(120);
+  ImGui::InputInt("Volume (-1 keep)", &fr.newVol);
+  fr.newVol = std::clamp(fr.newVol, -1, 0x7f);
+  ImGui::BeginDisabled(fr.fxCmd < 0);
+  hexField("New effect command", "##fxnew", fr.newFxCmd);
+  ImGui::EndDisabled();
+  ImGui::Separator();
+  ImGui::Combo("In", &fr.scope, "Selection (or this channel)\0Current pattern of this channel\0Whole song\0");
+  if (ImGui::Button("Count")) setStatus(std::to_string(findReplace(false)) + " matching cells");
+  ImGui::SameLine();
+  if (ImGui::Button("Replace all")) setStatus("Replaced in " + std::to_string(findReplace(true)) + " cells");
+  ImGui::End();
+}
+
+// ---------------------------------------------------------------------------
 // Keyboard
 // ---------------------------------------------------------------------------
 
@@ -550,6 +776,8 @@ void App::patternKey(const KeyEvent& ev) {
       case SDLK_c: copySelection(false); return;
       case SDLK_x: copySelection(true); return;
       case SDLK_v: paste(); return;
+      case SDLK_h: showFindReplace_ = true; return;
+      case SDLK_i: interpolateSelection(); return;
       case SDLK_a: {
         bool wholeChannel = hasSel_ && selCh0_ == selCh1_ && selRow0_ == 0 && selRow1_ == song_.patternLength - 1 &&
                             colToField(std::min(selCol0_, selCol1_)) == 0;
@@ -865,6 +1093,20 @@ void App::patternWindow() {
     mouseSelecting_ = false;
   }
   if (hovered && io.MouseWheel != 0 && !(playing && follow_)) moveRows(-(int)io.MouseWheel * 4);
+  // Right-click: the selection tools.
+  if (hovered && ImGui::IsMouseClicked(ImGuiMouseButton_Right)) ImGui::OpenPopup("patctx");
+  if (ImGui::BeginPopup("patctx")) {
+    if (ImGui::MenuItem("Cut", "Ctrl+X")) copySelection(true);
+    if (ImGui::MenuItem("Copy", "Ctrl+C")) copySelection(false);
+    if (ImGui::MenuItem("Paste", "Ctrl+V")) paste();
+    ImGui::Separator();
+    if (ImGui::MenuItem("Transpose +1")) transpose(1);
+    if (ImGui::MenuItem("Transpose -1")) transpose(-1);
+    ImGui::Separator();
+    ImGui::TextDisabled(hasSel_ ? "Selection" : "No selection: the whole channel");
+    selectionToolsMenu();
+    ImGui::EndPopup();
+  }
 
   ImGui::End();
 }

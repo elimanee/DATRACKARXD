@@ -23,70 +23,25 @@ void App::ordersWindow() {
   bool changed = false;
 
   // Order list operations.
-  if (ImGui::Button("+") && numOrders < MAX_ORDERS) {
-    // New row using the first unused pattern of each channel.
-    std::array<uint8_t, MAX_CHANNELS> row{};
-    for (int c = 0; c < nch; c++) {
-      int p = 0;
-      while (p < MAX_PATTERNS - 1) {
-        bool used = song_.pattern(c, p) != nullptr;
-        for (auto& o : song_.orders) used |= o[c] == p;
-        if (!used) break;
-        p++;
-      }
-      row[c] = (uint8_t)p;
-    }
-    song_.orders.insert(song_.orders.begin() + curOrder_ + 1, row);
-    curOrder_++;
-    changed = true;
-  }
+  if (ImGui::Button("+") && numOrders < MAX_ORDERS) orderInsertNew(curOrder_ + 1);
   if (ImGui::IsItemHovered()) ImGui::SetTooltip("Add an order with new empty patterns");
   ImGui::SameLine();
-  if (ImGui::Button("Dup") && numOrders < MAX_ORDERS) {
-    song_.orders.insert(song_.orders.begin() + curOrder_ + 1, song_.orders[curOrder_]);
-    curOrder_++;
-    changed = true;
-  }
+  if (ImGui::Button("Dup") && numOrders < MAX_ORDERS) orderDuplicate(curOrder_, curOrder_);
   if (ImGui::IsItemHovered()) ImGui::SetTooltip("Duplicate this order (same patterns)");
   ImGui::SameLine();
-  if (ImGui::Button("Clone") && numOrders < MAX_ORDERS) {
-    pushFullUndo();
-    // Copy the patterns into new unused slots.
-    std::array<uint8_t, MAX_CHANNELS> row = song_.orders[curOrder_];
-    for (int c = 0; c < nch; c++) {
-      int p = 0;
-      while (p < MAX_PATTERNS - 1) {
-        bool used = song_.pattern(c, p) != nullptr;
-        for (auto& o : song_.orders) used |= o[c] == p;
-        if (!used) break;
-        p++;
-      }
-      const Pattern* src = song_.pattern(c, row[c]);
-      if (src) *song_.pattern(c, p, true) = *src;
-      row[c] = (uint8_t)p;
-    }
-    song_.orders.insert(song_.orders.begin() + curOrder_ + 1, row);
-    curOrder_++;
-    changed = true;
-  }
+  if (ImGui::Button("Clone") && numOrders < MAX_ORDERS) orderClone(curOrder_);
   if (ImGui::IsItemHovered()) ImGui::SetTooltip("Copy this order into new patterns");
   ImGui::SameLine();
-  if (ImGui::Button("Del") && numOrders > 1) {
-    song_.orders.erase(song_.orders.begin() + curOrder_);
-    curOrder_ = std::min(curOrder_, (int)song_.orders.size() - 1);
-    changed = true;
-  }
+  if (ImGui::Button("Del") && numOrders > 1) orderDelete(curOrder_, curOrder_);
   ImGui::SameLine();
   if (ImGui::ArrowButton("up", ImGuiDir_Up) && curOrder_ > 0) {
-    std::swap(song_.orders[curOrder_], song_.orders[curOrder_ - 1]);
+    orderSwap(curOrder_, curOrder_ - 1);
     curOrder_--;
-    changed = true;
   }
   ImGui::SameLine();
   if (ImGui::ArrowButton("down", ImGuiDir_Down) && curOrder_ < (int)song_.orders.size() - 1) {
-    std::swap(song_.orders[curOrder_], song_.orders[curOrder_ + 1]);
+    orderSwap(curOrder_, curOrder_ + 1);
     curOrder_++;
-    changed = true;
   }
 
   // Change the selected cell's pattern number.
@@ -200,6 +155,25 @@ void App::songWindow() {
         song_.speeds = sp;
         changed = true;
       }
+    }
+    if (ImGui::SmallButton("Swing...")) ImGui::OpenPopup("swing");
+    if (ImGui::BeginPopup("swing")) {
+      // Swing: long row then short row, the same tempo on average.
+      int total = 0;
+      for (int v : song_.speeds) total += v;
+      int base = std::max(1, (int)std::lround(total / (float)std::max<size_t>(1, song_.speeds.size())));
+      int amount = song_.speeds.size() == 2 ? std::abs(song_.speeds[0] - song_.speeds[1]) / 2 : 0;
+      ImGui::SetNextItemWidth(140);
+      bool c1 = ImGui::SliderInt("Speed", &base, 1, 32);
+      ImGui::SetNextItemWidth(140);
+      bool c2 = ImGui::SliderInt("Swing", &amount, 0, std::max(0, base - 1));
+      if (c1 || c2) {
+        amount = std::min(amount, base - 1);
+        song_.speeds = amount ? std::vector<int>{base + amount, base - amount} : std::vector<int>{base};
+        changed = true;
+      }
+      ImGui::TextDisabled("Rows alternate %d and %d ticks.", base + amount, base - amount);
+      ImGui::EndPopup();
     }
   }
   ImGui::SetNextItemWidth(120);
@@ -619,6 +593,9 @@ void App::keysHelp() {
       {"Ctrl+A", "Select channel, again for whole pattern"},
       {"Ctrl+Z / Ctrl+Y", "Undo / redo"},
       {"Ctrl+Up/Down (+Shift)", "Transpose 1 (12) semitones"},
+      {"Ctrl+I", "Interpolate volumes and effect values in the selection"},
+      {"Ctrl+H", "Find & replace"},
+      {"Right-click in the pattern", "Selection tools: interpolate, scale, humanize, reverse, expand, shrink"},
       {"Delete", "Clear"},
       {"Insert / Backspace", "Insert row / delete row"},
       {"Numpad / *", "Octave down / up"},

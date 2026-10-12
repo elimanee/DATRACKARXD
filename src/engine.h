@@ -119,7 +119,8 @@ class Engine {
   // may be rendering (the audio callback locks it).
   std::mutex mutex;
 
-  void play(int order, int row);
+  // countIn: rows of metronome clicks before the song starts (recording).
+  void play(int order, int row, int countIn = 0);
   void stop();
   bool playing() const { return playing_; }
   void reset();  // silence everything
@@ -146,6 +147,14 @@ class Engine {
   float tickRate() const { return tickRate_; }
   int loops() const { return loops_; }
   bool loopPattern = false;  // keep repeating the current pattern
+  // Loop over orders first..last (inclusive); -1 = no loop range.
+  void setLoopRange(int first, int last);
+  int loopFirst() const { return loopFirst_; }
+  int loopLast() const { return loopLast_; }
+  bool metronome = false;   // clicks on the beats while playing (never in exports)
+  float metronomeVolume = 0.5f;
+  bool countingIn() const { return playing_ && countIn_ > 0; }
+  int currentTick() const { return tick_; }
 
   const ChannelState& channel(int c) const { return ch_[c]; }
   int scopePos() const { return scopePos_; }
@@ -168,6 +177,19 @@ class Engine {
   int rowRepeat_ = 0;                  // pattern delay rows left
   bool skipRow_ = false;
   int loops_ = 0;
+  int loopFirst_ = -1, loopLast_ = -1;
+  int countIn_ = 0, countInRow_ = 0;
+  // Metronome click.
+  float clickEnv_ = 0, clickFreq_ = 1000;
+  double clickPhase_ = 0;
+  void click(bool accent);
+  // Automation values for this tick; NaN = not automated.
+  float autoVol_[MAX_CHANNELS], autoPan_[MAX_CHANNELS], autoCut_[MAX_CHANNELS], autoRev_[MAX_CHANNELS], autoDel_[MAX_CHANNELS];
+  float autoFx_[MAX_CHANNELS][MAX_CHANNEL_FX][4];
+  float autoMasterVol_ = 0, autoMasterCut_ = 0;
+  float volSmooth_[MAX_CHANNELS];  // automated volume, smoothed per sample
+  void clearAutomation();
+  void applyAutomation();
   std::vector<bool> visited_;
   double samplesToTick_ = 0;
 
