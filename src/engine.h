@@ -117,6 +117,9 @@ class Engine {
   void resetPan(int ch);  // back to the channel's default panning
   // Pitch bend in semitones, applied at once (MIDI pitch wheel).
   void setBend(int ch, double semitones);
+  // Live MPE controls: filter cutoff (like 13xx) and channel volume (00-7F).
+  void setCutoff(int ch, int value);
+  void setVolume(int ch, int vol);
   // Runs one tick without rendering audio (MIDI export).
   void tick() { doTick(); }
 

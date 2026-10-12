@@ -457,16 +457,19 @@ bool importMIDI(const std::vector<uint8_t>& data, Song& song, std::string& err) 
         if (off->note == NOTE_EMPTY) off->note = NOTE_OFF;
       }
     }
-    // The pitch wheel becomes E8xx bends (+-8 semitones) on each voice.
-    int lastBend = 0x80;
+    // The pitch wheel becomes E8xx bends (+-8 semitones), or E9xx beyond.
+    std::pair<int, int> lastBend{0xE8, 0x80};
     for (const auto& [tick, semis] : v.drums ? std::vector<std::pair<uint32_t, double>>() : part.bends) {
       int row = rowOf(tick);
       if (row >= maxRows) break;
-      int val = std::clamp((int)std::lround(std::clamp(semis, -8.0, 7.9375) * 16) + 0x80, 0, 0xff);
-      if (val == lastBend) continue;
-      lastBend = val;
+      std::pair<int, int> b;
+      bendEffect(semis, b.first, b.second);
+      if (b == lastBend) continue;
+      lastBend = b;
       Cell* cell = song.cell((int)c, row / 64, row % 64, true);
-      putCellEffect(*cell, info.effectCols, 0xE8, val);
+      removeCellEffect(*cell, 0xE8);
+      removeCellEffect(*cell, 0xE9);
+      putCellEffect(*cell, info.effectCols, b.first, b.second);
     }
   }
 
@@ -549,15 +552,22 @@ bool exportMIDI(const Song& song, const std::string& path, int loops, std::strin
   tracks[0].event(0, {0xff, 0x51, 0x03, (uint8_t)(us >> 16), (uint8_t)(us >> 8), (uint8_t)us});
   tracks[0].event(0, {0xff, 0x58, 0x04, 0x04, 0x02, 0x18, 0x08});
 
+  int bendRange = 12;
+  for (const ChannelInfo& chan : song.channels)
+    for (const Pattern& pat : chan.patterns)
+      for (const Cell& cell : pat.rows)
+        for (const Effect& e : cell.fx)
+          if (e.cmd == 0xE9 && std::abs(e.val - 0x80) > 48) bendRange = 48;
+
   // MIDI channel per song channel, skipping the drum channel.
   std::vector<int> midiCh(nch);
   for (int c = 0; c < nch; c++) {
     int m = c % 15;
     midiCh[c] = m >= 9 ? m + 1 : m;
     tracks[c + 1].meta(0, 0x03, song.channels[c].name);
-    // Pitch wheel range: 12 semitones (RPN 0,0), so E8xx bends fit.
+    // Pitch wheel range (RPN 0,0): 12 semitones, or 48 (MPE) when E9xx bends go further.
     uint8_t cc = (uint8_t)(0xb0 | midiCh[c]);
-    for (auto [k, v] : {std::pair<int, int>{101, 0}, {100, 0}, {6, 12}, {38, 0}, {101, 127}, {100, 127}})
+    for (auto [k, v] : {std::pair<int, int>{101, 0}, {100, 0}, {6, bendRange}, {38, 0}, {101, 127}, {100, 127}})
       tracks[c + 1].event(0, {cc, (uint8_t)k, (uint8_t)v});
   }
 
@@ -585,9 +595,9 @@ bool exportMIDI(const Song& song, const std::string& path, int loops, std::strin
       bool trig = s.triggers != state[c].triggers;
       state[c].triggers = s.triggers;
       bool sounding = s.active && !s.released;
-      double bend = std::clamp(s.bend + s.fine, -12.0, 12.0);
+      double bend = std::clamp(s.bend + s.fine, -(double)bendRange, (double)bendRange);
       if (std::abs(bend - state[c].bend) >= 1.0 / 128) {
-        int v = std::clamp(8192 + (int)std::lround(bend / 12.0 * 8192), 0, 16383);
+        int v = std::clamp(8192 + (int)std::lround(bend / bendRange * 8192), 0, 16383);
         tracks[c + 1].event(tick, {(uint8_t)(0xe0 | midiCh[c]), (uint8_t)(v & 127), (uint8_t)(v >> 7)});
         state[c].bend = bend;
       }

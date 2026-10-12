@@ -456,6 +456,7 @@ void App::effectsHelp() {
       {"E6xx", "Pattern loop: E600 marks the start, E6xx repeats xx times"},
       {"E5xx", "Fine pitch: 80 = none, 00-FF = -1 to +1 semitone"},
       {"E8xx", "Pitch bend: (xx - 80) / 16 semitones (00 = -8, 80 = none, FF = +7.9), glides over the row and stays"},
+      {"E9xx", "Wide pitch bend: (xx - 80) / 4 semitones (00 = -32, 80 = none, FF = +31.75)"},
       {"ECxx", "Cut the note after xx ticks"},
       {"EDxx", "Delay the row by xx ticks"},
       {"EExx", "Pattern delay: repeat the row xx times"},
