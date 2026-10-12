@@ -116,6 +116,33 @@ const Cell* Song::cell(int ch, int order, int row) const {
   return p ? &p->rows[row] : nullptr;
 }
 
+bool putCellEffect(Cell& cell, int& effectCols, int cmd, int val) {
+  for (int e = 0; e < MAX_EFFECTS; e++)
+    if (cell.fx[e].cmd == cmd) {
+      cell.fx[e].val = (int16_t)val;
+      effectCols = std::max(effectCols, e + 1);
+      return true;
+    }
+  for (int e = 0; e < MAX_EFFECTS; e++) {
+    if (cell.fx[e].cmd >= 0) continue;
+    cell.fx[e] = {(int16_t)cmd, (int16_t)val};
+    effectCols = std::max(effectCols, e + 1);
+    return true;
+  }
+  return false;
+}
+
+void removeCellEffect(Cell& cell, int cmd) {
+  for (Effect& e : cell.fx)
+    if (e.cmd == cmd) e = Effect();
+}
+
+int cellEffect(const Cell& cell, int cmd) {
+  for (const Effect& e : cell.fx)
+    if (e.cmd == cmd) return e.val < 0 ? -2 : e.val;
+  return -1;
+}
+
 std::string noteName(int note) {
   static const char* names[12] = {"C-", "C#", "D-", "D#", "E-", "F-", "F#", "G-", "G#", "A-", "A#", "B-"};
   if (note == NOTE_OFF) return "OFF";

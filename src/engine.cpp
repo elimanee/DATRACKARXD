@@ -149,6 +149,13 @@ void Engine::noteOn(int c, int note, int ins, int vol) {
   updateChannel(c);
 }
 
+void Engine::setBend(int c, double semitones) {
+  if (c < 0 || c >= MAX_CHANNELS) return;
+  ch_[c].bend = ch_[c].bendTarget = semitones;
+  ch_[c].bendStep = 0;
+  updateChannel(c);
+}
+
 void Engine::resetPan(int c) {
   if (c >= 0 && c < song_.channelCount()) linearPan(song_.channels[c].pan, ch_[c].panL, ch_[c].panR);
 }
@@ -511,6 +518,13 @@ void Engine::processCell(int c, const Cell& cell, bool fromDelay) {
         }
         break;
       case 0xEC: s.cutTick = val; break;
+      case 0xE5: s.fine = ((cell.fx[e].val < 0 ? 0x80 : val) - 0x80) / 128.0; break;
+      case 0xE8: {
+        // Bend to (xx - 80) / 16 semitones, gliding over the row.
+        s.bendTarget = ((cell.fx[e].val < 0 ? 0x80 : val) - 0x80) / 16.0;
+        s.bendStep = std::abs(s.bendTarget - s.bend) / std::max(1, speed());
+        break;
+      }
       case 0xEE:
         if (playing_ && !skipRow_ && rowRepeat_ == 0) rowRepeat_ = val;
         break;
@@ -598,6 +612,11 @@ void Engine::doTick() {
     }
 
     // Continuous effects.
+    if (s.bend != s.bendTarget) {
+      if (s.bendStep <= 0) s.bend = s.bendTarget;
+      else if (s.bend < s.bendTarget) s.bend = std::min(s.bend + s.bendStep, s.bendTarget);
+      else s.bend = std::max(s.bend - s.bendStep, s.bendTarget);
+    }
     if (s.pitchSlide) s.pitch = std::clamp(s.pitch + s.pitchSlide * PITCH_UNIT, 0.0, 131.0);
     if (s.portaTarget >= 0 && s.portaSpeed > 0) {
       double step = s.portaSpeed * PITCH_UNIT;
@@ -651,7 +670,7 @@ void Engine::updateChannel(int c) {
   const Instrument* ins = instrument(c);
   int forced = c < song_.channelCount() ? song_.channels[c].forceWave : -1;
 
-  double pitch = s.pitch;
+  double pitch = s.pitch + s.bend + s.fine;
   if (s.arpX || s.arpY) {
     int phase = s.arpTick % 3;
     pitch += phase == 1 ? s.arpX : phase == 2 ? s.arpY : 0;

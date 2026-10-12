@@ -128,7 +128,9 @@ Hors de l'éditeur de patterns, les touches de notes jouent l'instrument courant
 | `90xx`-`92xx` | Position de départ du sample (octets 0, 1, 2) |
 | `C0xx`-`C3xx` | Vitesse des ticks en Hz |
 | `E1xy` / `E2xy` | Glisser de y demi-tons vers le haut / bas à la vitesse x |
+| `E5xx` | Hauteur fine : `80` = rien, `00`-`FF` = -1 à +1 demi-ton |
 | `E6xx` | Boucle de pattern : `E600` marque le début, `E6xx` répète xx fois |
+| `E8xx` | Pitch bend : (xx - 80) / 16 demi-tons (`00` = -8, `80` = rien, `A0` = +2, `FF` = +7,9). Glisse sur la ligne et reste jusqu'au prochain `E8` |
 | `ECxx` | Couper la note après xx ticks |
 | `EDxx` | Retarder la ligne de xx ticks |
 | `EExx` | Répéter la ligne xx fois (pattern delay) |
@@ -154,7 +156,9 @@ comme dans FL Studio :
 | Molette | Défiler ; Shift : horizontal, Ctrl : zoom temps, Alt : zoom hauteur |
 | Clavier à gauche | Écouter une note |
 | Règle en haut | Placer le curseur (et la lecture) |
-| Ligne « Vol » en bas | Dessiner la vélocité (colonne volume) |
+| Ligne du bas, « Vol » | Dessiner la vélocité (colonne volume) |
+| Ligne du bas, « Pitch » | Dessiner le pitch bend (`E8xx`) ; clic droit pour effacer, Ctrl pour arrondir au demi-ton, « +-N » change l'échelle |
+| Case « Slide », Alt+clic ou `S` | Notes « slide » : la note glisse depuis la note précédente pendant sa durée (`03xx` calculé tout seul) |
 
 Les notes grisées sont celles des autres canaux (case « Ghosts »). Un canal de tracker ne joue qu'une
 note à la fois : si deux notes se chevauchent, la première s'arrête où la suivante commence.
@@ -171,6 +175,8 @@ l'instrument courant ; un accord se répartit sur les canaux « Voices » du pia
 - pendant la lecture, elles s'écrivent à la ligne jouée, avec un note off au relâchement.
 
 « Velocity -> volume » met la vélocité dans la colonne volume ; un « program change » choisit l'instrument.
+La **molette de pitch bend** fait glisser les notes jouées (« Pitch wheel range » règle l'amplitude,
+2 demi-tons par défaut) ; en mode Record pendant la lecture, elle s'écrit en `E8xx` ligne par ligne.
 
 ## Mixer et effets
 
@@ -239,7 +245,8 @@ est converti vers le moteur de DATRACKARXD, donc le rendu est proche de l'origin
   Sunsoft 5B ; séquences, grooves et tempo.
 - **MIDI (.mid)** : les notes sont alignées sur les lignes (doubles-croches, ou triples-croches si
   besoin), chaque partie reçoit un instrument puce selon son programme General MIDI et autant de canaux
-  que de notes simultanées ; la batterie (canal 10) devient des percussions puce.
+  que de notes simultanées ; la batterie (canal 10) devient des percussions puce. Le pitch bend
+  devient des `E8xx` (et l'export MIDI écrit les bends, avec une amplitude de 12 demi-tons).
 - **MOD / S3M / XM / IT** : samples, boucles, multi-samples, enveloppes de volume (converties en macros),
   fadeout, effets classiques (arpège, slides, vibrato, trémolo, retrigger, boucles de pattern…).
   Non gérés : enveloppes de panoramique et de pitch, filtres, volumes globaux et de canal, NNA (IT).

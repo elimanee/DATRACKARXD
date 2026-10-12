@@ -54,6 +54,7 @@ void App::loadSettings() {
       if (k == "dir" && fs::is_directory(v)) dialogDir_ = v;
       if (k == "midi") midiPort_ = v;
       if (k == "midivelocity") midiVelocity_ = std::stoi(v) != 0;
+      if (k == "midibend") midiBendRange_ = std::clamp(std::stoi(v), 1, 24);
     } catch (...) {
     }
   }
@@ -70,6 +71,7 @@ void App::saveSettings() {
   f << "dir=" << dialogDir_ << "\n";
   f << "midi=" << midiPort_ << "\n";
   f << "midivelocity=" << (midiVelocity_ ? 1 : 0) << "\n";
+  f << "midibend=" << midiBendRange_ << "\n";
 }
 
 void App::openAudio() {
@@ -569,6 +571,9 @@ void App::midiMenu() {
   ImGui::Separator();
   if (ImGui::MenuItem("Rescan")) midiPorts_ = midi_.ports();
   ImGui::MenuItem("Velocity -> volume", nullptr, &midiVelocity_);
+  ImGui::SetNextItemWidth(120);
+  ImGui::SliderInt("Pitch wheel range", &midiBendRange_, 1, 24, "%d semitones");
+  if (ImGui::IsItemHovered()) ImGui::SetTooltip("In Record mode, while playing, the wheel is written as E8xx bends.");
   ImGui::EndMenu();
 }
 
@@ -581,7 +586,33 @@ void App::midiEvents() {
       midiNoteOff(m.data1);
     else if (type == 0xc0 && m.data1 < song_.instruments.size())
       curIns_ = m.data1;  // program change picks the instrument
+    else if (type == 0xe0)
+      midiPitchWheel(m.data1 | (m.data2 << 7));
   }
+}
+
+// The wheel bends the channels the MIDI keyboard plays on (the piano roll's
+// voice channels). In Record mode while playing it is written as E8xx.
+void App::midiPitchWheel(int value) {
+  midiBend_ = (value - 8192) / 8192.0 * midiBendRange_;
+  int nch = song_.channelCount();
+  if (curCh_ >= nch) return;
+  int voices = std::clamp(prVoices_, 1, nch - curCh_);
+  for (int c = curCh_; c < curCh_ + voices; c++) engine_->setBend(c, midiBend_);
+  if (!editMode_ || !engine_->playing()) return;
+
+  int order = engine_->order(), row = engine_->row();
+  int val = std::clamp((int)std::lround(midiBend_ * 16) + 0x80, 0, 0xff);
+  if (order != midiBendOrder_ || row != midiBendRow_) {
+    pushUndo(curCh_, curCh_ + voices - 1, order);  // one undo step per row
+    midiBendOrder_ = order;
+    midiBendRow_ = row;
+  }
+  for (int c = curCh_; c < curCh_ + voices; c++) {
+    Cell* cell = song_.cell(c, order, row, true);
+    if (cell) putEffect(c, *cell, 0xE8, val);
+  }
+  dirty_ = true;
 }
 
 // MIDI note 60 (middle C) is C-4, like the computer keyboard at octave 4.

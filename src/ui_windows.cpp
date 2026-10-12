@@ -454,6 +454,8 @@ void App::effectsHelp() {
       {"C0xx-C3xx", "Set tick rate in Hz (C0-C3 hold the high bits)"},
       {"E1xy / E2xy", "Slide up / down y semitones at speed x"},
       {"E6xx", "Pattern loop: E600 marks the start, E6xx repeats xx times"},
+      {"E5xx", "Fine pitch: 80 = none, 00-FF = -1 to +1 semitone"},
+      {"E8xx", "Pitch bend: (xx - 80) / 16 semitones (00 = -8, 80 = none, FF = +7.9), glides over the row and stays"},
       {"ECxx", "Cut the note after xx ticks"},
       {"EDxx", "Delay the row by xx ticks"},
       {"EExx", "Pattern delay: repeat the row xx times"},

@@ -47,10 +47,11 @@ int scancodeToNote(SDL_Scancode sc);
 // A note as the piano roll sees it: a start row and a length in rows.
 struct PRNote {
   int start, len, note, ins, vol;
-  int ch = 0;  // channel the note lives in
+  int ch = 0;          // channel the note lives in
+  bool slide = false;  // glides from the previous note over its length (03xx)
 };
 
-enum class PRDrag { None, Move, Resize, Select, Erase, Velocity, Key };
+enum class PRDrag { None, Move, Resize, Select, Erase, Velocity, Pitch, PitchErase, Key };
 
 enum class FileDialogMode { None, Open, Save, ExportWav, LoadSample, LoadInstrument, SaveInstrument, ExportMidi, ExportOgg, ExportPlayer };
 enum class PendingAction { None, New, Open, Demo, Quit };
@@ -102,6 +103,9 @@ class App {
   std::string midiPort_;               // port to reopen at startup
   std::vector<std::string> midiPorts_; // last scan
   bool midiVelocity_ = true;           // velocity -> volume column
+  int midiBendRange_ = 2;              // pitch wheel range, semitones
+  double midiBend_ = 0;                // wheel position, semitones
+  int midiBendOrder_ = -1, midiBendRow_ = -1;  // row of the last recorded bend (undo step)
   struct MidiHeld {
     int ch, order, row;  // where the note was written (row -1 = not written)
   };
@@ -134,6 +138,10 @@ class App {
   bool prGhosts_ = true;
   int prLength_ = 4;                   // length of new notes, in rows
   int prVoices_ = 1;                   // channels used for chords (1 = this channel only)
+  int prLane_ = 0;                     // lane under the notes: 0 volume, 1 pitch bend
+  int prBendView_ = 2;                 // pitch lane height, in semitones each way
+  bool prSlide_ = false;               // new notes are slide notes
+  int prLastRow_ = -1, prLastVal_ = 0x80;  // last row and value drawn in the pitch lane
   std::set<int> prSel_;                // selected notes (start * 256 + note)
   int prViewCh_ = -1, prViewOrder_ = -1;
   PRDrag prDrag_ = PRDrag::None;
@@ -182,6 +190,7 @@ class App {
   void midiEvents();
   void midiNoteOn(int key, int velocity);
   void midiNoteOff(int key);
+  void midiPitchWheel(int value);
 
   // ui_pattern.cpp
   void patternWindow();
@@ -192,6 +201,9 @@ class App {
   void setCursorFromPlayback();
   Cell* cursorCell(bool create);
   void pushUndo(int ch0, int ch1, int order = -1);  // order -1: the cursor's
+  // Sets effect cmd in a cell of channel ch: reuses a column with the same
+  // command, else the first free one, adding a column if needed.
+  bool putEffect(int ch, Cell& cell, int cmd, int val);
   void pushFullUndo();
   void commitMetaEdit();
   void resetUndo();

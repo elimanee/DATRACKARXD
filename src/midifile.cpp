@@ -26,6 +26,7 @@ struct Part {
   int track = 0, channel = 0, program = 0;
   std::string name;
   std::vector<MidiNote> notes;
+  std::vector<std::pair<uint32_t, double>> bends;  // tick, semitones
 };
 
 struct Tempo {
@@ -218,6 +219,12 @@ bool importMIDI(const std::vector<uint8_t>& data, Song& song, std::string& err) 
     }
     std::string trackName;
     int program[16] = {};
+    int rpn[16][2];
+    double bendRange[16];
+    for (int ch = 0; ch < 16; ch++) {
+      rpn[ch][0] = rpn[ch][1] = 127;
+      bendRange[ch] = 2;  // General MIDI default
+    }
     std::map<int, size_t> open[16];  // key -> note index in its part (sounding notes)
     uint32_t tick = 0;
     int status = 0;
@@ -286,6 +293,14 @@ bool importMIDI(const std::vector<uint8_t>& data, Song& song, std::string& err) 
         program[ch] = d1;
         auto it = partOf.find({t, ch});
         if (it != partOf.end() && parts[it->second].notes.empty()) parts[it->second].program = d1;
+      } else if (type == 0xb0) {
+        // RPN 0,0 sets the pitch wheel range.
+        if (d1 == 101) rpn[ch][0] = d2;
+        if (d1 == 100) rpn[ch][1] = d2;
+        if (d1 == 6 && rpn[ch][0] == 0 && rpn[ch][1] == 0) bendRange[ch] = std::max(1, d2);
+      } else if (type == 0xe0) {
+        int v = d1 | (d2 << 7);
+        parts[partFor(ch)].bends.push_back({tick, (v - 8192) / 8192.0 * bendRange[ch]});
       }
     }
     for (int ch = 0; ch < 16; ch++)
@@ -442,6 +457,17 @@ bool importMIDI(const std::vector<uint8_t>& data, Song& song, std::string& err) 
         if (off->note == NOTE_EMPTY) off->note = NOTE_OFF;
       }
     }
+    // The pitch wheel becomes E8xx bends (+-8 semitones) on each voice.
+    int lastBend = 0x80;
+    for (const auto& [tick, semis] : v.drums ? std::vector<std::pair<uint32_t, double>>() : part.bends) {
+      int row = rowOf(tick);
+      if (row >= maxRows) break;
+      int val = std::clamp((int)std::lround(std::clamp(semis, -8.0, 7.9375) * 16) + 0x80, 0, 0xff);
+      if (val == lastBend) continue;
+      lastBend = val;
+      Cell* cell = song.cell((int)c, row / 64, row % 64, true);
+      putCellEffect(*cell, info.effectCols, 0xE8, val);
+    }
   }
 
   // Tempo changes become F0xx (BPM) on the first channel.
@@ -529,6 +555,10 @@ bool exportMIDI(const Song& song, const std::string& path, int loops, std::strin
     int m = c % 15;
     midiCh[c] = m >= 9 ? m + 1 : m;
     tracks[c + 1].meta(0, 0x03, song.channels[c].name);
+    // Pitch wheel range: 12 semitones (RPN 0,0), so E8xx bends fit.
+    uint8_t cc = (uint8_t)(0xb0 | midiCh[c]);
+    for (auto [k, v] : {std::pair<int, int>{101, 0}, {100, 0}, {6, 12}, {38, 0}, {101, 127}, {100, 127}})
+      tracks[c + 1].event(0, {cc, (uint8_t)k, (uint8_t)v});
   }
 
   Engine engine(song, 44100);
@@ -537,6 +567,7 @@ bool exportMIDI(const Song& song, const std::string& path, int loops, std::strin
     int midiCh = -1, key = -1;
     uint32_t triggers = 0;
     int program = -1;
+    double bend = 0;
   };
   std::vector<Sounding> state(nch);
   double t = 0;
@@ -554,6 +585,12 @@ bool exportMIDI(const Song& song, const std::string& path, int loops, std::strin
       bool trig = s.triggers != state[c].triggers;
       state[c].triggers = s.triggers;
       bool sounding = s.active && !s.released;
+      double bend = std::clamp(s.bend + s.fine, -12.0, 12.0);
+      if (std::abs(bend - state[c].bend) >= 1.0 / 128) {
+        int v = std::clamp(8192 + (int)std::lround(bend / 12.0 * 8192), 0, 16383);
+        tracks[c + 1].event(tick, {(uint8_t)(0xe0 | midiCh[c]), (uint8_t)(v & 127), (uint8_t)(v >> 7)});
+        state[c].bend = bend;
+      }
       if (trig) noteOff(c, tick);
       else if (!sounding) noteOff(c, tick);
       if (!trig || !s.active || song.channels[c].muted || s.note < 0) continue;
