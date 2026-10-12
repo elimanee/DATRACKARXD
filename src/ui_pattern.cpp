@@ -6,6 +6,7 @@
 #include <cstdio>
 
 #include "app.h"
+#include "i18n.h"
 #include "theme.h"
 
 namespace {
@@ -687,45 +688,45 @@ int App::findReplace(bool apply) {
 }
 
 void App::selectionToolsMenu() {
-  if (ImGui::MenuItem("Interpolate", "Ctrl+I")) interpolateSelection();
-  if (ImGui::IsItemHovered()) ImGui::SetTooltip("Fill the volumes and effect values between the first and last ones");
-  if (ImGui::BeginMenu("Scale volumes")) {
+  if (ImGui::MenuItem(T("Interpolate"), "Ctrl+I")) interpolateSelection();
+  if (ImGui::IsItemHovered()) ImGui::SetTooltip(T("Fill the volumes and effect values between the first and last ones"));
+  if (ImGui::BeginMenu(T("Scale volumes"))) {
     for (int pct : {25, 50, 75, 125, 150, 200}) {
       std::string l = std::to_string(pct) + "%";
       if (ImGui::MenuItem(l.c_str())) volumeTool(pct / 100.0f, 0);
     }
     ImGui::EndMenu();
   }
-  if (ImGui::MenuItem("Humanize volumes")) volumeTool(1.0f, 8);
-  if (ImGui::IsItemHovered()) ImGui::SetTooltip("Nudge each note's volume randomly (+-8)");
-  if (ImGui::MenuItem("Reverse rows")) rowTool(0);
-  if (ImGui::MenuItem("Expand x2")) rowTool(1);
-  if (ImGui::IsItemHovered()) ImGui::SetTooltip("Spread the rows out to every other row (half speed)");
-  if (ImGui::MenuItem("Shrink /2")) rowTool(2);
-  if (ImGui::IsItemHovered()) ImGui::SetTooltip("Keep one row in two, packed together (double speed)");
+  if (ImGui::MenuItem(T("Humanize volumes"))) volumeTool(1.0f, 8);
+  if (ImGui::IsItemHovered()) ImGui::SetTooltip(T("Nudge each note's volume randomly (+-8)"));
+  if (ImGui::MenuItem(T("Reverse rows"))) rowTool(0);
+  if (ImGui::MenuItem(T("Expand x2"))) rowTool(1);
+  if (ImGui::IsItemHovered()) ImGui::SetTooltip(T("Spread the rows out to every other row (half speed)"));
+  if (ImGui::MenuItem(T("Shrink /2"))) rowTool(2);
+  if (ImGui::IsItemHovered()) ImGui::SetTooltip(T("Keep one row in two, packed together (double speed)"));
   ImGui::Separator();
-  if (ImGui::MenuItem("Find & replace...", "Ctrl+H")) showFindReplace_ = true;
+  if (ImGui::MenuItem(T("Find & replace..."), "Ctrl+H")) showFindReplace_ = true;
 }
 
 void App::findReplaceWindow() {
-  if (!ImGui::Begin("Find & replace", &showFindReplace_, ImGuiWindowFlags_AlwaysAutoResize)) {
+  if (!ImGui::Begin(TW("Find & replace").c_str(), &showFindReplace_, ImGuiWindowFlags_AlwaysAutoResize)) {
     ImGui::End();
     return;
   }
   FindReplace& fr = findReplace_;
-  ImGui::TextUnformatted("Find cells with");
+  ImGui::TextUnformatted(T("Find cells with"));
   char noteBuf[16];
   std::snprintf(noteBuf, sizeof(noteBuf), "%s", fr.note == -1 ? "anything" : fr.note == -2 ? "any note" : noteName(fr.note).c_str());
   ImGui::SetNextItemWidth(S(120));
-  if (ImGui::BeginCombo("Note", noteBuf)) {
-    if (ImGui::Selectable("anything", fr.note == -1)) fr.note = -1;
-    if (ImGui::Selectable("any note", fr.note == -2)) fr.note = -2;
+  if (ImGui::BeginCombo(T("Note"), noteBuf)) {
+    if (ImGui::Selectable(T("anything"), fr.note == -1)) fr.note = -1;
+    if (ImGui::Selectable(T("any note"), fr.note == -2)) fr.note = -2;
     for (int n = 0; n < NOTE_COUNT; n++)
       if (ImGui::Selectable(noteName(n).c_str(), fr.note == n)) fr.note = n;
     ImGui::EndCombo();
   }
   ImGui::SetNextItemWidth(S(120));
-  ImGui::InputInt("Instrument (-1 any)", &fr.ins);
+  ImGui::InputInt(T("Instrument (-1 any)"), &fr.ins);
   fr.ins = std::clamp(fr.ins, -1, MAX_INSTRUMENTS - 1);
   auto hexField = [](const char* check, const char* id, int& v) {
     bool on = v >= 0;
@@ -739,23 +740,23 @@ void App::findReplaceWindow() {
   };
   hexField("Effect command", "##fxfind", fr.fxCmd);
   ImGui::Separator();
-  ImGui::TextUnformatted("Replace with");
+  ImGui::TextUnformatted(T("Replace with"));
   ImGui::SetNextItemWidth(S(120));
-  ImGui::SliderInt("Transpose", &fr.transpose, -24, 24);
+  ImGui::SliderInt(T("Transpose"), &fr.transpose, -24, 24);
   ImGui::SetNextItemWidth(S(120));
-  ImGui::InputInt("Instrument (-1 keep)", &fr.newIns);
+  ImGui::InputInt(T("Instrument (-1 keep)"), &fr.newIns);
   fr.newIns = std::clamp(fr.newIns, -1, MAX_INSTRUMENTS - 1);
   ImGui::SetNextItemWidth(S(120));
-  ImGui::InputInt("Volume (-1 keep)", &fr.newVol);
+  ImGui::InputInt(T("Volume (-1 keep)"), &fr.newVol);
   fr.newVol = std::clamp(fr.newVol, -1, 0x7f);
   ImGui::BeginDisabled(fr.fxCmd < 0);
   hexField("New effect command", "##fxnew", fr.newFxCmd);
   ImGui::EndDisabled();
   ImGui::Separator();
-  ImGui::Combo("In", &fr.scope, "Selection (or this channel)\0Current pattern of this channel\0Whole song\0");
-  if (ImGui::Button("Count")) setStatus(std::to_string(findReplace(false)) + " matching cells");
+  ImGui::Combo(T("In"), &fr.scope, TC("Selection (or this channel)\0Current pattern of this channel\0Whole song\0"));
+  if (ImGui::Button(T("Count"))) setStatus(std::to_string(findReplace(false)) + " matching cells");
   ImGui::SameLine();
-  if (ImGui::Button("Replace all")) setStatus("Replaced in " + std::to_string(findReplace(true)) + " cells");
+  if (ImGui::Button(T("Replace all"))) setStatus("Replaced in " + std::to_string(findReplace(true)) + " cells");
   ImGui::End();
 }
 
@@ -849,7 +850,7 @@ void App::selectChannelOrAll() {
 // ---------------------------------------------------------------------------
 
 void App::patternWindow() {
-  bool open = ImGui::Begin("Pattern", &showPattern_);
+  bool open = ImGui::Begin(TW("Pattern").c_str(), &showPattern_);
   patternDockId_ = ImGui::GetWindowDockID();
   if (!open) {
     patternFocused_ = false;
@@ -865,18 +866,18 @@ void App::patternWindow() {
 
   // Toolbar.
   ImGui::SetNextItemWidth(S(80));
-  ImGui::InputInt("Octave", &octave_);
+  ImGui::InputInt(T("Octave"), &octave_);
   octave_ = std::clamp(octave_, 0, 8);
   ImGui::SameLine();
   ImGui::SetNextItemWidth(S(80));
-  ImGui::InputInt("Step", &editStep_);
+  ImGui::InputInt(T("Step"), &editStep_);
   editStep_ = std::clamp(editStep_, 0, 64);
   ImGui::SameLine();
   ImGui::SetNextItemWidth(S(200));
   char insLabel[128];
   std::snprintf(insLabel, sizeof(insLabel), "%02X: %s", curIns_,
                 song_.instruments.empty() ? "" : song_.instruments[curIns_].name.c_str());
-  if (ImGui::BeginCombo("Instrument", insLabel)) {
+  if (ImGui::BeginCombo(T("Instrument"), insLabel)) {
     for (int i = 0; i < (int)song_.instruments.size(); i++) {
       char buf[128];
       std::snprintf(buf, sizeof(buf), "%02X: %s", i, song_.instruments[i].name.c_str());
@@ -885,12 +886,12 @@ void App::patternWindow() {
     ImGui::EndCombo();
   }
   ImGui::SameLine();
-  ImGui::Checkbox("Record", &editMode_);
+  ImGui::Checkbox(T("Record"), &editMode_);
   ImGui::SameLine();
-  ImGui::TextDisabled("Order %02X / pattern %02X", curOrder_, song_.orders[curOrder_][curCh_]);
+  ImGui::TextDisabled(T("Order %02X / pattern %02X"), curOrder_, song_.orders[curOrder_][curCh_]);
 
   ImGuiIO& io = ImGui::GetIO();
-  const Theme& T = theme();
+  const Theme& TH = theme();
   ImDrawList* dl = ImGui::GetWindowDrawList();
   float cw = ImGui::CalcTextSize("0").x;
   float rh = ImGui::GetTextLineHeight() + 2.0f;
@@ -936,7 +937,7 @@ void App::patternWindow() {
   }
 
   dl->PushClipRect(origin, ImVec2(origin.x + avail.x, origin.y + avail.y), true);
-  dl->AddRectFilled(origin, ImVec2(origin.x + avail.x, origin.y + avail.y), T.patBg);
+  dl->AddRectFilled(origin, ImVec2(origin.x + avail.x, origin.y + avail.y), TH.patBg);
 
   // Channel headers: click to mute, right-click to solo.
   for (size_t i = 0; i < chIdx.size(); i++) {
@@ -944,7 +945,7 @@ void App::patternWindow() {
     ChannelInfo& info = song_.channels[c];
     ImVec2 a(chX[i], origin.y), b(chX[i] + chWidth(c) - chPad * 0.5f, origin.y + headerH - 2);
     bool hov = hovered && io.MousePos.x >= a.x && io.MousePos.x < b.x && io.MousePos.y >= a.y && io.MousePos.y < b.y;
-    dl->AddRectFilled(a, b, info.muted ? T.headerMuted : hov ? T.headerHover : T.header, 3);
+    dl->AddRectFilled(a, b, info.muted ? TH.headerMuted : hov ? TH.headerHover : TH.header, 3);
     // Level meter from the scope buffer.
     const ChannelState& st = engine_->channel(c);
     float peak = 0;
@@ -952,7 +953,7 @@ void App::patternWindow() {
     dl->AddRectFilled(ImVec2(a.x, b.y - 3), ImVec2(a.x + (b.x - a.x) * std::min(peak * 1.5f, 1.0f), b.y), IM_COL32(100, 220, 120, 200));
     std::string label = info.muted ? info.name + " (M)" : info.name;
     dl->PushClipRect(a, b, true);
-    dl->AddText(ImVec2(a.x + 4, a.y + 2), info.muted ? IM_COL32(200, 120, 120, 255) : T.headerText, label.c_str());
+    dl->AddText(ImVec2(a.x + 4, a.y + 2), info.muted ? IM_COL32(200, 120, 120, 255) : TH.headerText, label.c_str());
     dl->PopClipRect();
     if (hov && ImGui::IsMouseClicked(ImGuiMouseButton_Left)) info.muted = !info.muted;
     if (hov && ImGui::IsMouseClicked(ImGuiMouseButton_Right)) {
@@ -976,16 +977,16 @@ void App::patternWindow() {
     ImVec2 ra(origin.x, y), rb(rightEdge, y + rh);
 
     if (song_.highlight2 > 0 && row % song_.highlight2 == 0)
-      dl->AddRectFilled(ra, rb, T.rowHi2);
+      dl->AddRectFilled(ra, rb, TH.rowHi2);
     else if (song_.highlight1 > 0 && row % song_.highlight1 == 0)
-      dl->AddRectFilled(ra, rb, T.rowHi1);
-    if (playing && playOrder == curOrder_ && playRow == row) dl->AddRectFilled(ra, rb, T.playRow);
-    if (row == curRow_) dl->AddRectFilled(ra, rb, editMode_ ? T.editRow : T.cursorRow);
+      dl->AddRectFilled(ra, rb, TH.rowHi1);
+    if (playing && playOrder == curOrder_ && playRow == row) dl->AddRectFilled(ra, rb, TH.playRow);
+    if (row == curRow_) dl->AddRectFilled(ra, rb, editMode_ ? TH.editRow : TH.cursorRow);
 
     char buf[16];
     std::snprintf(buf, sizeof(buf), "%02X", row);
     bool hiRow = song_.highlight1 > 0 && row % song_.highlight1 == 0;
-    dl->AddText(ImVec2(origin.x + cw * 0.5f, y + 1), hiRow ? T.rowNumHi : T.rowNum, buf);
+    dl->AddText(ImVec2(origin.x + cw * 0.5f, y + 1), hiRow ? TH.rowNumHi : TH.rowNum, buf);
 
     for (size_t i = 0; i < chIdx.size(); i++) {
       int c = chIdx[i];
@@ -1002,27 +1003,27 @@ void App::patternWindow() {
         auto fieldX0 = [&](int f) { return f == 0 ? 0 : f == 1 ? 4 : f == 2 ? 7 : 10 + 5 * (f - 3); };
         auto fieldX1 = [&](int f) { return f == 0 ? 3 : f == 1 ? 6 : f == 2 ? 9 : 14 + 5 * (f - 3); };
         if (f0 <= f1)
-          dl->AddRectFilled(ImVec2(x + fieldX0(f0) * cw - 1, y), ImVec2(x + fieldX1(f1) * cw + 1, y + rh), T.selection);
+          dl->AddRectFilled(ImVec2(x + fieldX0(f0) * cw - 1, y), ImVec2(x + fieldX1(f1) * cw + 1, y + rh), TH.selection);
       }
 
       std::string nn = cl.note == NOTE_EMPTY ? "..." : noteName(cl.note);
-      dl->AddText(ImVec2(x, y + 1), cl.note == NOTE_EMPTY ? T.empty : cl.note == NOTE_OFF ? T.noteOff : T.note, nn.c_str());
+      dl->AddText(ImVec2(x, y + 1), cl.note == NOTE_EMPTY ? TH.empty : cl.note == NOTE_OFF ? TH.noteOff : TH.note, nn.c_str());
       hex2(buf, cl.ins);
-      dl->AddText(ImVec2(x + 4 * cw, y + 1), cl.ins < 0 ? T.empty : T.ins, buf);
+      dl->AddText(ImVec2(x + 4 * cw, y + 1), cl.ins < 0 ? TH.empty : TH.ins, buf);
       hex2(buf, cl.vol);
-      dl->AddText(ImVec2(x + 7 * cw, y + 1), cl.vol < 0 ? T.empty : T.vol, buf);
+      dl->AddText(ImVec2(x + 7 * cw, y + 1), cl.vol < 0 ? TH.empty : TH.vol, buf);
       for (int e = 0; e < info.effectCols; e++) {
         hex2(buf, cl.fx[e].cmd);
-        dl->AddText(ImVec2(x + (10 + 5 * e) * cw, y + 1), cl.fx[e].cmd < 0 ? T.empty : T.fxCmd, buf);
+        dl->AddText(ImVec2(x + (10 + 5 * e) * cw, y + 1), cl.fx[e].cmd < 0 ? TH.empty : TH.fxCmd, buf);
         hex2(buf, cl.fx[e].val);
-        dl->AddText(ImVec2(x + (12 + 5 * e) * cw, y + 1), cl.fx[e].val < 0 ? T.empty : T.fxVal, buf);
+        dl->AddText(ImVec2(x + (12 + 5 * e) * cw, y + 1), cl.fx[e].val < 0 ? TH.empty : TH.fxVal, buf);
       }
       if (c == curCh_ && row == curRow_) {
         float cx = x + subColChar(curCol_) * cw;
-        dl->AddRect(ImVec2(cx - 1, y), ImVec2(cx + subColWidth(curCol_) * cw + 1, y + rh), T.cursorBox, 0, 0, 1.5f);
+        dl->AddRect(ImVec2(cx - 1, y), ImVec2(cx + subColWidth(curCol_) * cw + 1, y + rh), TH.cursorBox, 0, 0, 1.5f);
       }
       // Channel separator.
-      dl->AddLine(ImVec2(x + chWidth(c) - chPad * 0.5f, y), ImVec2(x + chWidth(c) - chPad * 0.5f, y + rh), T.separator);
+      dl->AddLine(ImVec2(x + chWidth(c) - chPad * 0.5f, y), ImVec2(x + chWidth(c) - chPad * 0.5f, y + rh), TH.separator);
     }
   }
   dl->PopClipRect();
@@ -1074,14 +1075,14 @@ void App::patternWindow() {
   }
   if (hovered && io.MouseWheel != 0 && !(playing && follow_)) moveRows(-(int)io.MouseWheel * 4);
   // Right-click: the selection tools.
-  if (hovered && ImGui::IsMouseClicked(ImGuiMouseButton_Right)) ImGui::OpenPopup("patctx");
-  if (ImGui::BeginPopup("patctx")) {
-    if (ImGui::MenuItem("Cut", "Ctrl+X")) copySelection(true);
-    if (ImGui::MenuItem("Copy", "Ctrl+C")) copySelection(false);
-    if (ImGui::MenuItem("Paste", "Ctrl+V")) paste();
+  if (hovered && ImGui::IsMouseClicked(ImGuiMouseButton_Right)) ImGui::OpenPopup(T("patctx"));
+  if (ImGui::BeginPopup(T("patctx"))) {
+    if (ImGui::MenuItem(T("Cut"), "Ctrl+X")) copySelection(true);
+    if (ImGui::MenuItem(T("Copy"), "Ctrl+C")) copySelection(false);
+    if (ImGui::MenuItem(T("Paste"), "Ctrl+V")) paste();
     ImGui::Separator();
-    if (ImGui::MenuItem("Transpose +1")) transpose(1);
-    if (ImGui::MenuItem("Transpose -1")) transpose(-1);
+    if (ImGui::MenuItem(T("Transpose +1"))) transpose(1);
+    if (ImGui::MenuItem(T("Transpose -1"))) transpose(-1);
     ImGui::Separator();
     ImGui::TextDisabled(hasSel_ ? "Selection" : "No selection: the whole channel");
     selectionToolsMenu();

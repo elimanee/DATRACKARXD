@@ -244,7 +244,7 @@ void App::settingsWindow() {
     ImGui::TextWrapped("%s", T("Smaller buffers answer the keyboard faster; raise it if the sound crackles."));
     ImGui::Spacing();
     ImGui::TextDisabled("%s", audioStatus_.c_str());
-    if (audioDev_) ImGui::TextDisabled("%s %.1f ms", T("Latency:"), audioLatencyMs_);
+    if (audioDev_) ImGui::TextDisabled(T("%s %.1f ms"), T("Latency:"), audioLatencyMs_);
     ImGui::EndTabItem();
   }
 

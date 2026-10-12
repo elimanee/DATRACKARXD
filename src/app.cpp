@@ -273,18 +273,18 @@ void App::doAction(PendingAction a) {
 
 void App::confirmPopup() {
   if (confirmRequest_) {
-    ImGui::OpenPopup("Unsaved changes");
+    ImGui::OpenPopup(T("Unsaved changes"));
     confirmRequest_ = false;
   }
-  if (ImGui::BeginPopupModal("Unsaved changes", nullptr, ImGuiWindowFlags_AlwaysAutoResize)) {
-    ImGui::Text("The song has unsaved changes. Discard them?");
-    if (ImGui::Button("Discard", ImVec2(S(120), 0))) {
+  if (ImGui::BeginPopupModal(T("Unsaved changes"), nullptr, ImGuiWindowFlags_AlwaysAutoResize)) {
+    ImGui::Text(T("The song has unsaved changes. Discard them?"));
+    if (ImGui::Button(T("Discard"), ImVec2(S(120), 0))) {
       ImGui::CloseCurrentPopup();
       doAction(pending_);
       pending_ = PendingAction::None;
     }
     ImGui::SameLine();
-    if (ImGui::Button("Cancel", ImVec2(S(120), 0)) || ImGui::IsKeyPressed(ImGuiKey_Escape)) {
+    if (ImGui::Button(T("Cancel"), ImVec2(S(120), 0)) || ImGui::IsKeyPressed(ImGuiKey_Escape)) {
       ImGui::CloseCurrentPopup();
       pending_ = PendingAction::None;
     }
@@ -318,25 +318,25 @@ void App::openFileDialog(FileDialogMode mode) {
 // Texts of the keygen player, then the file dialog for where to write it.
 void App::playerExportPopup() {
   if (playerPopupRequest_) {
-    ImGui::OpenPopup("Export keygen player");
+    ImGui::OpenPopup(T("Export keygen player"));
     playerPopupRequest_ = false;
   }
   ImGui::SetNextWindowSize(ImVec2(S(520), 0), ImGuiCond_Appearing);
-  if (!ImGui::BeginPopupModal("Export keygen player", nullptr)) return;
-  ImGui::TextWrapped("A standalone program that plays this song with the keygen intro: starfield, logo and scroller. "
-                     "It runs on its own, without DATRACKARXD.");
-  ImGui::TextDisabled("For colors, speeds and a live preview, use the DATRACKARXD Keygen app.");
+  if (!ImGui::BeginPopupModal(T("Export keygen player"), nullptr)) return;
+  ImGui::TextWrapped(T("A standalone program that plays this song with the keygen intro: starfield, logo and scroller. "
+                     "It runs on its own, without DATRACKARXD."));
+  ImGui::TextDisabled(T("For colors, speeds and a live preview, use the DATRACKARXD Keygen app."));
   ImGui::Separator();
-  ImGui::InputText("Logo", playerLogo_, sizeof(playerLogo_));
-  ImGui::InputText("Window title", playerTitle_, sizeof(playerTitle_));
-  ImGui::TextUnformatted("Scroller text");
+  ImGui::InputText(T("Logo"), playerLogo_, sizeof(playerLogo_));
+  ImGui::InputText(T("Window title"), playerTitle_, sizeof(playerTitle_));
+  ImGui::TextUnformatted(T("Scroller text"));
   ImGui::InputTextMultiline("##scroll", playerScroll_, sizeof(playerScroll_), ImVec2(-1, S(90)));
-  if (ImGui::Button("Export...", ImVec2(S(120), 0))) {
+  if (ImGui::Button(T("Export..."), ImVec2(S(120), 0))) {
     ImGui::CloseCurrentPopup();
     openFileDialog(FileDialogMode::ExportPlayer);
   }
   ImGui::SameLine();
-  if (ImGui::Button("Cancel", ImVec2(S(120), 0)) || ImGui::IsKeyPressed(ImGuiKey_Escape)) ImGui::CloseCurrentPopup();
+  if (ImGui::Button(T("Cancel"), ImVec2(S(120), 0)) || ImGui::IsKeyPressed(ImGuiKey_Escape)) ImGui::CloseCurrentPopup();
   ImGui::EndPopup();
 }
 
@@ -390,7 +390,7 @@ void App::fileDialog() {
     return false;
   };
   ImGui::TextUnformatted(dialogDir_.c_str());
-  if (ImGui::Button("Up")) {
+  if (ImGui::Button(T("Up"))) {
     fs::path p = fs::path(dialogDir_).parent_path();
     if (!p.empty()) dialogDir_ = p.string();
   }
@@ -398,7 +398,7 @@ void App::fileDialog() {
   {
     std::string list;
     for (const auto& x : exts) list += " *" + x;
-    ImGui::TextDisabled("(folders and%s)", list.c_str());
+    ImGui::TextDisabled(T("(folders and%s)"), list.c_str());
   }
 
   bool accept = false;
@@ -438,12 +438,12 @@ void App::fileDialog() {
       dialogMode_ == FileDialogMode::ExportOgg) {
     ImGui::SameLine();
     ImGui::SetNextItemWidth(S(80));
-    ImGui::InputInt("loops", &exportLoops_);
+    ImGui::InputInt(T("loops"), &exportLoops_);
     exportLoops_ = std::clamp(exportLoops_, 1, 16);
   }
   if (dialogMode_ == FileDialogMode::ExportModule) {
     ImGui::SetNextItemWidth(S(120));
-    if (ImGui::Combo("Format", &moduleFormat_, "XM (FastTracker 2)\0MOD (ProTracker)\0IT (Impulse Tracker)\0")) {
+    if (ImGui::Combo(T("Format"), &moduleFormat_, TC("XM (FastTracker 2)\0MOD (ProTracker)\0IT (Impulse Tracker)\0"))) {
       // Follow the format in the file name.
       fs::path p(dialogName_);
       p.replace_extension(moduleFormat_ == 1 ? ".mod" : moduleFormat_ == 2 ? ".it" : ".xm");
@@ -452,26 +452,26 @@ void App::fileDialog() {
     ImGui::SameLine();
     ImGui::SetNextItemWidth(S(110));
     ImGui::BeginDisabled(moduleFormat_ == 1);
-    ImGui::Combo("Rendered instruments", &moduleRate_, "11025 Hz\0" "22050 Hz\0" "44100 Hz\0");
+    ImGui::Combo(T("Rendered instruments"), &moduleRate_, TC("11025 Hz\0" "22050 Hz\0" "44100 Hz\0"));
     ImGui::EndDisabled();
     ImGui::SetNextItemWidth(S(120));
-    ImGui::SliderFloat("Note held", &moduleHold_, 0.2f, 4.0f, "%.1f s");
+    ImGui::SliderFloat(T("Note held"), &moduleHold_, 0.2f, 4.0f, "%.1f s");
     if (ImGui::IsItemHovered())
-      ImGui::SetTooltip("Instruments that aren't samples are rendered: one note held this long, then\n"
-                        "looped if it still sounds. MOD resamples everything to 8363 Hz, 8-bit.");
+      ImGui::SetTooltip(T("Instruments that aren't samples are rendered: one note held this long, then\n"
+                        "looped if it still sounds. MOD resamples everything to 8363 Hz, 8-bit."));
   }
   if (dialogMode_ == FileDialogMode::ExportOgg) {
     ImGui::SetNextItemWidth(S(200));
-    ImGui::SliderInt("Quality", &oggQuality_, 0, 10);
+    ImGui::SliderInt(T("Quality"), &oggQuality_, 0, 10);
     ImGui::SameLine();
     static const int kbps[11] = {64, 80, 96, 112, 128, 160, 192, 224, 256, 320, 500};
-    ImGui::TextDisabled("about %d kbit/s", kbps[std::clamp(oggQuality_, 0, 10)]);
+    ImGui::TextDisabled(T("about %d kbit/s"), kbps[std::clamp(oggQuality_, 0, 10)]);
   }
   bool opening = dialogMode_ == FileDialogMode::Open || dialogMode_ == FileDialogMode::LoadSample ||
                  dialogMode_ == FileDialogMode::LoadInstrument;
   if (ImGui::Button(opening ? "Open" : "Save", ImVec2(S(100), 0))) accept = true;
   ImGui::SameLine();
-  bool cancel = ImGui::Button("Cancel", ImVec2(S(100), 0)) || ImGui::IsKeyPressed(ImGuiKey_Escape);
+  bool cancel = ImGui::Button(T("Cancel"), ImVec2(S(100), 0)) || ImGui::IsKeyPressed(ImGuiKey_Escape);
 
   if (accept && dialogName_[0]) {
     fs::path p = fs::path(dialogName_);
@@ -591,29 +591,29 @@ void App::fileDialog() {
 
 void App::menuBar() {
   if (!ImGui::BeginMainMenuBar()) return;
-  if (ImGui::BeginMenu("File")) {
-    if (ImGui::MenuItem("New", keyLabel(Action::New).c_str())) askAction(PendingAction::New);
-    if (ImGui::MenuItem("Open / import...", keyLabel(Action::Open).c_str())) askAction(PendingAction::Open);
-    if (ImGui::BeginMenu("Open recent", !recent_.empty())) {
+  if (ImGui::BeginMenu(T("File"))) {
+    if (ImGui::MenuItem(T("New"), keyLabel(Action::New).c_str())) askAction(PendingAction::New);
+    if (ImGui::MenuItem(T("Open / import..."), keyLabel(Action::Open).c_str())) askAction(PendingAction::Open);
+    if (ImGui::BeginMenu(T("Open recent"), !recent_.empty())) {
       for (const std::string& r : std::vector<std::string>(recent_))
         if (ImGui::MenuItem(r.c_str())) {
           droppedPath_ = r;
           askAction(PendingAction::OpenPath);
         }
       ImGui::Separator();
-      if (ImGui::MenuItem("Clear the list")) recent_.clear();
+      if (ImGui::MenuItem(T("Clear the list"))) recent_.clear();
       ImGui::EndMenu();
     }
-    if (ImGui::MenuItem("Save", keyLabel(Action::Save).c_str())) saveSong(false);
-    if (ImGui::MenuItem("Save as...", keyLabel(Action::SaveAs).c_str())) saveSong(true);
+    if (ImGui::MenuItem(T("Save"), keyLabel(Action::Save).c_str())) saveSong(false);
+    if (ImGui::MenuItem(T("Save as..."), keyLabel(Action::SaveAs).c_str())) saveSong(true);
     ImGui::Separator();
-    if (ImGui::MenuItem("Export WAV...")) openFileDialog(FileDialogMode::ExportWav);
-    if (ImGui::MenuItem("Export OGG...")) openFileDialog(FileDialogMode::ExportOgg);
-    if (ImGui::MenuItem("Export MIDI...")) openFileDialog(FileDialogMode::ExportMidi);
-    if (ImGui::MenuItem("Export module (XM, MOD, IT)...")) openFileDialog(FileDialogMode::ExportModule);
-    if (ImGui::MenuItem("Export VGM...")) openFileDialog(FileDialogMode::ExportVgm);
-    if (ImGui::IsItemHovered()) ImGui::SetTooltip("Register log of the emulated chips (AY, SN76489, Game Boy, OPL3)");
-    if (ImGui::MenuItem("Export keygen player...")) {
+    if (ImGui::MenuItem(T("Export WAV..."))) openFileDialog(FileDialogMode::ExportWav);
+    if (ImGui::MenuItem(T("Export OGG..."))) openFileDialog(FileDialogMode::ExportOgg);
+    if (ImGui::MenuItem(T("Export MIDI..."))) openFileDialog(FileDialogMode::ExportMidi);
+    if (ImGui::MenuItem(T("Export module (XM, MOD, IT)..."))) openFileDialog(FileDialogMode::ExportModule);
+    if (ImGui::MenuItem(T("Export VGM..."))) openFileDialog(FileDialogMode::ExportVgm);
+    if (ImGui::IsItemHovered()) ImGui::SetTooltip(T("Register log of the emulated chips (AY, SN76489, Game Boy, OPL3)"));
+    if (ImGui::MenuItem(T("Export keygen player..."))) {
       std::snprintf(playerTitle_, sizeof(playerTitle_), "%s", song_.name.c_str());
       if (!playerScroll_[0]) {
         std::string t = "Now playing: " + song_.name + (song_.author.empty() ? "" : "  by " + song_.author) +
@@ -622,45 +622,45 @@ void App::menuBar() {
       }
       playerPopupRequest_ = true;
     }
-    if (ImGui::MenuItem("Load demo song")) askAction(PendingAction::Demo);
+    if (ImGui::MenuItem(T("Load demo song"))) askAction(PendingAction::Demo);
     ImGui::Separator();
-    if (ImGui::MenuItem("Settings...", keyLabel(Action::Settings).c_str())) showSettings_ = true;
+    if (ImGui::MenuItem(T("Settings..."), keyLabel(Action::Settings).c_str())) showSettings_ = true;
     ImGui::Separator();
-    if (ImGui::MenuItem("Quit")) requestQuit();
+    if (ImGui::MenuItem(T("Quit"))) requestQuit();
     ImGui::EndMenu();
   }
-  if (ImGui::BeginMenu("Edit")) {
-    if (ImGui::MenuItem("Undo", keyLabel(Action::Undo).c_str(), false, !undo_.empty())) applyUndo(undo_, redo_);
-    if (ImGui::MenuItem("Redo", keyLabel(Action::Redo).c_str(), false, !redo_.empty())) applyUndo(redo_, undo_);
+  if (ImGui::BeginMenu(T("Edit"))) {
+    if (ImGui::MenuItem(T("Undo"), keyLabel(Action::Undo).c_str(), false, !undo_.empty())) applyUndo(undo_, redo_);
+    if (ImGui::MenuItem(T("Redo"), keyLabel(Action::Redo).c_str(), false, !redo_.empty())) applyUndo(redo_, undo_);
     ImGui::Separator();
-    if (ImGui::MenuItem("Cut", keyLabel(Action::Cut).c_str())) copySelection(true);
-    if (ImGui::MenuItem("Copy", keyLabel(Action::Copy).c_str())) copySelection(false);
-    if (ImGui::MenuItem("Paste", keyLabel(Action::Paste).c_str())) paste();
+    if (ImGui::MenuItem(T("Cut"), keyLabel(Action::Cut).c_str())) copySelection(true);
+    if (ImGui::MenuItem(T("Copy"), keyLabel(Action::Copy).c_str())) copySelection(false);
+    if (ImGui::MenuItem(T("Paste"), keyLabel(Action::Paste).c_str())) paste();
     ImGui::Separator();
-    if (ImGui::MenuItem("Transpose +1", keyLabel(Action::TransposeUp).c_str())) transpose(1);
-    if (ImGui::MenuItem("Transpose -1", keyLabel(Action::TransposeDown).c_str())) transpose(-1);
-    if (ImGui::MenuItem("Transpose +12", keyLabel(Action::TransposeOctUp).c_str())) transpose(12);
-    if (ImGui::MenuItem("Transpose -12", keyLabel(Action::TransposeOctDown).c_str())) transpose(-12);
+    if (ImGui::MenuItem(T("Transpose +1"), keyLabel(Action::TransposeUp).c_str())) transpose(1);
+    if (ImGui::MenuItem(T("Transpose -1"), keyLabel(Action::TransposeDown).c_str())) transpose(-1);
+    if (ImGui::MenuItem(T("Transpose +12"), keyLabel(Action::TransposeOctUp).c_str())) transpose(12);
+    if (ImGui::MenuItem(T("Transpose -12"), keyLabel(Action::TransposeOctDown).c_str())) transpose(-12);
     ImGui::Separator();
-    ImGui::TextDisabled("Selection (or the channel)");
+    ImGui::TextDisabled(T("Selection (or the channel)"));
     selectionToolsMenu();
     ImGui::EndMenu();
   }
-  if (ImGui::BeginMenu("View")) {
-    ImGui::MenuItem("Pattern", nullptr, &showPattern_);
-    ImGui::MenuItem("Piano roll", nullptr, &showPianoRoll_);
-    ImGui::MenuItem("Orders", nullptr, &showOrders_);
-    ImGui::MenuItem("Instruments", nullptr, &showInstruments_);
-    ImGui::MenuItem("Instrument editor", nullptr, &showInsEditor_);
-    ImGui::MenuItem("Song", nullptr, &showSong_);
-    ImGui::MenuItem("Samples", nullptr, &showSamples_);
-    ImGui::MenuItem("Mixer", nullptr, &showMixer_);
-    ImGui::MenuItem("Channel FX", nullptr, &showChanFx_);
-    ImGui::MenuItem("Arrangement", nullptr, &showArrangement_);
-    ImGui::MenuItem("Oscilloscope", nullptr, &showScope_);
-    ImGui::MenuItem("Keygen scroller", nullptr, &showScroller_);
+  if (ImGui::BeginMenu(T("View"))) {
+    ImGui::MenuItem(T("Pattern"), nullptr, &showPattern_);
+    ImGui::MenuItem(T("Piano roll"), nullptr, &showPianoRoll_);
+    ImGui::MenuItem(T("Orders"), nullptr, &showOrders_);
+    ImGui::MenuItem(T("Instruments"), nullptr, &showInstruments_);
+    ImGui::MenuItem(T("Instrument editor"), nullptr, &showInsEditor_);
+    ImGui::MenuItem(T("Song"), nullptr, &showSong_);
+    ImGui::MenuItem(T("Samples"), nullptr, &showSamples_);
+    ImGui::MenuItem(T("Mixer"), nullptr, &showMixer_);
+    ImGui::MenuItem(T("Channel FX"), nullptr, &showChanFx_);
+    ImGui::MenuItem(T("Arrangement"), nullptr, &showArrangement_);
+    ImGui::MenuItem(T("Oscilloscope"), nullptr, &showScope_);
+    ImGui::MenuItem(T("Keygen scroller"), nullptr, &showScroller_);
     ImGui::Separator();
-    if (ImGui::BeginMenu("Theme")) {
+    if (ImGui::BeginMenu(T("Theme"))) {
       for (int i = 0; i < THEME_COUNT; i++)
         if (ImGui::MenuItem(THEMES[i].name, nullptr, themeIndex() == i)) {
           setTheme(i);
@@ -668,15 +668,15 @@ void App::menuBar() {
         }
       ImGui::EndMenu();
     }
-    if (ImGui::MenuItem("Reset layout")) layoutDone_ = false;
+    if (ImGui::MenuItem(T("Reset layout"))) layoutDone_ = false;
     ImGui::EndMenu();
   }
   midiMenu();
-  if (ImGui::BeginMenu("Help")) {
-    ImGui::MenuItem("Manual", keyLabel(Action::Manual).c_str(), &showManual_);
-    ImGui::MenuItem("Effects", nullptr, &showEffects_);
-    ImGui::MenuItem("Keyboard", nullptr, &showKeys_);
-    ImGui::MenuItem("About", nullptr, &showAbout_);
+  if (ImGui::BeginMenu(T("Help"))) {
+    ImGui::MenuItem(T("Manual"), keyLabel(Action::Manual).c_str(), &showManual_);
+    ImGui::MenuItem(T("Effects"), nullptr, &showEffects_);
+    ImGui::MenuItem(T("Keyboard"), nullptr, &showKeys_);
+    ImGui::MenuItem(T("About"), nullptr, &showAbout_);
     ImGui::EndMenu();
   }
 
@@ -684,36 +684,36 @@ void App::menuBar() {
   ImGui::Separator();
   bool playing = engine_->playing();
   if (ImGui::MenuItem(playing ? "[Stop]" : "[Play]")) togglePlay(false);
-  if (ImGui::MenuItem("[Play row]")) {
+  if (ImGui::MenuItem(T("[Play row]"))) {
     engine_->stop();
     togglePlay(true);
   }
-  ImGui::MenuItem("Loop pattern", nullptr, &engine_->loopPattern);
-  ImGui::MenuItem("Follow", nullptr, &follow_);
+  ImGui::MenuItem(T("Loop pattern"), nullptr, &engine_->loopPattern);
+  ImGui::MenuItem(T("Follow"), nullptr, &follow_);
   ImGui::PushStyleColor(ImGuiCol_Text, editMode_ ? ImVec4(1, 0.4f, 0.4f, 1) : ImGui::GetStyleColorVec4(ImGuiCol_Text));
-  ImGui::MenuItem("Record", keyLabel(Action::RecordToggle).c_str(), &editMode_);
+  ImGui::MenuItem(T("Record"), keyLabel(Action::RecordToggle).c_str(), &editMode_);
   ImGui::PopStyleColor();
-  ImGui::MenuItem("Metronome", nullptr, &engine_->metronome);
-  if (ImGui::BeginMenu("Rec. options")) {
+  ImGui::MenuItem(T("Metronome"), nullptr, &engine_->metronome);
+  if (ImGui::BeginMenu(T("Rec. options"))) {
     ImGui::SetNextItemWidth(S(140));
-    ImGui::Combo("Count-in", &countInBars_, "Off\0" "1 bar\0" "2 bars\0" "3 bars\0" "4 bars\0");
-    if (ImGui::IsItemHovered()) ImGui::SetTooltip("Clicks before playback starts in Record mode (a bar = Highlight 2 rows)");
+    ImGui::Combo(T("Count-in"), &countInBars_, TC("Off\0" "1 bar\0" "2 bars\0" "3 bars\0" "4 bars\0"));
+    if (ImGui::IsItemHovered()) ImGui::SetTooltip(T("Clicks before playback starts in Record mode (a bar = Highlight 2 rows)"));
     ImGui::SetNextItemWidth(S(140));
-    ImGui::Combo("MIDI quantize", &midiQuantize_, "Off\0" "Nearest row\0" "2 rows\0" "Beat\0");
-    if (ImGui::IsItemHovered()) ImGui::SetTooltip("Live MIDI notes go to the nearest row of this grid instead of the row playing");
+    ImGui::Combo(T("MIDI quantize"), &midiQuantize_, TC("Off\0" "Nearest row\0" "2 rows\0" "Beat\0"));
+    if (ImGui::IsItemHovered()) ImGui::SetTooltip(T("Live MIDI notes go to the nearest row of this grid instead of the row playing"));
     ImGui::SetNextItemWidth(S(140));
-    ImGui::SliderFloat("Metronome volume", &metronomeVol_, 0, 1, "%.2f");
+    ImGui::SliderFloat(T("Metronome volume"), &metronomeVol_, 0, 1, "%.2f");
     ImGui::EndMenu();
   }
   engine_->metronomeVolume = metronomeVol_;
   if (engine_->countingIn()) {
     ImGui::PushStyleColor(ImGuiCol_Text, ImVec4(1, 0.8f, 0.3f, 1));
-    ImGui::TextUnformatted("count-in");
+    ImGui::TextUnformatted(T("count-in"));
     ImGui::PopStyleColor();
   }
   ImGui::Separator();
   float bpm = song_.tickRate * 60.0f / (std::max(engine_->speed(), 1) * std::max(song_.highlight1, 1));
-  ImGui::Text("Ord %02X  Row %02X  %.1f BPM", playing ? engine_->order() : curOrder_, playing ? engine_->row() : curRow_, bpm);
+  ImGui::Text(T("Ord %02X  Row %02X  %.1f BPM"), playing ? engine_->order() : curOrder_, playing ? engine_->row() : curRow_, bpm);
   if (!status_.empty() && ImGui::GetTime() - statusTime_ < 6.0) {
     ImGui::Separator();
     ImGui::TextUnformatted(status_.c_str());
@@ -726,9 +726,9 @@ void App::menuBar() {
 // ---------------------------------------------------------------------------
 
 void App::midiMenu() {
-  if (!ImGui::BeginMenu("MIDI")) return;
+  if (!ImGui::BeginMenu(T("MIDI"))) return;
   if (ImGui::IsWindowAppearing()) midiPorts_ = midi_.ports();
-  if (ImGui::MenuItem("None", nullptr, !midi_.isOpen())) {
+  if (ImGui::MenuItem(T("None"), nullptr, !midi_.isOpen())) {
     midi_.close();
     midiPort_.clear();
   }
@@ -744,21 +744,21 @@ void App::midiMenu() {
   }
   if (midiPorts_.empty()) ImGui::TextDisabled("%s", midi_.error().empty() ? "No MIDI input found" : midi_.error().c_str());
   ImGui::Separator();
-  if (ImGui::MenuItem("Rescan")) midiPorts_ = midi_.ports();
-  ImGui::MenuItem("Velocity -> volume", nullptr, &midiVelocity_);
+  if (ImGui::MenuItem(T("Rescan"))) midiPorts_ = midi_.ports();
+  ImGui::MenuItem(T("Velocity -> volume"), nullptr, &midiVelocity_);
   ImGui::SetNextItemWidth(S(120));
-  ImGui::SliderInt("Pitch wheel range", &midiBendRange_, 1, 24, "%d semitones");
-  if (ImGui::IsItemHovered()) ImGui::SetTooltip("In Record mode, while playing, the wheel is written as E8xx bends.");
+  ImGui::SliderInt(T("Pitch wheel range"), &midiBendRange_, 1, 24, "%d semitones");
+  if (ImGui::IsItemHovered()) ImGui::SetTooltip(T("In Record mode, while playing, the wheel is written as E8xx bends."));
   ImGui::Separator();
-  ImGui::MenuItem("MPE controller", nullptr, &midiMpe_);
+  ImGui::MenuItem(T("MPE controller"), nullptr, &midiMpe_);
   if (ImGui::IsItemHovered())
-    ImGui::SetTooltip("For MPE keyboards (Seaboard, Linnstrument, Osmose...): every note gets its own channel,\n"
+    ImGui::SetTooltip(T("For MPE keyboards (Seaboard, Linnstrument, Osmose...): every note gets its own channel,\n"
                       "pitch bend, slide (CC74 -> filter cutoff) and pressure (-> volume).\n"
                       "Notes use the piano roll's Voices channels (8 if Voices is 1).\n"
-                      "In Record mode while playing, all of it is written to the pattern.");
+                      "In Record mode while playing, all of it is written to the pattern."));
   ImGui::BeginDisabled(!midiMpe_);
   ImGui::SetNextItemWidth(S(120));
-  ImGui::SliderInt("MPE pitch range", &midiMpeRange_, 1, 96, "%d semitones");
+  ImGui::SliderInt(T("MPE pitch range"), &midiMpeRange_, 1, 96, "%d semitones");
   ImGui::EndDisabled();
   ImGui::EndMenu();
 }
@@ -950,20 +950,20 @@ void App::defaultLayout(unsigned int dockId) {
   ImGuiID bottom = ImGui::DockBuilderSplitNode(center, ImGuiDir_Down, 0.18f, nullptr, &center);
   ImGuiID leftBottom = ImGui::DockBuilderSplitNode(left, ImGuiDir_Down, 0.45f, nullptr, &left);
   ImGuiID rightBottom = ImGui::DockBuilderSplitNode(right, ImGuiDir_Down, 0.70f, nullptr, &right);
-  ImGui::DockBuilderDockWindow("Pattern", center);
-  ImGui::DockBuilderDockWindow("Piano roll", center);
-  ImGui::DockBuilderDockWindow("Orders", left);
-  ImGui::DockBuilderDockWindow("Song", leftBottom);
-  ImGui::DockBuilderDockWindow("Instruments", right);
-  ImGui::DockBuilderDockWindow("Instrument editor", rightBottom);
-  ImGui::DockBuilderDockWindow("Samples", center);
-  ImGui::DockBuilderDockWindow("Arrangement", center);
-  ImGui::DockBuilderDockWindow("Oscilloscope", bottom);
-  ImGui::DockBuilderDockWindow("Keygen", bottom);
-  ImGui::DockBuilderDockWindow("Mixer", bottom);
-  ImGui::DockBuilderDockWindow("Channel FX", bottom);
-  ImGui::DockBuilderDockWindow("Effects", rightBottom);
-  ImGui::DockBuilderDockWindow("Keyboard", rightBottom);
+  ImGui::DockBuilderDockWindow("###Pattern", center);
+  ImGui::DockBuilderDockWindow("###Piano roll", center);
+  ImGui::DockBuilderDockWindow("###Orders", left);
+  ImGui::DockBuilderDockWindow("###Song", leftBottom);
+  ImGui::DockBuilderDockWindow("###Instruments", right);
+  ImGui::DockBuilderDockWindow("###Instrument editor", rightBottom);
+  ImGui::DockBuilderDockWindow("###Samples", center);
+  ImGui::DockBuilderDockWindow("###Arrangement", center);
+  ImGui::DockBuilderDockWindow("###Oscilloscope", bottom);
+  ImGui::DockBuilderDockWindow("###Keygen", bottom);
+  ImGui::DockBuilderDockWindow("###Mixer", bottom);
+  ImGui::DockBuilderDockWindow("###Channel FX", bottom);
+  ImGui::DockBuilderDockWindow("###Effects", rightBottom);
+  ImGui::DockBuilderDockWindow("###Keyboard", rightBottom);
   ImGui::DockBuilderFinish(dockId);
 }
 
@@ -1091,11 +1091,11 @@ void App::frame() {
   playerExportPopup();
   if (showExportReport_) {
     ImGui::SetNextWindowSize(ImVec2(S(460), 0), ImGuiCond_Appearing);
-    if (ImGui::Begin("Export report", &showExportReport_)) {
-      ImGui::TextWrapped("Exported. These parts had no equivalent in the format and were left out:");
+    if (ImGui::Begin(TW("Export report").c_str(), &showExportReport_)) {
+      ImGui::TextWrapped(T("Exported. These parts had no equivalent in the format and were left out:"));
       ImGui::Separator();
       ImGui::TextUnformatted(exportReport_.c_str());
-      if (ImGui::Button("OK")) showExportReport_ = false;
+      if (ImGui::Button(T("OK"))) showExportReport_ = false;
     }
     ImGui::End();
   }
