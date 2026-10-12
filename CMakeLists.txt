@@ -1,5 +1,5 @@
 cmake_minimum_required(VERSION 3.16)
-project(DATRACKARXD VERSION 0.3.0 LANGUAGES CXX C)
+project(DATRACKARXD VERSION 0.4.0 LANGUAGES CXX C)
 
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
@@ -112,12 +112,10 @@ else()
   endif()
 endif()
 
-# --- the tracker ---
-add_executable(datrackarxd
-  src/main.cpp
+# --- shared code: song model, engine, importers, keygen player ---
+add_library(dtcore STATIC
   src/song.cpp
   src/engine.cpp
-  src/export.cpp
   src/effects.cpp
   src/demo.cpp
   src/import.cpp
@@ -126,24 +124,42 @@ add_executable(datrackarxd
   src/import_dmf.cpp
   src/import_ftm.cpp
   src/inflate.cpp
-  src/midi.cpp
   src/midifile.cpp
-  src/app.cpp
-  src/ui_pattern.cpp
-  src/ui_pianoroll.cpp
-  src/ui_instrument.cpp
-  src/ui_windows.cpp
   src/theme.cpp
   src/keygen_fx.cpp
   src/payload.cpp
   src/player.cpp)
-target_link_libraries(datrackarxd PRIVATE imgui rtmidi vorbisenc_static)
-target_compile_definitions(datrackarxd PRIVATE DATRACKARXD_VERSION="${PROJECT_VERSION}")
-if(TARGET SDL2::SDL2main)
-  target_link_libraries(datrackarxd PRIVATE SDL2::SDL2main)
-endif()
-if(MSVC)
-  target_compile_options(datrackarxd PRIVATE /W3)
-else()
-  target_compile_options(datrackarxd PRIVATE -Wall -Wextra)
-endif()
+target_include_directories(dtcore PUBLIC src)
+target_link_libraries(dtcore PUBLIC imgui)
+target_compile_definitions(dtcore PUBLIC DATRACKARXD_VERSION="${PROJECT_VERSION}")
+
+# --- the tracker ---
+add_executable(datrackarxd
+  src/main.cpp
+  src/export.cpp
+  src/midi.cpp
+  src/app.cpp
+  src/ui_pattern.cpp
+  src/ui_pianoroll.cpp
+  src/ui_instrument.cpp
+  src/ui_windows.cpp)
+target_link_libraries(datrackarxd PRIVATE dtcore rtmidi vorbisenc_static)
+
+# --- DATRACKARXD Keygen: makes standalone keygen-style players ---
+add_executable(datrackarxd-keygen
+  src/keygen_main.cpp
+  src/filebrowser.cpp)
+target_link_libraries(datrackarxd-keygen PRIVATE dtcore)
+
+foreach(t dtcore datrackarxd datrackarxd-keygen)
+  if(MSVC)
+    target_compile_options(${t} PRIVATE /W3)
+  else()
+    target_compile_options(${t} PRIVATE -Wall -Wextra)
+  endif()
+endforeach()
+foreach(t datrackarxd datrackarxd-keygen)
+  if(TARGET SDL2::SDL2main)
+    target_link_libraries(${t} PRIVATE SDL2::SDL2main)
+  endif()
+endforeach()

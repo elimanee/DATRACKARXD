@@ -71,7 +71,7 @@ static int commandLine(int argc, char** argv) {
     p.title = song.name;
     if (argc >= 5) p.logo = argv[4];
     if (argc >= 6) p.scroll = argv[5];
-    if (!writePlayer(argv[3], p, err)) {
+    if (!writePlayer(argv[3], p, err, findKeygenApp())) {
       std::fprintf(stderr, "%s\n", err.c_str());
       return 1;
     }

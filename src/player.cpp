@@ -30,6 +30,31 @@ std::string upper(std::string s) {
 
 }  // namespace
 
+void drawPlayerScreen(ImDrawList* dl, ImVec2 p0, ImVec2 size, KeygenScene& scene, const float* scope, int scopeLen,
+                      int scopePos, float t, float dt, const std::string& info) {
+  float peak = 0;
+  for (int i = 0; i < scopeLen; i++) peak = std::max(peak, std::abs(scope[i]));
+  scene.draw(dl, p0, size, t, dt, peak);
+  dl->PushClipRect(p0, ImVec2(p0.x + size.x, p0.y + size.y), true);
+  float barH = scene.style.scope ? std::clamp(size.y * 0.08f, 24.0f, 60.0f) : 0.0f;
+  ImVec2 b0(p0.x, p0.y + size.y - barH - 22), b1(p0.x + size.x, p0.y + size.y - 22);
+  dl->AddRectFilled(b0, ImVec2(b1.x, p0.y + size.y), IM_COL32(0, 0, 0, 170));
+  if (scene.style.scope && scopeLen > 1) {
+    const int n = std::min(512, scopeLen);
+    uint32_t c = scene.style.rainbow ? 0x00ffc8 : scene.style.color;
+    ImU32 col = IM_COL32((c >> 16) & 255, (c >> 8) & 255, c & 255, 230);
+    ImVec2 prev;
+    for (int i = 0; i < n; i++) {
+      float v = scope[(scopePos - n + i + scopeLen * 2) % scopeLen];
+      ImVec2 pt(b0.x + size.x * i / (n - 1), (b0.y + b1.y) / 2 - v * barH * 0.45f);
+      if (i) dl->AddLine(prev, pt, col, 1.5f);
+      prev = pt;
+    }
+  }
+  dl->AddText(ImVec2(p0.x + 10, p0.y + size.y - 19), IM_COL32(200, 255, 240, 255), info.c_str());
+  dl->PopClipRect();
+}
+
 int runPlayer(const PlayerPayload& payload, int argc, char** argv) {
   Song song;
   std::string err;
@@ -88,6 +113,7 @@ int runPlayer(const PlayerPayload& payload, int argc, char** argv) {
   if (dev) SDL_PauseAudioDevice(dev, 0);
 
   KeygenScene scene;
+  scene.style = payload.style;
   scene.logo = payload.logo.empty() ? "DATRACKARXD" : payload.logo;
   std::string scroll = payload.scroll;
   if (scroll.empty()) scroll = "NOW PLAYING: " + song.name + (song.author.empty() ? "" : "  BY " + song.author);
@@ -125,7 +151,6 @@ int runPlayer(const PlayerPayload& payload, int argc, char** argv) {
     ImGui_ImplSDL2_NewFrame();
     ImGui::NewFrame();
 
-    float peak = 0;
     std::array<float, SCOPE_LEN> scope;
     int scopePos;
     {
@@ -134,7 +159,6 @@ int runPlayer(const PlayerPayload& payload, int argc, char** argv) {
       scopePos = engine.scopePos();
     }
     if (paused) scope.fill(0);
-    for (float v : scope) peak = std::max(peak, std::abs(v));
 
     const ImGuiViewport* vp = ImGui::GetMainViewport();
     ImGui::SetNextWindowPos(vp->Pos);
@@ -144,29 +168,14 @@ int runPlayer(const PlayerPayload& payload, int argc, char** argv) {
     ImGui::Begin("player", nullptr,
                  ImGuiWindowFlags_NoDecoration | ImGuiWindowFlags_NoMove | ImGuiWindowFlags_NoSavedSettings |
                      ImGuiWindowFlags_NoBringToFrontOnFocus);
-    ImDrawList* dl = ImGui::GetWindowDrawList();
-    ImVec2 p0 = vp->Pos, size = vp->Size;
     double now = (double)(SDL_GetPerformanceCounter() - start) / SDL_GetPerformanceFrequency();
     float t = (float)(paused ? pauseStart - pausedTime : now - pausedTime);
-    scene.draw(dl, p0, size, t, paused ? 0.0f : ImGui::GetIO().DeltaTime, peak);
-
-    // Oscilloscope strip and the info line at the bottom.
-    float barH = std::clamp(size.y * 0.08f, 24.0f, 60.0f);
-    ImVec2 b0(p0.x, p0.y + size.y - barH - 22), b1(p0.x + size.x, p0.y + size.y - 22);
-    dl->AddRectFilled(b0, ImVec2(b1.x, p0.y + size.y), IM_COL32(0, 0, 0, 170));
-    const int n = 512;
-    ImVec2 prev;
-    for (int i = 0; i < n; i++) {
-      float v = scope[(scopePos - n + i + SCOPE_LEN * 2) % SCOPE_LEN];
-      ImVec2 pt(b0.x + size.x * i / (n - 1), (b0.y + b1.y) / 2 - v * barH * 0.45f);
-      if (i) dl->AddLine(prev, pt, IM_COL32(0, 255, 200, 230), 1.5f);
-      prev = pt;
-    }
     int secs = (int)t;
     char info[512];
     std::snprintf(info, sizeof(info), "%s%s%s   %02d:%02d   [SPACE] %s   [F] fullscreen   [ESC] exit", song.name.c_str(),
                   song.author.empty() ? "" : " - ", song.author.c_str(), secs / 60, secs % 60, paused ? "play" : "pause");
-    dl->AddText(ImVec2(p0.x + 10, p0.y + size.y - 19), IM_COL32(200, 255, 240, 255), info);
+    drawPlayerScreen(ImGui::GetWindowDrawList(), vp->Pos, vp->Size, scene, scope.data(), SCOPE_LEN, scopePos, t,
+                     paused ? 0.0f : ImGui::GetIO().DeltaTime, info);
     ImGui::End();
     ImGui::PopStyleVar(2);
 
