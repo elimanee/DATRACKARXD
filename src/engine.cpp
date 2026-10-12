@@ -156,6 +156,18 @@ void Engine::setBend(int c, double semitones) {
   updateChannel(c);
 }
 
+void Engine::setCutoff(int c, int value) {
+  if (c < 0 || c >= MAX_CHANNELS) return;
+  ch_[c].cutoffOverride = std::clamp(value, 0, 255);
+  updateChannel(c);
+}
+
+void Engine::setVolume(int c, int vol) {
+  if (c < 0 || c >= MAX_CHANNELS) return;
+  ch_[c].vol = std::clamp(vol, 0, 0x7f);
+  updateChannel(c);
+}
+
 void Engine::resetPan(int c) {
   if (c >= 0 && c < song_.channelCount()) linearPan(song_.channels[c].pan, ch_[c].panL, ch_[c].panR);
 }
@@ -519,9 +531,10 @@ void Engine::processCell(int c, const Cell& cell, bool fromDelay) {
         break;
       case 0xEC: s.cutTick = val; break;
       case 0xE5: s.fine = ((cell.fx[e].val < 0 ? 0x80 : val) - 0x80) / 128.0; break;
-      case 0xE8: {
-        // Bend to (xx - 80) / 16 semitones, gliding over the row.
-        s.bendTarget = ((cell.fx[e].val < 0 ? 0x80 : val) - 0x80) / 16.0;
+      case 0xE8:
+      case 0xE9: {
+        // Bend to (xx - 80) / 16 (E8) or / 4 (E9) semitones, gliding over the row.
+        s.bendTarget = ((cell.fx[e].val < 0 ? 0x80 : val) - 0x80) / (cmd == 0xE8 ? 16.0 : 4.0);
         s.bendStep = std::abs(s.bendTarget - s.bend) / std::max(1, speed());
         break;
       }

@@ -130,7 +130,8 @@ Hors de l'éditeur de patterns, les touches de notes jouent l'instrument courant
 | `E1xy` / `E2xy` | Glisser de y demi-tons vers le haut / bas à la vitesse x |
 | `E5xx` | Hauteur fine : `80` = rien, `00`-`FF` = -1 à +1 demi-ton |
 | `E6xx` | Boucle de pattern : `E600` marque le début, `E6xx` répète xx fois |
-| `E8xx` | Pitch bend : (xx - 80) / 16 demi-tons (`00` = -8, `80` = rien, `A0` = +2, `FF` = +7,9). Glisse sur la ligne et reste jusqu'au prochain `E8` |
+| `E8xx` | Pitch bend : (xx - 80) / 16 demi-tons (`00` = -8, `80` = rien, `A0` = +2, `FF` = +7,9). Glisse sur la ligne et reste jusqu'au prochain `E8`/`E9` |
+| `E9xx` | Grand pitch bend : (xx - 80) / 4 demi-tons (`00` = -32, `80` = rien, `B0` = +12, `FF` = +31,75), même glissement |
 | `ECxx` | Couper la note après xx ticks |
 | `EDxx` | Retarder la ligne de xx ticks |
 | `EExx` | Répéter la ligne xx fois (pattern delay) |
@@ -157,14 +158,33 @@ comme dans FL Studio :
 | Clavier à gauche | Écouter une note |
 | Règle en haut | Placer le curseur (et la lecture) |
 | Ligne du bas, « Vol » | Dessiner la vélocité (colonne volume) |
-| Ligne du bas, « Pitch » | Dessiner le pitch bend (`E8xx`) ; clic droit pour effacer, Ctrl pour arrondir au demi-ton, « +-N » change l'échelle |
-| Case « Slide », Alt+clic ou `S` | Notes « slide » : la note glisse depuis la note précédente pendant sa durée (`03xx` calculé tout seul) |
+| Ligne du bas, « Pitch » | Dessiner le pitch bend du canal (`E8xx`/`E9xx`) ; clic droit pour effacer, Ctrl pour arrondir au demi-ton, « +-N » change l'échelle |
+| Ligne du bas, « Press » / « Slide » | Expression de chaque note (voir MPE ci-dessous) |
 
 Les notes grisées sont celles des autres canaux (case « Ghosts »). Un canal de tracker ne joue qu'une
 note à la fois : si deux notes se chevauchent, la première s'arrête où la suivante commence.
 
 Pour les **accords**, régler « Voices » sur 2 à 8 : le piano roll montre alors ensemble le canal courant
 et les suivants, et chaque note posée va sur un canal libre. Tout est annulable avec Ctrl+Z.
+
+### Expression par note (MPE)
+
+Comme le MPE d'Ableton, la case **MPE** donne à chaque note ses propres courbes, qui bougent avec elle
+(déplacer, copier, transposer) :
+
+| Action (case MPE cochée) | Effet |
+|---|---|
+| Glisser le long d'une note | Dessiner sa courbe de hauteur (bend), affichée sur la note ; Ctrl pour arrondir au demi-ton |
+| Clic droit (ou glisser) sur une note | Effacer la courbe à cet endroit |
+| Double-clic sur une note | Remettre toutes ses expressions à zéro |
+| Bord droit d'une note | Changer sa durée, comme d'habitude |
+| Ligne « Press » | Pression : le volume de la note au fil du temps (colonne volume) |
+| Ligne « Slide » | Timbre : le cutoff du filtre de l'instrument (`13xx`, filtre activé) au fil du temps |
+
+Les lignes Press et Slide modifient les notes sélectionnées, sinon toutes les notes sous la souris.
+Dans le pattern, une courbe s'écrit en `E8xx` (`E9xx` au-delà de ±8 demi-tons) sur les lignes de la
+note, et un `E880` à sa fin pour que la note suivante reparte sans bend. Un canal ne joue qu'une note à
+la fois : avec « Voices », chaque note d'un accord a donc son propre bend, comme en MPE.
 
 ## Clavier MIDI
 
@@ -177,6 +197,18 @@ l'instrument courant ; un accord se répartit sur les canaux « Voices » du pia
 « Velocity -> volume » met la vélocité dans la colonne volume ; un « program change » choisit l'instrument.
 La **molette de pitch bend** fait glisser les notes jouées (« Pitch wheel range » règle l'amplitude,
 2 demi-tons par défaut) ; en mode Record pendant la lecture, elle s'écrit en `E8xx` ligne par ligne.
+
+**Contrôleur MPE** (Roli Seaboard, LinnStrument, Osmose, Push 3…) : cocher « MPE controller » dans le
+menu MIDI. Chaque note arrive sur son propre canal MIDI et reçoit son propre canal de tracker (8 voix si
+« Voices » vaut 1). Par note :
+
+- le pitch bend du canal MIDI bend la note (« MPE pitch range », 48 demi-tons par défaut comme le
+  standard MPE) → `E8xx`/`E9xx` ;
+- le CC74 (slide) règle le cutoff du filtre → `13xx` ;
+- la pression (aftertouch de canal) fait varier le volume entre 30 % et la vélocité → colonne volume.
+
+En mode Record pendant la lecture, tout s'écrit ligne par ligne sur le canal de la note, avec `E880` au
+note off si la note était bendée.
 
 ## Mixer et effets
 
@@ -246,7 +278,8 @@ est converti vers le moteur de DATRACKARXD, donc le rendu est proche de l'origin
 - **MIDI (.mid)** : les notes sont alignées sur les lignes (doubles-croches, ou triples-croches si
   besoin), chaque partie reçoit un instrument puce selon son programme General MIDI et autant de canaux
   que de notes simultanées ; la batterie (canal 10) devient des percussions puce. Le pitch bend
-  devient des `E8xx` (et l'export MIDI écrit les bends, avec une amplitude de 12 demi-tons).
+  devient des `E8xx`/`E9xx` (et l'export MIDI écrit les bends, avec une amplitude de 12 demi-tons, ou
+  48 si le morceau bend plus loin).
 - **MOD / S3M / XM / IT** : samples, boucles, multi-samples, enveloppes de volume (converties en macros),
   fadeout, effets classiques (arpège, slides, vibrato, trémolo, retrigger, boucles de pattern…).
   Non gérés : enveloppes de panoramique et de pitch, filtres, volumes globaux et de canal, NNA (IT).

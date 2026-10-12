@@ -143,6 +143,24 @@ int cellEffect(const Cell& cell, int cmd) {
   return -1;
 }
 
+void bendEffect(double semitones, int& cmd, int& val) {
+  if (semitones >= -8.0 && semitones <= 7.95) {
+    cmd = 0xE8;
+    val = std::clamp((int)std::lround(semitones * 16) + 0x80, 0, 0xff);
+  } else {
+    cmd = 0xE9;
+    val = std::clamp((int)std::lround(semitones * 4) + 0x80, 0, 0xff);
+  }
+}
+
+double cellBend(const Cell& cell) {
+  int v = cellEffect(cell, 0xE8);
+  if (v != -1) return ((v < 0 ? 0x80 : v) - 0x80) / 16.0;
+  v = cellEffect(cell, 0xE9);
+  if (v != -1) return ((v < 0 ? 0x80 : v) - 0x80) / 4.0;
+  return std::nan("");
+}
+
 std::string noteName(int note) {
   static const char* names[12] = {"C-", "C#", "D-", "D#", "E-", "F-", "F#", "G-", "G#", "A-", "A#", "B-"};
   if (note == NOTE_OFF) return "OFF";

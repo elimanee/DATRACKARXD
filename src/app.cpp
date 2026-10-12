@@ -55,6 +55,8 @@ void App::loadSettings() {
       if (k == "midi") midiPort_ = v;
       if (k == "midivelocity") midiVelocity_ = std::stoi(v) != 0;
       if (k == "midibend") midiBendRange_ = std::clamp(std::stoi(v), 1, 24);
+      if (k == "mpe") midiMpe_ = std::stoi(v) != 0;
+      if (k == "mperange") midiMpeRange_ = std::clamp(std::stoi(v), 1, 96);
     } catch (...) {
     }
   }
@@ -72,6 +74,8 @@ void App::saveSettings() {
   f << "midi=" << midiPort_ << "\n";
   f << "midivelocity=" << (midiVelocity_ ? 1 : 0) << "\n";
   f << "midibend=" << midiBendRange_ << "\n";
+  f << "mpe=" << (midiMpe_ ? 1 : 0) << "\n";
+  f << "mperange=" << midiMpeRange_ << "\n";
 }
 
 void App::openAudio() {
@@ -574,57 +578,111 @@ void App::midiMenu() {
   ImGui::SetNextItemWidth(120);
   ImGui::SliderInt("Pitch wheel range", &midiBendRange_, 1, 24, "%d semitones");
   if (ImGui::IsItemHovered()) ImGui::SetTooltip("In Record mode, while playing, the wheel is written as E8xx bends.");
+  ImGui::Separator();
+  ImGui::MenuItem("MPE controller", nullptr, &midiMpe_);
+  if (ImGui::IsItemHovered())
+    ImGui::SetTooltip("For MPE keyboards (Seaboard, Linnstrument, Osmose...): every note gets its own channel,\n"
+                      "pitch bend, slide (CC74 -> filter cutoff) and pressure (-> volume).\n"
+                      "Notes use the piano roll's Voices channels (8 if Voices is 1).\n"
+                      "In Record mode while playing, all of it is written to the pattern.");
+  ImGui::BeginDisabled(!midiMpe_);
+  ImGui::SetNextItemWidth(120);
+  ImGui::SliderInt("MPE pitch range", &midiMpeRange_, 1, 96, "%d semitones");
+  ImGui::EndDisabled();
   ImGui::EndMenu();
 }
 
 void App::midiEvents() {
   for (const MidiMessage& m : midi_.drain()) {
-    int type = m.status & 0xf0;
-    if (type == 0x90 && m.data2 > 0)
-      midiNoteOn(m.data1, m.data2);
-    else if (type == 0x80 || type == 0x90)
-      midiNoteOff(m.data1);
-    else if (type == 0xc0 && m.data1 < song_.instruments.size())
+    int type = m.status & 0xf0, mch = m.status & 15;
+    int id = midiMpe_ ? m.data1 + 256 * mch : m.data1;
+    if (type == 0x90 && m.data2 > 0) {
+      int ch = midiNoteOn(m.data1, m.data2, id);
+      if (midiMpe_ && ch >= 0) {
+        MpeChannel& mc = mpe_[mch];
+        mc.voice = ch;
+        mc.velVol = midiVelocity_ ? std::clamp((int)m.data2, 1, 127) : 127;
+        engine_->setBend(ch, mc.bend);  // the controller may have set it before the note
+        if (mc.bend != 0) recordExpression(ch, mc.bend, -1, 0, -1);
+      }
+    } else if (type == 0x80 || type == 0x90) {
+      midiNoteOff(id);
+      if (midiMpe_) mpe_[mch].voice = -1;
+    } else if (type == 0xc0 && m.data1 < song_.instruments.size()) {
       curIns_ = m.data1;  // program change picks the instrument
-    else if (type == 0xe0)
+    } else if (type == 0xe0 && midiMpe_) {
+      // MPE: this note's own pitch bend.
+      MpeChannel& mc = mpe_[mch];
+      mc.bend = ((m.data1 | (m.data2 << 7)) - 8192) / 8192.0 * midiMpeRange_;
+      if (mc.voice >= 0) {
+        engine_->setBend(mc.voice, mc.bend);
+        recordExpression(mc.voice, mc.bend, -1, 0, -1);
+      }
+    } else if (type == 0xe0) {
       midiPitchWheel(m.data1 | (m.data2 << 7));
+    } else if (type == 0xb0 && m.data1 == 74 && midiMpe_ && mpe_[mch].voice >= 0) {
+      // MPE slide (timbre): the instrument's filter cutoff, like 13xx.
+      int v = m.data2 * 2;
+      engine_->setCutoff(mpe_[mch].voice, v);
+      recordExpression(mpe_[mch].voice, std::nan(""), 0x13, v, -1);
+    } else if (type == 0xd0 && midiMpe_ && mpe_[mch].voice >= 0) {
+      // MPE pressure: shapes the note's volume, from 30% to its velocity.
+      int vol = std::clamp((int)std::lround(mpe_[mch].velVol * (0.3 + 0.7 * m.data1 / 127.0)), 1, 127);
+      engine_->setVolume(mpe_[mch].voice, vol);
+      recordExpression(mpe_[mch].voice, std::nan(""), -1, 0, vol);
+    }
   }
 }
 
+void App::recordExpression(int ch, double bend, int cmd, int val, int vol) {
+  if (!editMode_ || !engine_->playing() || ch < 0 || ch >= song_.channelCount()) return;
+  int order = engine_->order(), row = engine_->row();
+  auto it = midiRecRow_.find(ch);
+  if (it == midiRecRow_.end() || it->second != std::make_pair(order, row)) {
+    pushUndo(ch, ch, order);  // one undo step per row and channel
+    midiRecRow_[ch] = {order, row};
+  }
+  Cell* cell = song_.cell(ch, order, row, true);
+  if (!cell) return;
+  if (!std::isnan(bend)) {
+    int bcmd, bval;
+    bendEffect(bend, bcmd, bval);
+    removeCellEffect(*cell, 0xE8);
+    removeCellEffect(*cell, 0xE9);
+    putEffect(ch, *cell, bcmd, bval);
+    if (bend != 0) midiBent_.insert(ch);
+    else midiBent_.erase(ch);
+  }
+  if (cmd >= 0) putEffect(ch, *cell, cmd, val);
+  if (vol >= 0) cell->vol = (int16_t)vol;
+  dirty_ = true;
+}
+
 // The wheel bends the channels the MIDI keyboard plays on (the piano roll's
-// voice channels). In Record mode while playing it is written as E8xx.
+// voice channels). In Record mode while playing it is written as E8/E9.
 void App::midiPitchWheel(int value) {
   midiBend_ = (value - 8192) / 8192.0 * midiBendRange_;
   int nch = song_.channelCount();
   if (curCh_ >= nch) return;
   int voices = std::clamp(prVoices_, 1, nch - curCh_);
-  for (int c = curCh_; c < curCh_ + voices; c++) engine_->setBend(c, midiBend_);
-  if (!editMode_ || !engine_->playing()) return;
-
-  int order = engine_->order(), row = engine_->row();
-  int val = std::clamp((int)std::lround(midiBend_ * 16) + 0x80, 0, 0xff);
-  if (order != midiBendOrder_ || row != midiBendRow_) {
-    pushUndo(curCh_, curCh_ + voices - 1, order);  // one undo step per row
-    midiBendOrder_ = order;
-    midiBendRow_ = row;
-  }
   for (int c = curCh_; c < curCh_ + voices; c++) {
-    Cell* cell = song_.cell(c, order, row, true);
-    if (cell) putEffect(c, *cell, 0xE8, val);
+    engine_->setBend(c, midiBend_);
+    recordExpression(c, midiBend_, -1, 0, -1);
   }
-  dirty_ = true;
 }
 
 // MIDI note 60 (middle C) is C-4, like the computer keyboard at octave 4.
 // Held notes spread over the piano roll's voice channels. In Record mode
 // they are written at the cursor (stopped: the cursor moves on once every
 // key is up) or at the playing row (live: key up writes a note off).
-void App::midiNoteOn(int key, int velocity) {
-  if (midiHeld_.count(key)) midiNoteOff(key);
+int App::midiNoteOn(int key, int velocity, int id) {
+  if (id < 0) id = key;
+  if (midiHeld_.count(id)) midiNoteOff(id);
   int nch = song_.channelCount();
-  if (curCh_ >= nch) return;
+  if (curCh_ >= nch) return -1;
   int note = std::clamp(key - 12, 0, 119);
-  int voices = std::clamp(prVoices_, 1, nch - curCh_);
+  // MPE needs a channel per finger: 8 voices when Voices is left at 1.
+  int voices = std::clamp(midiMpe_ && prVoices_ == 1 ? 8 : prVoices_, 1, nch - curCh_);
   auto used = [&](int c) {
     for (auto& h : midiHeld_)
       if (h.second.ch == c) return true;
@@ -668,11 +726,12 @@ void App::midiNoteOn(int key, int velocity) {
     held = {ch, order, row};
     if (!live) midiChord_ = true;
   }
-  midiHeld_[key] = held;
+  midiHeld_[id] = held;
+  return ch;
 }
 
-void App::midiNoteOff(int key) {
-  auto it = midiHeld_.find(key);
+void App::midiNoteOff(int id) {
+  auto it = midiHeld_.find(id);
   if (it == midiHeld_.end()) return;
   MidiHeld h = it->second;
   midiHeld_.erase(it);
@@ -689,6 +748,9 @@ void App::midiNoteOff(int key) {
         c->note = NOTE_OFF;
         c->ins = -1;
       }
+      if (midiBent_.erase(h.ch) && c && c->note == NOTE_OFF && cellEffect(*c, 0xE8) == -1 &&
+          cellEffect(*c, 0xE9) == -1)
+        putEffect(h.ch, *c, 0xE8, 0x80);  // the next note starts unbent
     }
   }
   if (midiChord_ && midiHeld_.empty()) {

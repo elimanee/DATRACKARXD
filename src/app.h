@@ -47,11 +47,16 @@ int scancodeToNote(SDL_Scancode sc);
 // A note as the piano roll sees it: a start row and a length in rows.
 struct PRNote {
   int start, len, note, ins, vol;
-  int ch = 0;          // channel the note lives in
-  bool slide = false;  // glides from the previous note over its length (03xx)
+  int ch = 0;  // channel the note lives in
+  // Per-note expression (MPE style), one entry per row of the note. They
+  // live in the note's channel as E8/E9 bends, 13xx cutoffs and volumes,
+  // and move with the note.
+  std::vector<float> bend{};    // semitones from the note, NaN = keeps the last value
+  std::vector<int16_t> press{}; // volume 00-7F on the rows after the first, -1 = none
+  std::vector<int16_t> timbre{};  // filter cutoff 00-FF (13xx), -1 = none
 };
 
-enum class PRDrag { None, Move, Resize, Select, Erase, Velocity, Pitch, PitchErase, Key };
+enum class PRDrag { None, Move, Resize, Select, Erase, Velocity, Pitch, PitchErase, Bend, BendErase, Lane, LaneErase, Key };
 
 enum class FileDialogMode { None, Open, Save, ExportWav, LoadSample, LoadInstrument, SaveInstrument, ExportMidi, ExportOgg, ExportPlayer };
 enum class PendingAction { None, New, Open, Demo, Quit };
@@ -105,7 +110,18 @@ class App {
   bool midiVelocity_ = true;           // velocity -> volume column
   int midiBendRange_ = 2;              // pitch wheel range, semitones
   double midiBend_ = 0;                // wheel position, semitones
-  int midiBendOrder_ = -1, midiBendRow_ = -1;  // row of the last recorded bend (undo step)
+  std::map<int, std::pair<int, int>> midiRecRow_;  // channel -> (order, row) of its last undo step
+  std::set<int> midiBent_;  // channels with a recorded bend, reset with E880 at the note off
+  // MPE controller: one note per MIDI channel, each with its own bend,
+  // slide (CC74 -> filter cutoff) and pressure (-> volume).
+  bool midiMpe_ = false;
+  int midiMpeRange_ = 48;  // MPE per-note pitch range, semitones
+  struct MpeChannel {
+    int voice = -1;   // song channel of the note on this MIDI channel
+    int velVol = 127; // the note's velocity as a volume
+    double bend = 0;
+  };
+  MpeChannel mpe_[16];
   struct MidiHeld {
     int ch, order, row;  // where the note was written (row -1 = not written)
   };
@@ -138,9 +154,11 @@ class App {
   bool prGhosts_ = true;
   int prLength_ = 4;                   // length of new notes, in rows
   int prVoices_ = 1;                   // channels used for chords (1 = this channel only)
-  int prLane_ = 0;                     // lane under the notes: 0 volume, 1 pitch bend
+  int prLane_ = 0;                     // lane under the notes: 0 volume, 1 pitch bend, 2 pressure, 3 slide
   int prBendView_ = 2;                 // pitch lane height, in semitones each way
-  bool prSlide_ = false;               // new notes are slide notes
+  bool prMpe_ = false;                 // MPE editing: dragging a note bends it
+  int prBendKey_ = -1;                 // note being bent (noteKey)
+  float prLastBend_ = 0;
   int prLastRow_ = -1, prLastVal_ = 0x80;  // last row and value drawn in the pitch lane
   std::set<int> prSel_;                // selected notes (start * 256 + note)
   int prViewCh_ = -1, prViewOrder_ = -1;
@@ -188,9 +206,14 @@ class App {
   void afterSongReplaced();
   void midiMenu();
   void midiEvents();
-  void midiNoteOn(int key, int velocity);
-  void midiNoteOff(int key);
+  // id tells held notes apart (the key, or key + 256 * channel with MPE);
+  // returns the song channel playing the note, or -1.
+  int midiNoteOn(int key, int velocity, int id = -1);
+  void midiNoteOff(int id);
   void midiPitchWheel(int value);
+  // Writes an expression at the playing row of a channel (Record mode):
+  // a bend (E8/E9), another effect, and/or a volume (-1 = none).
+  void recordExpression(int ch, double bend, int cmd, int val, int vol);
 
   // ui_pattern.cpp
   void patternWindow();

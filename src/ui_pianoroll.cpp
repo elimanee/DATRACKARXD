@@ -21,27 +21,52 @@ std::vector<PRNote> readNotes(const Pattern* p, int len) {
     const Cell& c = p->rows[r];
     if (c.note == NOTE_EMPTY) continue;
     if (!out.empty() && out.back().start + out.back().len > r) out.back().len = r - out.back().start;
-    if (c.note >= 0) {
-      PRNote n{r, len - r, c.note, c.ins, c.vol};
-      n.slide = cellEffect(c, 0x03) != -1;
-      out.push_back(n);
+    if (c.note >= 0) out.push_back({r, len - r, c.note, c.ins, c.vol});
+  }
+  // Expressions on the note's rows.
+  for (PRNote& n : out) {
+    n.bend.assign(n.len, std::nanf(""));
+    n.press.assign(n.len, -1);
+    n.timbre.assign(n.len, -1);
+    for (int k = 0; k < n.len; k++) {
+      const Cell& c = p->rows[n.start + k];
+      n.bend[k] = (float)cellBend(c);
+      int t = cellEffect(c, 0x13);
+      n.timbre[k] = (int16_t)(t >= 0 ? t : -1);
+      if (k > 0 && c.note == NOTE_EMPTY) n.press[k] = c.vol;
     }
   }
   return out;
 }
 
-// Rewrites the note column. Instrument, volume and the slide (03xx) move
-// with their note; other effects stay on their rows. On equal start rows the
-// later note wins. A slide note glides from the previous note over its own
-// length: its 03xx speed comes from the interval and the length.
-void writeNotes(Pattern* p, int len, std::vector<PRNote> notes, int ticksPerRow, int& effectCols) {
+bool hasBend(const PRNote& n) {
+  for (float b : n.bend)
+    if (!std::isnan(b) && b != 0) return true;
+  return false;
+}
+
+// Rewrites the note column. Instrument, volume and the note's expressions
+// (bends, cutoffs, volumes on its rows) move with the note; other effects
+// stay on their rows. On equal start rows the later note wins.
+void writeNotes(Pattern* p, int len, std::vector<PRNote> notes, int& effectCols) {
+  // Take the old notes' expressions out first.
+  for (const PRNote& o : readNotes(p, len)) {
+    for (int k = 0; k < o.len; k++) {
+      Cell& c = p->rows[o.start + k];
+      removeCellEffect(c, 0xE8);
+      removeCellEffect(c, 0xE9);
+      removeCellEffect(c, 0x13);
+      if (k > 0 && c.note == NOTE_EMPTY) c.vol = -1;
+    }
+    int end = o.start + o.len;
+    if (end < len && cellEffect(p->rows[end], 0xE8) == 0x80) removeCellEffect(p->rows[end], 0xE8);
+  }
   for (int r = 0; r < len; r++) {
     Cell& c = p->rows[r];
     if (c.note != NOTE_EMPTY) {
       c.note = NOTE_EMPTY;
       c.ins = -1;
       c.vol = -1;
-      removeCellEffect(c, 0x03);
     }
   }
   std::stable_sort(notes.begin(), notes.end(), [](const PRNote& a, const PRNote& b) { return a.start < b.start; });
@@ -57,14 +82,24 @@ void writeNotes(Pattern* p, int len, std::vector<PRNote> notes, int ticksPerRow,
     c.note = (int16_t)std::clamp(n.note, 0, NOTE_COUNT - 1);
     c.ins = (int16_t)n.ins;
     c.vol = (int16_t)n.vol;
-    if (n.slide) {
-      int from = i > 0 ? uniq[i - 1].note : n.note;
-      int ticks = std::max(1, n.len) * std::max(1, ticksPerRow);
-      int speed = std::clamp((int)std::ceil(std::abs(n.note - from) * 32.0 / ticks), 1, 255);
-      putCellEffect(c, effectCols, 0x03, speed);
-    }
     int end = n.start + std::max(1, n.len);
     int next = i + 1 < uniq.size() ? uniq[i + 1].start : len;
+    int span = std::min({end, next, len}) - n.start;
+    for (int k = 0; k < span; k++) {
+      Cell& e = p->rows[n.start + k];
+      if (k < (int)n.bend.size() && !std::isnan(n.bend[k])) {
+        int cmd, val;
+        bendEffect(n.bend[k], cmd, val);
+        removeCellEffect(e, 0xE8);
+        removeCellEffect(e, 0xE9);
+        putCellEffect(e, effectCols, cmd, val);
+      }
+      if (k < (int)n.timbre.size() && n.timbre[k] >= 0) putCellEffect(e, effectCols, 0x13, n.timbre[k]);
+      if (k > 0 && k < (int)n.press.size() && n.press[k] >= 0) e.vol = n.press[k];
+    }
+    // A bent note hands the channel back unbent.
+    int stop = n.start + span;
+    if (hasBend(n) && stop < len && std::isnan(cellBend(p->rows[stop]))) putCellEffect(p->rows[stop], effectCols, 0xE8, 0x80);
     if (end < next && end < len) p->rows[end].note = NOTE_OFF;
   }
 }
@@ -169,10 +204,12 @@ void App::pianoRollWindow() {
   ImGui::SameLine();
   ImGui::Checkbox("Ghosts", &prGhosts_);
   ImGui::SameLine();
-  ImGui::Checkbox("Slide", &prSlide_);
+  ImGui::Checkbox("MPE", &prMpe_);
   if (ImGui::IsItemHovered())
-    ImGui::SetTooltip("New notes are slide notes: they glide from the previous note over their length.\n"
-                      "Alt+click or S toggles slide on notes.");
+    ImGui::SetTooltip("Per-note expression, like MPE in Ableton:\n"
+                      "drag on a note to bend its pitch (Ctrl: whole semitones), right-drag to clear,\n"
+                      "double-click to reset it. The Press and Slide lanes edit each note's volume and\n"
+                      "timbre (filter cutoff, 13xx). Use Voices for chords: each note gets its own channel.");
   ImGui::SameLine();
   curIns_ = std::clamp(curIns_, 0, std::max(0, (int)song_.instruments.size() - 1));
   char insLabel[128];
@@ -210,7 +247,7 @@ void App::pianoRollWindow() {
     ImGui::End();
     return;
   }
-  const float keyW = 46, rulerH = 18, velH = std::min(70.0f, avail.y * 0.2f), gap = 4;
+  const float keyW = 46, rulerH = 18, velH = std::min(100.0f, avail.y * 0.25f), gap = 4;
   ImVec2 g0(p0.x + keyW, p0.y + rulerH), g1(p0.x + avail.x, p0.y + avail.y - velH - gap);
   ImVec2 v0(g0.x, g1.y + gap), v1(g1.x, p0.y + avail.y);
   float zx = prZoomX_, zy = prZoomY_;
@@ -286,21 +323,8 @@ void App::pianoRollWindow() {
     const PRNote& n = notes[i];
     float x0 = rowX((float)n.start), x1 = rowX((float)(n.start + n.len)), y = noteY((float)n.note);
     bool sel = prSel_.count(noteKey(n)) > 0;
-    if (x1 >= g0.x && x0 <= g1.x && n.slide) {
-      // The glide: from the previous note of the same channel to this one.
-      int from = n.note, best = -1;
-      for (const PRNote& o : notes)
-        if (o.ch == n.ch && o.start < n.start && o.start > best) {
-          best = o.start;
-          from = o.note;
-        }
-      float ya = noteY((float)from) + zy / 2, yb = y + zy / 2;
-      dl->AddLine(ImVec2(x0, ya), ImVec2(x1, yb), IM_COL32(255, 255, 255, 200), 2.0f);
-      dl->AddTriangleFilled(ImVec2(x0 + 1, y + 1), ImVec2(x0 + 1, y + zy - 1), ImVec2(x0 + std::min(10.0f, zy), y + zy / 2),
-                            IM_COL32(255, 255, 255, 230));
-    }
     if (x1 >= g0.x && x0 <= g1.x) {
-      dl->AddRectFilled(ImVec2(x0 + 1, y + 1), ImVec2(x1 - 1, y + zy - 1), insColor(n.ins, n.slide ? (sel ? 170 : 110) : sel ? 255 : 210), 3);
+      dl->AddRectFilled(ImVec2(x0 + 1, y + 1), ImVec2(x1 - 1, y + zy - 1), insColor(n.ins, prMpe_ && hasBend(n) ? (sel ? 170 : 120) : sel ? 255 : 210), 3);
       dl->AddRect(ImVec2(x0 + 1, y + 1), ImVec2(x1 - 1, y + zy - 1), sel ? IM_COL32(255, 255, 255, 255) : IM_COL32(0, 0, 0, 120), 3, 0,
                   sel ? 2.0f : 1.0f);
       if (x1 - x0 > 30 && zy >= 10) {
@@ -311,6 +335,24 @@ void App::pianoRollWindow() {
     if (inGrid && m.x >= x0 && m.x < x1 && m.y >= y && m.y < y + zy) {
       hoverNote = (int)i;
       hoverEdge = m.x > x1 - std::clamp((x1 - x0) / 3, 3.0f, 8.0f);
+    }
+  }
+
+  // Per-note pitch curves (MPE): the line leaves the note's center and bends
+  // toward other pitches, gliding over each row like the engine does.
+  for (const PRNote& n : notes) {
+    if (!hasBend(n)) continue;
+    float cur = 0;
+    ImVec2 prev(rowX((float)n.start), noteY((float)n.note) + zy / 2);
+    for (int k = 0; k < n.len && k < (int)n.bend.size(); k++) {
+      bool set = !std::isnan(n.bend[k]);
+      if (set) cur = n.bend[k];
+      ImVec2 pt(rowX((float)(n.start + k + 1)), noteY(n.note + cur) + zy / 2);
+      if (pt.x >= g0.x && prev.x <= g1.x) {
+        dl->AddLine(prev, pt, IM_COL32(255, 255, 255, 230), 2.0f);
+        if (set) dl->AddCircleFilled(pt, 3.0f, IM_COL32(255, 255, 255, 255));
+      }
+      prev = pt;
     }
   }
 
@@ -360,20 +402,23 @@ void App::pianoRollWindow() {
   }
   dl->PopClipRect();
 
-  // Lane under the notes: velocity (volume column) or pitch bend (E8xx).
+  // Lane under the notes: velocity (volume column), the channel's pitch
+  // bend (E8/E9), or the notes' pressure (volume) and slide (13xx cutoff).
   dl->AddRectFilled(v0, v1, T.scopeBg);
   ImVec2 lk0(p0.x, v0.y);
   auto laneLabel = [&](int i, const char* label) {
     ImVec2 a(lk0.x + 2, v0.y + 2 + i * 17.0f);
-    bool on = (i == 0 && prLane_ == 0) || (i == 1 && prLane_ == 1);
+    bool on = i == prLane_;
     if (on) dl->AddRectFilled(a, ImVec2(g0.x - 3, a.y + 16), T.header, 3);
     dl->AddText(ImVec2(a.x + 3, a.y + 1), on ? T.headerText : T.rowNum, label);
   };
   laneLabel(0, "Vol");
   laneLabel(1, "Pitch");
+  laneLabel(2, "Press");
+  laneLabel(3, "Slide");
   char rangeLabel[16];
   std::snprintf(rangeLabel, sizeof(rangeLabel), "+-%d", prBendView_);
-  if (prLane_ == 1) laneLabel(2, rangeLabel);
+  if (prLane_ == 1) laneLabel(4, rangeLabel);
   dl->PushClipRect(v0, v1, true);
   float vh = v1.y - v0.y - 4;
   float mid = (v0.y + v1.y) / 2, half = (v1.y - v0.y) / 2 - 3;
@@ -390,6 +435,28 @@ void App::pianoRollWindow() {
       dl->AddLine(ImVec2(x, v1.y - 2), ImVec2(x, top), col, 2.0f);
       dl->AddCircleFilled(ImVec2(x, top), 3.5f, col);
     }
+  } else if (prLane_ >= 2) {
+    // Each note's pressure (volume) or slide (cutoff) over its rows.
+    bool press = prLane_ == 2;
+    float scale = press ? 127.0f : 255.0f;
+    for (const PRNote& n : notes) {
+      ImU32 col = insColor(n.ins, 255);
+      int cur = press ? (n.vol < 0 ? 0x7f : n.vol) : -1;
+      for (int k = 0; k < n.len; k++) {
+        int v = press ? (k > 0 && k < (int)n.press.size() && n.press[k] >= 0 ? n.press[k] : -1)
+                      : (k < (int)n.timbre.size() ? n.timbre[k] : -1);
+        bool set = v >= 0 || (press && k == 0);
+        if (v >= 0) cur = v;
+        if (cur < 0) continue;
+        float x0 = rowX((float)(n.start + k)), x1 = rowX((float)(n.start + k + 1));
+        if (x1 < v0.x || x0 > v1.x) continue;
+        float y = v1.y - 2 - vh * cur / scale;
+        dl->AddLine(ImVec2(x0, y), ImVec2(x1, y), col, 2.0f);
+        if (set) dl->AddCircleFilled(ImVec2(x0 + 2, y), 3.0f, col);
+      }
+    }
+    dl->AddText(ImVec2(v1.x - 330, v0.y + 2), T.rowNum,
+                press ? "Pressure: each note's volume over time" : "Slide: each note's filter cutoff (13xx, filter on)");
   } else {
     // Semitone lines, the zero line, then the bend as the engine plays it:
     // each E8xx glides over its row and the value stays.
@@ -401,18 +468,18 @@ void App::pianoRollWindow() {
     for (int o = 0; o < curOrder_; o++)
       if (const Pattern* pp = song_.pattern(ch, song_.orders[o][ch]))
         for (int r = 0; r < len; r++) {
-          int v = cellEffect(pp->rows[r], 0xE8);
-          if (v != -1) cur = ((v < 0 ? 0x80 : v) - 0x80) / 16.0;
+          double b = cellBend(pp->rows[r]);
+          if (!std::isnan(b)) cur = b;
         }
     const Pattern* pp = song_.pattern(ch, song_.orders[curOrder_][ch]);
     ImU32 lineCol = IM_COL32(120, 220, 255, 255);
     for (int r = 0; r < len; r++) {
-      int v = pp ? cellEffect(pp->rows[r], 0xE8) : -1;
-      double target = v == -1 ? cur : ((v < 0 ? 0x80 : v) - 0x80) / 16.0;
+      double b = pp ? cellBend(pp->rows[r]) : std::nan("");
+      double target = std::isnan(b) ? cur : b;
       float x0 = rowX((float)r), x1 = rowX((float)(r + 1));
       if (x1 >= v0.x && x0 <= v1.x) {
         dl->AddLine(ImVec2(x0, bendY(cur)), ImVec2(x1, bendY(target)), lineCol, 2.0f);
-        if (v != -1) dl->AddCircleFilled(ImVec2(x0, bendY(target)), 3.0f, lineCol);
+        if (!std::isnan(b)) dl->AddCircleFilled(ImVec2(x0, bendY(target)), 3.0f, lineCol);
       }
       cur = target;
     }
@@ -434,13 +501,12 @@ void App::pianoRollWindow() {
       prUndone_ = true;
     }
     if (voices == 1) {
-      writeNotes(song_.pattern(ch, song_.orders[curOrder_][ch], true), len, std::move(out), song_.speed(),
-                 song_.channels[ch].effectCols);
+      writeNotes(song_.pattern(ch, song_.orders[curOrder_][ch], true), len, std::move(out), song_.channels[ch].effectCols);
     } else {
       auto perVoice = allocateVoices(std::move(out), ch, voices);
       for (int v = 0; v < voices; v++) {
         Pattern* p = song_.pattern(ch + v, song_.orders[curOrder_][ch + v], !perVoice[v].empty());
-        if (p) writeNotes(p, len, perVoice[v], song_.speed(), song_.channels[ch + v].effectCols);
+        if (p) writeNotes(p, len, perVoice[v], song_.channels[ch + v].effectCols);
       }
     }
     dirty_ = true;
@@ -494,18 +560,26 @@ void App::pianoRollWindow() {
       }
     } else if (inLaneKeys) {
       int i = (int)((m.y - v0.y - 2) / 17);
-      if (i == 0 || i == 1) prLane_ = i;
-      if (i == 2 && prLane_ == 1) prBendView_ = prBendView_ >= 8 ? 1 : prBendView_ * 2;
+      if (i >= 0 && i <= 3) prLane_ = i;
+      if (i == 4 && prLane_ == 1) prBendView_ = prBendView_ >= 8 ? 1 : prBendView_ * 2;
     } else if (inVel) {
-      beginDrag(prLane_ == 0 ? PRDrag::Velocity : PRDrag::Pitch, notes, -1);
+      beginDrag(prLane_ == 0 ? PRDrag::Velocity : prLane_ == 1 ? PRDrag::Pitch : PRDrag::Lane, notes, -1);
       prLastRow_ = -1;
     } else if (inGrid) {
-      if (hoverNote >= 0 && io.KeyAlt) {
-        // Alt+click: turn the note into a slide note, or back.
+      if (hoverNote >= 0 && prMpe_ && ImGui::IsMouseDoubleClicked(ImGuiMouseButton_Left)) {
+        // Double-click in MPE mode: reset the note's expressions.
         std::vector<PRNote> out = notes;
-        out[hoverNote].slide = !out[hoverNote].slide;
+        out[hoverNote].bend.assign(out[hoverNote].len, std::nanf(""));
+        out[hoverNote].press.assign(out[hoverNote].len, -1);
+        out[hoverNote].timbre.assign(out[hoverNote].len, -1);
         prUndone_ = false;
         writeBack(out);
+      } else if (hoverNote >= 0 && prMpe_ && !hoverEdge) {
+        // MPE: drag along the note to bend its pitch (the right edge still resizes).
+        beginDrag(PRDrag::Bend, notes, hoverNote);
+        prBendKey_ = noteKey(notes[hoverNote]);
+        prLastRow_ = -1;
+        preview(notes[hoverNote].note);
       } else if (hoverNote >= 0) {
         int start = notes[hoverNote].start, key = noteKey(notes[hoverNote]);
         if (io.KeyShift) {
@@ -526,7 +600,6 @@ void App::pianoRollWindow() {
         std::vector<PRNote> base = notes;
         PRNote added{row, prLength_, note, curIns_, -1};
         added.ch = -1;  // any free voice
-        added.slide = prSlide_;
         base.push_back(added);
         prUndone_ = false;
         writeBack(base);
@@ -543,11 +616,16 @@ void App::pianoRollWindow() {
       }
     }
   }
-  if (ImGui::IsMouseClicked(ImGuiMouseButton_Right) && inGrid) {
+  if (ImGui::IsMouseClicked(ImGuiMouseButton_Right) && inGrid && prMpe_ && hoverNote >= 0) {
+    beginDrag(PRDrag::BendErase, notes, hoverNote);
+    prBendKey_ = noteKey(notes[hoverNote]);
+    prLastRow_ = -1;
+  } else if (ImGui::IsMouseClicked(ImGuiMouseButton_Right) && inGrid) {
     prDrag_ = PRDrag::Erase;
     prUndone_ = false;
-  } else if (ImGui::IsMouseClicked(ImGuiMouseButton_Right) && inVel && prLane_ == 1) {
-    prDrag_ = PRDrag::PitchErase;
+  } else if (ImGui::IsMouseClicked(ImGuiMouseButton_Right) && inVel && prLane_ >= 1) {
+    if (prLane_ == 1) prDrag_ = PRDrag::PitchErase;
+    else beginDrag(PRDrag::LaneErase, notes, -1);
     prUndone_ = false;
     prLastRow_ = -1;
   }
@@ -617,6 +695,67 @@ void App::pianoRollWindow() {
         if (hit) writeBack(out);
         break;
       }
+      case PRDrag::Bend:
+      case PRDrag::BendErase: {
+        // Bend the grabbed note: the mouse height is the pitch for the row
+        // under it; rows skipped by a fast drag are interpolated.
+        std::vector<PRNote> out = notes;
+        int idx = -1;
+        for (size_t i = 0; i < out.size(); i++)
+          if (noteKey(out[i]) == prBendKey_) idx = (int)i;
+        if (idx < 0) break;
+        PRNote& n = out[idx];
+        n.bend.resize(n.len, std::nanf(""));
+        int row = std::clamp(xRow(m.x), n.start, n.start + n.len - 1);
+        float semis = std::clamp(prTop_ - (m.y - g0.y) / zy - 0.5f - n.note, -32.0f, 31.75f);
+        semis = io.KeyCtrl ? std::round(semis) : std::round(semis * 16) / 16;
+        if (std::abs(semis) > 8) semis = std::round(semis * 4) / 4;  // E9 steps
+        int r0 = prLastRow_ < 0 ? row : prLastRow_;
+        float b0 = prLastRow_ < 0 ? semis : prLastBend_;
+        for (int r = std::min(r0, row); r <= std::max(r0, row); r++) {
+          float v = r0 == row ? semis : b0 + (semis - b0) * (r - r0) / (row - r0);
+          n.bend[r - n.start] = prDrag_ == PRDrag::Bend ? std::round(v * 16) / 16 : std::nanf("");
+        }
+        prLastRow_ = row;
+        prLastBend_ = semis;
+        writeBack(out);
+        if (prDrag_ == PRDrag::Bend && !playing) engine_->setBend(ch, semis);
+        break;
+      }
+      case PRDrag::Lane:
+      case PRDrag::LaneErase: {
+        // Pressure or slide for the notes under the mouse (the selected ones
+        // if some are selected), interpolated across skipped rows.
+        bool press = prLane_ == 2;
+        int row = std::clamp(xRow(m.x), 0, len - 1);
+        int val = std::clamp((int)std::lround((v1.y - 2 - m.y) / vh * (press ? 127 : 255)), 0, press ? 127 : 255);
+        int r0 = prLastRow_ < 0 ? row : prLastRow_, val0 = prLastRow_ < 0 ? val : prLastVal_;
+        std::vector<PRNote> out = notes;
+        bool anySel = false;
+        for (const PRNote& n : out) anySel |= prSel_.count(noteKey(n)) > 0;
+        bool hit = false;
+        for (int r = std::min(r0, row); r <= std::max(r0, row); r++) {
+          int v = r0 == row ? val : val0 + (val - val0) * (r - r0) / (row - r0);
+          for (PRNote& n : out) {
+            if (r < n.start || r >= n.start + n.len || (anySel && !prSel_.count(noteKey(n)))) continue;
+            int k = r - n.start;
+            n.press.resize(n.len, -1);
+            n.timbre.resize(n.len, -1);
+            if (press && k == 0) {
+              if (prDrag_ == PRDrag::Lane) n.vol = v;
+            } else if (press) {
+              n.press[k] = (int16_t)(prDrag_ == PRDrag::Lane ? v : -1);
+            } else {
+              n.timbre[k] = (int16_t)(prDrag_ == PRDrag::Lane ? v : -1);
+            }
+            hit = true;
+          }
+        }
+        prLastRow_ = row;
+        prLastVal_ = val;
+        if (hit) writeBack(out);
+        break;
+      }
       case PRDrag::Pitch:
       case PRDrag::PitchErase: {
         // Draw E8xx on every row the mouse crosses, interpolating between
@@ -665,6 +804,7 @@ void App::pianoRollWindow() {
         break;
     }
   } else if (prDrag_ != PRDrag::None) {
+    if (prDrag_ == PRDrag::Bend && !playing) engine_->setBend(ch, 0);
     prDrag_ = PRDrag::None;
     preview(-1);
   }
@@ -698,17 +838,6 @@ void App::pianoRollWindow() {
     if (ImGui::IsKeyPressed(ImGuiKey_LeftArrow)) transform(-1, 0, false);
     if (ImGui::IsKeyPressed(ImGuiKey_RightArrow)) transform(1, 0, false);
     if (ImGui::IsKeyPressed(ImGuiKey_Escape)) prSel_.clear();
-    if (ImGui::IsKeyPressed(ImGuiKey_S) && !io.KeyCtrl && !prSel_.empty()) {
-      // S: toggle slide on the selected notes.
-      std::vector<PRNote> out = notes;
-      bool any = false;
-      for (PRNote& n : out)
-        if (prSel_.count(noteKey(n))) any |= !n.slide;
-      for (PRNote& n : out)
-        if (prSel_.count(noteKey(n))) n.slide = any;
-      prUndone_ = false;
-      writeBack(out);
-    }
     if (io.KeyCtrl && ImGui::IsKeyPressed(ImGuiKey_A)) {
       prSel_.clear();
       for (const PRNote& n : notes) prSel_.insert(noteKey(n));

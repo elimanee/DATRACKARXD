@@ -216,6 +216,10 @@ bool putCellEffect(Cell& cell, int& effectCols, int cmd, int val);
 void removeCellEffect(Cell& cell, int cmd);
 // The value of effect cmd in the cell, or -1 (-2 if present without a value).
 int cellEffect(const Cell& cell, int cmd);
+// Pitch bend effects: E8xx (1/16 semitone, +-8) or E9xx (1/4 semitone, +-32).
+void bendEffect(double semitones, int& cmd, int& val);
+// The bend set in the cell (E8/E9), or NaN if none.
+double cellBend(const Cell& cell);
 
 // Reads a WAV file into a sample. Returns false and sets err on failure.
 bool loadWavSample(const std::string& path, Sample& out, std::string& err);
