@@ -128,13 +128,26 @@ bool readOwnPayload(PlayerPayload& out) {
     if (k == "logo") out.logo = v;
     else if (k == "scroll") out.scroll = v;
     else if (k == "title") out.title = v;
+    else out.style.set(k, v);
   }
   out.song.assign(std::istreambuf_iterator<char>(ss), std::istreambuf_iterator<char>());
   return !out.song.empty();
 }
 
-bool writePlayer(const std::string& path, const PlayerPayload& payload, std::string& err) {
+std::string findKeygenApp() {
   fs::path self = selfPath();
+  if (self.empty()) return "";
+#ifdef _WIN32
+  fs::path p = self.parent_path() / "datrackarxd-keygen.exe";
+#else
+  fs::path p = self.parent_path() / "datrackarxd-keygen";
+#endif
+  std::error_code ec;
+  return fs::is_regular_file(p, ec) ? p.string() : "";
+}
+
+bool writePlayer(const std::string& path, const PlayerPayload& payload, std::string& err, const std::string& templatePath) {
+  fs::path self = templatePath.empty() ? selfPath() : fs::path(templatePath);
   std::vector<char> exe;
   if (self.empty() || !readAll(self, exe)) {
     err = "Cannot read the program file";
@@ -145,7 +158,7 @@ bool writePlayer(const std::string& path, const PlayerPayload& payload, std::str
   split(exe, exeSize, old);  // a player exporting again drops its own song
 
   std::string body = "logo=" + esc(payload.logo) + "\ntitle=" + esc(payload.title) + "\nscroll=" + esc(payload.scroll) +
-                     "\n\n" + payload.song;
+                     "\n" + payload.style.toText() + "\n" + payload.song;
   fs::path out(path);
   {
     std::ofstream f(out, std::ios::binary | std::ios::trunc);

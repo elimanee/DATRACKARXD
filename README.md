@@ -21,6 +21,7 @@ Furnace, DefleMask, FamiTracker, MOD, XM, IT, S3M et MIDI.
 - **Presets d'instruments** : `.dti` (sauver / charger), import `.fui` (Furnace) et `.wav`
 - **Import** des formats `.fur` (Furnace), `.dmf` (DefleMask), `.ftm` / `.dnm` / `.0cc` (FamiTracker), `.mod`, `.xm`, `.it`, `.s3m` et `.mid`
 - **Export** WAV, OGG, MIDI, et **lecteur keygen** : un programme autonome qui joue le morceau avec logo, étoiles et scroller
+- **DATRACKARXD Keygen** : une appli séparée pour fabriquer ces lecteurs, avec aperçu en direct
 - Thèmes : Furnace, **Keygen** (néon, avec un scroller sinus, des barres copper et un champ d'étoiles), FastTracker, Amber CRT
 - Éditeur de patterns au clavier (disposition physique, fonctionne en AZERTY comme en QWERTY), sélection, copier/coller, transposition
 - Piano roll façon FL Studio, avec un mode accords (« Voices ») qui répartit les notes sur plusieurs canaux
@@ -39,6 +40,9 @@ de lancer `datrackarxd` (ou `datrackarxd.exe`) : rien d'autre à installer.
 - **macOS** : l'application n'est pas signée. Au premier lancement, clic droit > Ouvrir, ou
   `xattr -d com.apple.quarantine datrackarxd` dans un terminal.
 - **Windows** : SmartScreen peut avertir pour la même raison ; « Informations complémentaires » > « Exécuter quand même ».
+
+L'archive contient deux programmes : `datrackarxd` (le tracker) et `datrackarxd-keygen` (l'appli
+DATRACKARXD Keygen, voir plus bas).
 
 Pour publier une nouvelle version, mettre à jour `VERSION` dans `CMakeLists.txt`, puis au choix :
 - dans l'onglet **Actions** de GitHub, ouvrir le workflow « Build », cliquer sur « Run workflow » et
@@ -199,6 +203,27 @@ Dans le menu Fichier :
   autonome qui joue le morceau en boucle avec le champ d'étoiles, les barres copper, le logo et le
   scroller (Espace : pause, F : plein écran, Échap : quitter). Le programme n'a besoin de rien d'autre.
 
+## DATRACKARXD Keygen (appli séparée)
+
+`datrackarxd-keygen` sert uniquement à fabriquer des lecteurs keygen :
+
+1. ouvrir un morceau (bouton **Open song...** ou glisser-déposer un fichier : `.dtk`, `.fur`, `.dmf`,
+   `.ftm`, `.mod`, `.xm`, `.it`, `.s3m`, `.mid`), il se joue tout de suite ;
+2. régler le logo, le titre de la fenêtre et le texte du scroller ;
+3. régler le look : couleurs arc-en-ciel ou une seule couleur, barres copper, champ d'étoiles et sa
+   vitesse, vitesse et hauteur de vague du scroller, oscilloscope ; l'aperçu montre exactement le
+   résultat ;
+4. **Export player...** écrit le lecteur autonome.
+
+Le lecteur est une copie de cette petite appli avec le morceau dedans, donc plus léger qu'avec le
+tracker. Si `datrackarxd-keygen` est à côté du tracker, l'export du tracker l'utilise aussi.
+
+```sh
+datrackarxd-keygen                                    # ouvrir l'appli
+datrackarxd-keygen song.xm                            # l'ouvrir avec un morceau
+datrackarxd-keygen --export song.fur intro "LOGO" "texte du scroller"
+```
+
 ## Import de modules
 
 Fichier > Open / import (Ctrl+O) ouvre aussi les `.fur`, `.dmf`, `.ftm`, `.mod`, `.xm`, `.it`, `.s3m` et `.mid`. Le morceau
@@ -241,6 +266,7 @@ La macro volume avec un point de release donne un vrai « release » (fondu apr�
 - `src/import*.cpp`, `src/fur_internal.h`, `src/inflate.cpp` : import FUR, DMF, FTM, MOD, S3M, XM, IT (et décompression zlib)
 - `src/midi.*` : entrée clavier MIDI (RtMidi)
 - `src/payload.*`, `src/player.cpp`, `src/keygen_fx.*` : lecteur keygen autonome et sa scène
+- `src/keygen_main.cpp`, `src/filebrowser.*` : l'appli DATRACKARXD Keygen
 - `src/theme.*` : thèmes de couleurs
 - `src/app.*` : application, menus, raccourcis, dialogue de fichiers
 - `src/ui_pattern.cpp` : éditeur de patterns

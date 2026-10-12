@@ -60,6 +60,8 @@ jobs:
         run: |
           exe=build/datrackarxd
           [ -f build/Release/datrackarxd.exe ] && exe=build/Release/datrackarxd.exe
+          kg=build/datrackarxd-keygen
+          [ -f build/Release/datrackarxd-keygen.exe ] && kg=build/Release/datrackarxd-keygen.exe
           "$exe" --version
           # A release must match the version in CMakeLists.txt.
           actual=$("$exe" --version | tr -d '\r')
@@ -78,7 +80,11 @@ jobs:
           [ "${{ runner.os }}" = "Windows" ] && player=player.exe
           "$exe" --export-player songs/demo.dtk "$player"
           "./$player" --selftest
-          cp "$exe" .
+          # The separate keygen app makes players too.
+          "$kg" --version
+          "$kg" --export songs/demo.dtk "kg-$player" "DATRACKARXD" "ci test"
+          "./kg-$player" --selftest
+          cp "$exe" "$kg" .
 
       - name: Package
         shell: bash
@@ -88,10 +94,10 @@ jobs:
           cp README.md "$dir/"
           cp songs/*.dtk "$dir/songs/"
           if [ "${{ runner.os }}" = "Windows" ]; then
-            cp datrackarxd.exe "$dir/"
+            cp datrackarxd.exe datrackarxd-keygen.exe "$dir/"
             7z a "$dir.zip" "$dir" > /dev/null
           else
-            cp datrackarxd "$dir/"
+            cp datrackarxd datrackarxd-keygen "$dir/"
             tar czf "$dir.tar.gz" "$dir"
           fi
 

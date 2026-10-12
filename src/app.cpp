@@ -240,6 +240,7 @@ void App::playerExportPopup() {
   if (!ImGui::BeginPopupModal("Export keygen player", nullptr)) return;
   ImGui::TextWrapped("A standalone program that plays this song with the keygen intro: starfield, logo and scroller. "
                      "It runs on its own, without DATRACKARXD.");
+  ImGui::TextDisabled("For colors, speeds and a live preview, use the DATRACKARXD Keygen app.");
   ImGui::Separator();
   ImGui::InputText("Logo", playerLogo_, sizeof(playerLogo_));
   ImGui::InputText("Window title", playerTitle_, sizeof(playerTitle_));
@@ -411,7 +412,8 @@ void App::fileDialog() {
       p.logo = playerLogo_;
       p.title = playerTitle_;
       p.scroll = playerScroll_;
-      if (writePlayer(path, p, err))
+      // The DATRACKARXD Keygen app makes lighter players than the tracker.
+      if (writePlayer(path, p, err, findKeygenApp()))
         setStatus("Exported player " + path);
       else
         setStatus("Player export failed: " + err);
