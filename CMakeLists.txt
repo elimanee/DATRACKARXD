@@ -1,5 +1,5 @@
 cmake_minimum_required(VERSION 3.16)
-project(DATRACKARXD VERSION 0.6.0 LANGUAGES CXX C)
+project(DATRACKARXD VERSION 0.7.0 LANGUAGES CXX C)
 
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
@@ -71,7 +71,7 @@ else()
   endif()
 endif()
 
-# --- libogg + libvorbis (OGG export): the sources are built directly, as
+# --- libogg + libvorbis (OGG export and import): the sources are built directly, as
 # their own CMake files want an installed Ogg ---
 FetchContent_Declare(ogg
   GIT_REPOSITORY https://github.com/xiph/ogg.git
@@ -91,7 +91,7 @@ file(WRITE ${OGG_CONFIG_DIR}/ogg/config_types.h
   "typedef int32_t ogg_int32_t;\ntypedef uint32_t ogg_uint32_t;\n"
   "typedef int64_t ogg_int64_t;\ntypedef uint64_t ogg_uint64_t;\n#endif\n")
 set(VORBIS_LIB_SOURCES mdct smallft block envelope window lsp lpc analysis synthesis psy info
-  floor1 floor0 res0 mapping0 registry codebook sharedbook lookup bitrate vorbisenc)
+  floor1 floor0 res0 mapping0 registry codebook sharedbook lookup bitrate vorbisenc vorbisfile)
 list(TRANSFORM VORBIS_LIB_SOURCES PREPEND ${vorbis_SOURCE_DIR}/lib/)
 list(TRANSFORM VORBIS_LIB_SOURCES APPEND .c)
 add_library(vorbisenc_static STATIC
@@ -112,10 +112,36 @@ else()
   endif()
 endif()
 
+# --- dr_flac and dr_mp3 (public domain / MIT-0): FLAC and MP3 samples ---
+FetchContent_Declare(drlibs
+  GIT_REPOSITORY https://github.com/mackron/dr_libs.git
+  GIT_TAG mp3-0.7.3
+  GIT_SHALLOW TRUE
+  SOURCE_SUBDIR no-cmake)
+FetchContent_MakeAvailable(drlibs)
+
+# --- ymfm (BSD-3-Clause): the OPL3 emulator ---
+FetchContent_Declare(ymfm
+  GIT_REPOSITORY https://github.com/aaronsgiles/ymfm.git
+  GIT_TAG 81aec25ccbb98f4873a255f7551ac4dadac59b4a
+  SOURCE_SUBDIR no-cmake)
+FetchContent_MakeAvailable(ymfm)
+add_library(ymfm STATIC
+  ${ymfm_SOURCE_DIR}/src/ymfm_opl.cpp
+  ${ymfm_SOURCE_DIR}/src/ymfm_adpcm.cpp
+  ${ymfm_SOURCE_DIR}/src/ymfm_pcm.cpp)
+target_include_directories(ymfm SYSTEM PUBLIC ${ymfm_SOURCE_DIR}/src)
+if(MSVC)
+  target_compile_options(ymfm PRIVATE /W0)
+else()
+  target_compile_options(ymfm PRIVATE -w)
+endif()
+
 # --- shared code: song model, engine, importers, keygen player ---
 add_library(dtcore STATIC
   src/song.cpp
   src/engine.cpp
+  src/chips.cpp
   src/effects.cpp
   src/demo.cpp
   src/import.cpp
@@ -128,9 +154,10 @@ add_library(dtcore STATIC
   src/theme.cpp
   src/keygen_fx.cpp
   src/payload.cpp
-  src/player.cpp)
+  src/player.cpp
+  src/sampleops.cpp)
 target_include_directories(dtcore PUBLIC src)
-target_link_libraries(dtcore PUBLIC imgui)
+target_link_libraries(dtcore PUBLIC imgui ymfm)
 target_compile_definitions(dtcore PUBLIC DATRACKARXD_VERSION="${PROJECT_VERSION}")
 
 # --- the tracker ---
@@ -142,7 +169,10 @@ add_executable(datrackarxd
   src/ui_pattern.cpp
   src/ui_pianoroll.cpp
   src/ui_instrument.cpp
-  src/ui_windows.cpp)
+  src/ui_windows.cpp
+  src/audiofile.cpp
+  src/recorder.cpp)
+target_include_directories(datrackarxd PRIVATE ${drlibs_SOURCE_DIR})
 target_link_libraries(datrackarxd PRIVATE dtcore rtmidi vorbisenc_static)
 
 # --- DATRACKARXD Keygen: makes standalone keygen-style players ---

@@ -11,6 +11,7 @@
 #include "engine.h"
 #include "keygen_fx.h"
 #include "midi.h"
+#include "recorder.h"
 #include "song.h"
 
 struct KeyEvent {
@@ -137,9 +138,27 @@ class App {
   bool showPattern_ = true, showOrders_ = true, showInstruments_ = true, showInsEditor_ = true;
   bool showSamples_ = true;
   bool showMixer_ = true;
+  bool showChanFx_ = false;
+  int fxCh_ = 0;  // channel shown in the Channel FX window
   bool showScroller_ = false;
   KeygenScene keygen_;
   int curSample_ = 0;
+  // Sample editor: view and selection in frames, clipboard, recording.
+  int smpFor_ = -1;                  // sample the view below belongs to
+  double smpViewStart_ = 0, smpViewLen_ = 0;  // 0 length = whole sample
+  int smpSelA_ = 0, smpSelB_ = 0;    // selection [a, b), empty = none
+  int smpCursor_ = 0;                // paste position when nothing is selected
+  bool smpDraw_ = false;             // pencil mode
+  int smpDrag_ = 0;                  // 1 selecting, 2 drawing
+  int smpLastDrawX_ = -1;
+  float smpLastDrawV_ = 0;
+  std::vector<float> smpClipboard_;
+  float smpGainPct_ = 150.0f;
+  int smpNewRate_ = 22050;
+  Recorder recorder_;
+  std::string recDevice_;
+  float recPeak_ = 0;
+  void sampleEditor(Sample& smp);
   int loadSampleIntoIns_ = -1;  // instrument that receives the next loaded WAV
   bool showSong_ = true, showScope_ = true, showEffects_ = false, showKeys_ = false, showAbout_ = false;
   bool layoutDone_ = false;
@@ -257,11 +276,16 @@ class App {
   void samplesWindow();
   bool wavetableEditor(Instrument& ins);
   bool sidEditor(Instrument& ins);
+  bool modulationEditor(Instrument& ins);
+  bool chipEditor(Instrument& ins);
+  bool oplEditor(Instrument& ins);
+  bool morphEditor(Instrument& ins);
 
   // ui_windows.cpp
   void ordersWindow();
   void songWindow();
   void mixerWindow();
+  void channelFxWindow();
   void scopeWindow();
   void scrollerWindow();
   void saveSettings();

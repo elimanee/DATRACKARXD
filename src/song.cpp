@@ -8,8 +8,45 @@
 
 const char* const WAVE_NAMES[WAVE_COUNT] = {"Pulse", "Triangle", "Saw", "Noise", "Sine", "Wavetable"};
 const char* const MACRO_NAMES[MACRO_COUNT] = {"Volume", "Arpeggio", "Duty", "Waveform", "Pitch", "Cutoff"};
-const char* const INS_TYPE_NAMES[INS_TYPE_COUNT] = {"Chip", "FM", "Sample"};
+const char* const INS_TYPE_NAMES[INS_TYPE_COUNT] = {"Chip", "FM", "Sample", "AY / YM2149", "SN76489", "Game Boy", "OPL3 (AdLib)"};
 const char* const LOOP_NAMES[4] = {"No loop", "Forward", "Ping-pong", "Backward"};
+const char* const LFO_TARGET_NAMES[LFO_TARGET_COUNT] = {"Pitch", "Volume", "Pulse width", "Cutoff", "Pan"};
+const ChanFxInfo CHAN_FX_INFO[CFX_COUNT] = {
+    {"Bitcrusher", 3,
+     {{"Bits", 1, 16, 6, "%.0f bits", false, nullptr},
+      {"Downsample", 1, 64, 4, "x%.0f", true, nullptr},
+      {"Mix", 0, 1, 1, "%.2f", false, nullptr},
+      {}}},
+    {"Distortion", 4,
+     {{"Drive", 0, 1, 0.5f, "%.2f", false, nullptr},
+      {"Tone", 0, 1, 0.7f, "%.2f", false, nullptr},
+      {"Mix", 0, 1, 1, "%.2f", false, nullptr},
+      {"Type", 0, 2, 0, nullptr, false, "Soft\0Hard clip\0Fold\0"}}},
+    {"Chorus", 4,
+     {{"Rate", 0.05f, 5, 0.8f, "%.2f Hz", true, nullptr},
+      {"Depth", 0, 10, 3, "%.1f ms", false, nullptr},
+      {"Mix", 0, 1, 0.5f, "%.2f", false, nullptr},
+      {"Feedback", 0, 0.9f, 0, "%.2f", false, nullptr}}},
+    {"EQ", 4,
+     {{"Low", -24, 12, 0, "%+.1f dB", false, nullptr},
+      {"Mid", -24, 12, 0, "%+.1f dB", false, nullptr},
+      {"Mid freq", 200, 8000, 1000, "%.0f Hz", true, nullptr},
+      {"High", -24, 12, 0, "%+.1f dB", false, nullptr}}},
+    {"Compressor", 4,
+     {{"Threshold", -60, 0, -18, "%.1f dB", false, nullptr},
+      {"Ratio", 1, 20, 4, "%.1f:1", true, nullptr},
+      {"Attack", 0.1f, 100, 5, "%.1f ms", true, nullptr},
+      {"Release", 10, 1000, 100, "%.0f ms", true, nullptr}}},
+};
+
+ChannelEffect ChannelEffect::make(int type) {
+  ChannelEffect e;
+  e.type = std::clamp(type, 0, CFX_COUNT - 1);
+  for (int i = 0; i < CHAN_FX_INFO[e.type].count; i++) e.p[i] = CHAN_FX_INFO[e.type].params[i].def;
+  return e;
+}
+
+const char* const LFO_SHAPE_NAMES[LFO_SHAPE_COUNT] = {"Sine", "Triangle", "Saw", "Square", "Random"};
 
 bool Cell::empty() const {
   if (note != NOTE_EMPTY || ins >= 0 || vol >= 0) return false;
@@ -28,18 +65,33 @@ Instrument::Instrument() {
   // Default wavetable: a sine shape.
   for (int i = 0; i < WAVETABLE_LEN; i++)
     wavetable[i] = (int)std::lround(7.5 + 7.5 * std::sin(i * 2.0 * 3.14159265358979 / WAVETABLE_LEN));
+  // Default morph target: a saw.
+  for (int i = 0; i < WAVETABLE_LEN; i++) morph.table[i] = i / 2;
+  // Default OPL sound: a soft electric piano-like 2-op patch.
+  opl.ops[0].tl = 28;
+  opl.ops[0].mult = 1;
+  opl.ops[0].dr = 3;
+  opl.ops[0].sl = 3;
+  opl.ops[1].mult = 1;
+  opl.ops[1].dr = 2;
+  opl.ops[1].sl = 2;
+  opl.ops[2].tl = 30;
+  opl.ops[3].tl = 0;
 }
 
 void Instrument::macroRange(int macro, int& lo, int& hi) const {
   switch (macro) {
     case MACRO_VOL:
       lo = 0;
-      hi = type == INS_FM ? 127 : type == INS_SAMPLE ? 64 : 15;
+      hi = type == INS_FM || type == INS_OPL ? 127 : type == INS_SAMPLE ? 64 : 15;
       break;
     case MACRO_ARP: lo = -60; hi = ARP_FIXED + NOTE_COUNT - 1; break;
-    case MACRO_DUTY: lo = 0; hi = pulseWidth >= 0 ? 255 : 3; break;
+    case MACRO_DUTY:
+      lo = 0;
+      hi = type == INS_AY ? 31 : type == INS_SN ? 1 : pulseWidth >= 0 && type == INS_STANDARD ? 255 : 3;
+      break;
     case MACRO_CUTOFF: lo = 0; hi = 255; break;
-    case MACRO_WAVE: lo = 0; hi = 255; break;
+    case MACRO_WAVE: lo = 0; hi = type == INS_AY ? 7 : type == INS_OPL ? 7 : 255; break;
     default: lo = -128; hi = 127; break;
   }
 }
@@ -278,6 +330,8 @@ void Song::write(std::ostream& f) const {
     if (ch.fixedDuty >= 0 || ch.minNote > 0 || ch.mix != 1.0f)
       f << "chanchip " << c << ' ' << ch.fixedDuty << ' ' << ch.minNote << ' ' << ch.mix << '\n';
     if (ch.reverbSend > 0 || ch.delaySend > 0) f << "chansend " << c << ' ' << ch.reverbSend << ' ' << ch.delaySend << '\n';
+    for (const ChannelEffect& e : ch.effects)
+      f << "chanfx " << c << ' ' << e.type << ' ' << e.on << ' ' << e.p[0] << ' ' << e.p[1] << ' ' << e.p[2] << ' ' << e.p[3] << '\n';
   }
   f << "fx.reverb " << fx.reverb << ' ' << fx.roomSize << ' ' << fx.damping << ' ' << fx.reverbLevel << '\n';
   f << "fx.delay " << fx.delay << ' ' << fx.delayRows << ' ' << fx.delayFeedback << ' ' << fx.delayLevel << ' ' << fx.pingPong << '\n';
@@ -307,6 +361,22 @@ void Song::write(std::ostream& f) const {
           << op.dr << ' ' << op.sl << ' ' << op.d2r << ' ' << op.rr << ' ' << op.ksr << ' ' << op.ssg << '\n';
       }
     }
+    if (ins.type == INS_AY || ins.type == INS_SN || ins.type == INS_GB) {
+      const ChipSettings& c = ins.chip;
+      f << "ins.chip " << c.clock << ' ' << c.ayModel << ' ' << c.ayTone << ' ' << c.ayNoise << ' ' << c.ayEnv << ' ' << c.ayNoiseFreq
+        << ' ' << c.ayEnvShape << ' ' << c.ayEnvAuto << ' ' << c.ayEnvPeriod << ' ' << c.snNoise << ' ' << c.snWhite << ' '
+        << c.gbChannel << ' ' << c.gbEnvDir << ' ' << c.gbEnvLen << ' ' << c.gbSweepTime << ' ' << c.gbSweepDir << ' '
+        << c.gbSweepShift << ' ' << c.gbShortNoise << '\n';
+    }
+    if (ins.type == INS_OPL) {
+      const OPLParams& o = ins.opl;
+      f << "ins.opl " << o.fourOp << ' ' << o.alg << ' ' << o.fb << ' ' << o.deepAm << ' ' << o.deepVib << '\n';
+      for (int k = 0; k < (o.fourOp ? 4 : 2); k++) {
+        const OPLOperator& op = o.ops[k];
+        f << "ins.oplop " << k << ' ' << op.am << ' ' << op.vib << ' ' << op.sus << ' ' << op.ksr << ' ' << op.mult << ' ' << op.ksl
+          << ' ' << op.tl << ' ' << op.ar << ' ' << op.dr << ' ' << op.sl << ' ' << op.rr << ' ' << op.ws << '\n';
+      }
+    }
     if (ins.sample >= 0) f << "ins.sample " << ins.sample << '\n';
     if (ins.songWave >= 0) f << "ins.songwave " << ins.songWave << '\n';
     if (!ins.sampleMap.empty()) {
@@ -315,6 +385,19 @@ void Song::write(std::ostream& f) const {
       f << '\n';
     }
     if (ins.fadeout > 0) f << "ins.fadeout " << ins.fadeout << '\n';
+    const InsEnvelope& env = ins.env;
+    if (env.on) f << "ins.adsr " << env.on << ' ' << env.attack << ' ' << env.decay << ' ' << env.sustain << ' ' << env.release << '\n';
+    for (int l = 0; l < INS_LFOS; l++) {
+      const InsLfo& lfo = ins.lfo[l];
+      if (!lfo.isDefault())
+        f << "ins.lfo " << l << ' ' << lfo.on << ' ' << lfo.target << ' ' << lfo.shape << ' ' << lfo.rate << ' ' << lfo.depth << ' '
+          << lfo.delay << '\n';
+    }
+    if (ins.morph.on) {
+      f << "ins.morph " << ins.morph.on << ' ' << ins.morph.time << ' ' << ins.morph.mode;
+      for (int v : ins.morph.table) f << ' ' << v;
+      f << '\n';
+    }
   }
 
   for (size_t i = 0; i < samples.size(); i++) {
@@ -391,6 +474,7 @@ bool Song::read(std::istream& f, const std::string& path, std::string& err) {
   int lineNo = 1;
 
   auto clampVal = [](int v, int lo, int hi) { return std::clamp(v, lo, hi); };
+  auto clampF = [](float v, float lo, float hi) { return std::isfinite(v) ? std::clamp(v, lo, hi) : lo; };
 
   while (std::getline(f, line)) {
     lineNo++;
@@ -438,6 +522,20 @@ bool Song::read(std::istream& f, const std::string& path, std::string& err) {
         s.channels[c].forceWave = clampVal(forceWave, -1, WAVE_COUNT - 1);
         s.channels[c].name = restOfLine(ss);
       }
+    } else if (key == "chanfx") {
+      int c = -1, type = 0, on = 1;
+      ss >> c >> type >> on;
+      if (c < 0 || c >= s.channelCount() || type < 0 || type >= CFX_COUNT) continue;
+      if ((int)s.channels[c].effects.size() >= MAX_CHANNEL_FX) continue;
+      ChannelEffect e = ChannelEffect::make(type);
+      e.on = on != 0;
+      const ChanFxInfo& info = CHAN_FX_INFO[type];
+      for (int i = 0; i < 4; i++) {
+        float v = e.p[i];
+        ss >> v;
+        e.p[i] = i < info.count ? clampF(v, info.params[i].min, info.params[i].max) : 0.0f;
+      }
+      s.channels[c].effects.push_back(e);
     } else if (key == "chansend") {
       int c = -1;
       float rv = 0, dl = 0;
@@ -577,7 +675,89 @@ bool Song::read(std::istream& f, const std::string& path, std::string& err) {
         }
       } else if (key == "ins.fadeout") {
         ss >> curIns->fadeout;
-        curIns->fadeout = std::clamp(curIns->fadeout, 0.0f, 1.0f);
+        curIns->fadeout = clampF(curIns->fadeout, 0.0f, 1.0f);
+      } else if (key == "ins.chip") {
+        ChipSettings& c = curIns->chip;
+        int t = 1, n = 0, e = 0, sn = 0, wh = 1, sh = 0;
+        ss >> c.clock >> c.ayModel >> t >> n >> e >> c.ayNoiseFreq >> c.ayEnvShape >> c.ayEnvAuto >> c.ayEnvPeriod >> sn >> wh
+           >> c.gbChannel >> c.gbEnvDir >> c.gbEnvLen >> c.gbSweepTime >> c.gbSweepDir >> c.gbSweepShift >> sh;
+        c.clock = clampVal(c.clock, 0, 3);
+        c.ayModel = clampVal(c.ayModel, 0, 1);
+        c.ayTone = t != 0;
+        c.ayNoise = n != 0;
+        c.ayEnv = e != 0;
+        c.ayNoiseFreq = clampVal(c.ayNoiseFreq, 0, 31);
+        c.ayEnvShape = clampVal(c.ayEnvShape, 0, 15);
+        c.ayEnvAuto = clampVal(c.ayEnvAuto, 0, 5);
+        c.ayEnvPeriod = clampVal(c.ayEnvPeriod, 1, 65535);
+        c.snNoise = sn != 0;
+        c.snWhite = wh != 0;
+        c.gbChannel = clampVal(c.gbChannel, 0, 2);
+        c.gbEnvDir = clampVal(c.gbEnvDir, 0, 1);
+        c.gbEnvLen = clampVal(c.gbEnvLen, 0, 7);
+        c.gbSweepTime = clampVal(c.gbSweepTime, 0, 7);
+        c.gbSweepDir = clampVal(c.gbSweepDir, 0, 1);
+        c.gbSweepShift = clampVal(c.gbSweepShift, 0, 7);
+        c.gbShortNoise = sh != 0;
+      } else if (key == "ins.opl") {
+        OPLParams& o = curIns->opl;
+        int four = 0, am = 0, vib = 0;
+        ss >> four >> o.alg >> o.fb >> am >> vib;
+        o.fourOp = four != 0;
+        o.alg = clampVal(o.alg, 0, o.fourOp ? 3 : 1);
+        o.fb = clampVal(o.fb, 0, 7);
+        o.deepAm = am != 0;
+        o.deepVib = vib != 0;
+      } else if (key == "ins.oplop") {
+        int k = -1;
+        ss >> k;
+        if (k < 0 || k > 3) continue;
+        OPLOperator& op = curIns->opl.ops[k];
+        ss >> op.am >> op.vib >> op.sus >> op.ksr >> op.mult >> op.ksl >> op.tl >> op.ar >> op.dr >> op.sl >> op.rr >> op.ws;
+        op.am = clampVal(op.am, 0, 1);
+        op.vib = clampVal(op.vib, 0, 1);
+        op.sus = clampVal(op.sus, 0, 1);
+        op.ksr = clampVal(op.ksr, 0, 1);
+        op.mult = clampVal(op.mult, 0, 15);
+        op.ksl = clampVal(op.ksl, 0, 3);
+        op.tl = clampVal(op.tl, 0, 63);
+        op.ar = clampVal(op.ar, 0, 15);
+        op.dr = clampVal(op.dr, 0, 15);
+        op.sl = clampVal(op.sl, 0, 15);
+        op.rr = clampVal(op.rr, 0, 15);
+        op.ws = clampVal(op.ws, 0, 7);
+      } else if (key == "ins.adsr") {
+        int on = 0;
+        InsEnvelope& env = curIns->env;
+        ss >> on >> env.attack >> env.decay >> env.sustain >> env.release;
+        env.on = on != 0;
+        env.attack = clampF(env.attack, 0.0f, 20.0f);
+        env.decay = clampF(env.decay, 0.0f, 20.0f);
+        env.sustain = clampF(env.sustain, 0.0f, 1.0f);
+        env.release = clampF(env.release, 0.0f, 20.0f);
+      } else if (key == "ins.lfo") {
+        int l = -1, on = 0;
+        ss >> l;
+        if (l < 0 || l >= INS_LFOS) continue;
+        InsLfo& lfo = curIns->lfo[l];
+        ss >> on >> lfo.target >> lfo.shape >> lfo.rate >> lfo.depth >> lfo.delay;
+        lfo.on = on != 0;
+        lfo.target = clampVal(lfo.target, 0, LFO_TARGET_COUNT - 1);
+        lfo.shape = clampVal(lfo.shape, 0, LFO_SHAPE_COUNT - 1);
+        lfo.rate = clampF(lfo.rate, 0.01f, 100.0f);
+        lfo.depth = clampF(lfo.depth, 0.0f, 255.0f);
+        lfo.delay = clampF(lfo.delay, 0.0f, 20.0f);
+      } else if (key == "ins.morph") {
+        int on = 0;
+        InsMorph& m = curIns->morph;
+        ss >> on >> m.time >> m.mode;
+        m.on = on != 0;
+        m.time = clampF(m.time, 0.01f, 60.0f);
+        m.mode = clampVal(m.mode, 0, 2);
+        for (int& v : m.table) {
+          ss >> v;
+          v = clampVal(v, 0, 15);
+        }
       }
     } else if (key == "sample") {
       int idx = 0;

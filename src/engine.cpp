@@ -84,6 +84,8 @@ void Engine::clearEffects() {
   delay_.clear();
   filterL_.clear();
   filterR_.clear();
+  for (auto& units : chanFx_)
+    for (ChannelFxUnit& u : units) u.clear();
 }
 
 void Engine::resetChannel(int c) {
@@ -95,6 +97,7 @@ void Engine::resetChannel(int c) {
 
 void Engine::reset() {
   for (int c = 0; c < MAX_CHANNELS; c++) resetChannel(c);
+  for (auto& chip : chips_) chip.reset();
   playing_ = false;
   speeds_ = song_.speeds;
   tickRate_ = song_.tickRate;
@@ -110,6 +113,7 @@ int Engine::speed() const {
 
 void Engine::play(int order, int row) {
   for (int c = 0; c < MAX_CHANNELS; c++) resetChannel(c);
+  for (auto& chip : chips_) chip.reset();  // note counters restart, so do the chips
   order_ = std::clamp(order, 0, (int)song_.orders.size() - 1);
   row_ = std::clamp(row, 0, song_.patternLength - 1);
   tick_ = 0;
@@ -314,6 +318,21 @@ void Engine::triggerNote(int c, int note, int offset) {
   s.fade = 1;
   s.lfsr = 1;
   s.type = ins ? ins->type : INS_STANDARD;
+  // The envelope starts again from the current level (no click on legato notes).
+  bool envWasOn = s.envOn && s.envStage < 4;
+  s.envOn = ins && ins->env.on;
+  if (s.envOn) {
+    s.envStage = 0;
+    if (!envWasOn) s.envLevel = 0;
+  }
+  s.noteTime = 0;
+  for (int l = 0; l < INS_LFOS; l++) {
+    s.lfoPhase[l] = 0;
+    s.lfoHold[l] = randomUnit();
+  }
+  s.lfoPan = 0;
+  s.morphOn = ins && ins->morph.on;
+  s.morphPos = 0;
   for (auto& m : s.macros) m = MacroState();
   stepMacros(c);
   s.justTriggered = true;
@@ -330,6 +349,8 @@ void Engine::triggerNote(int c, int note, int offset) {
   } else if (s.type == INS_FM) {
     updateChannel(c);
     fmKeyOn(c);
+  } else if (isChipType(s.type)) {
+    if (!chips_[c] || chips_[c]->type() != s.type) chips_[c] = makeChipVoice(s.type, sampleRate_);
   }
 }
 
@@ -338,10 +359,13 @@ void Engine::releaseNote(int c) {
   if (!s.active) return;
   s.released = true;
   const Instrument* ins = instrument(c);
+  if (s.envOn) s.envStage = 3;
   if (s.type == INS_FM) {
     fmKeyOff(c);
-  } else if (!ins || (ins->macros[MACRO_VOL].release < 0 && ins->fadeout <= 0)) {
-    // With a release point or a fadeout the sound carries on, otherwise cut.
+  } else if (s.type == INS_OPL) {
+    // Keys off on the next update; the note ends when its release is done.
+  } else if (!ins || (ins->macros[MACRO_VOL].release < 0 && ins->fadeout <= 0 && !s.envOn)) {
+    // With a release point, a fadeout or an envelope the sound carries on, otherwise cut.
     s.active = false;
   }
   for (int m = 0; m < MACRO_COUNT; m++) {
@@ -399,6 +423,55 @@ void Engine::stepMacros(int c) {
   }
   // The pitch macro is cumulative; a finished one stops adding.
   if (s.macros[MACRO_PITCH].finished) s.macros[MACRO_PITCH].hasValue = false;
+}
+
+float Engine::randomUnit() {
+  rng_ ^= rng_ << 13;
+  rng_ ^= rng_ >> 17;
+  rng_ ^= rng_ << 5;
+  return (float)(rng_ % 20001) / 10000.0f - 1.0f;
+}
+
+// Runs once per tick: note time, LFO phases and the wavetable morph.
+void Engine::advanceLfos(int c) {
+  ChannelState& s = ch_[c];
+  const Instrument* ins = instrument(c);
+  double dt = 1.0 / std::max(tickRate_, 1.0f);
+  if (!ins || !s.active) return;
+  s.noteTime += dt;
+  for (int l = 0; l < INS_LFOS; l++) {
+    const InsLfo& lfo = ins->lfo[l];
+    if (!lfo.on) continue;
+    s.lfoPhase[l] += lfo.rate * dt;
+    if (s.lfoPhase[l] >= 1.0) {
+      s.lfoPhase[l] -= std::floor(s.lfoPhase[l]);
+      s.lfoHold[l] = randomUnit();
+    }
+  }
+  if (s.morphOn) {
+    const InsMorph& m = ins->morph;
+    double t = s.noteTime / std::max(0.01f, m.time);
+    if (m.mode == 0) s.morphPos = (float)std::min(1.0, t);
+    else if (m.mode == 1) s.morphPos = (float)(t - std::floor(t));
+    else s.morphPos = (float)(1.0 - std::abs(std::fmod(t, 2.0) - 1.0));
+  }
+}
+
+float Engine::lfoValue(const ChannelState& s, int l, const InsLfo& lfo, float& fade) const {
+  fade = 0;
+  if (!lfo.on || s.noteTime < lfo.delay) return 0;
+  double p = s.lfoPhase[l];
+  float v = 0;
+  switch (lfo.shape) {
+    case LFO_SINE: v = sinCycles(p); break;
+    case LFO_TRIANGLE: v = (float)(p < 0.25 ? 4 * p : p < 0.75 ? 2 - 4 * p : 4 * p - 4); break;
+    case LFO_SAW: v = (float)(2 * p - 1); break;
+    case LFO_SQUARE: v = p < 0.5 ? 1.0f : -1.0f; break;
+    default: v = s.lfoHold[l]; break;
+  }
+  // After its delay, the LFO fades in over 0.3 s.
+  fade = lfo.delay > 0 ? (float)std::min(1.0, (s.noteTime - lfo.delay) / 0.3) : 1.0f;
+  return v;
 }
 
 void Engine::processCell(int c, const Cell& cell, bool fromDelay) {
@@ -657,6 +730,7 @@ void Engine::doTick() {
     }
     if (!s.justTriggered) stepMacros(c);
     s.justTriggered = false;
+    advanceLfos(c);
     updateChannel(c);
     s.arpTick++;
     s.vibPos = (s.vibPos + s.vibSpeed) & 63;
@@ -683,7 +757,20 @@ void Engine::updateChannel(int c) {
   const Instrument* ins = instrument(c);
   int forced = c < song_.channelCount() ? song_.channels[c].forceWave : -1;
 
-  double pitch = s.pitch + s.bend + s.fine;
+  // LFO values by target.
+  float lfo[LFO_TARGET_COUNT] = {};
+  float lfoVol = 1;  // tremolo: full volume at the top, 1 - depth at the bottom
+  for (int l = 0; ins && l < INS_LFOS; l++) {
+    const InsLfo& L = ins->lfo[l];
+    if (!L.on) continue;
+    float fade, v = lfoValue(s, l, L, fade);
+    int t = std::clamp(L.target, 0, LFO_TARGET_COUNT - 1);
+    if (t == LFO_VOLUME) lfoVol *= 1.0f - std::min(L.depth, 1.0f) * fade * (1.0f - v) * 0.5f;
+    else lfo[t] += v * L.depth * fade;
+  }
+  s.lfoPan = std::clamp(lfo[LFO_PAN], -1.0f, 1.0f);
+
+  double pitch = s.pitch + s.bend + s.fine + lfo[LFO_PITCH];
   if (s.arpX || s.arpY) {
     int phase = s.arpTick % 3;
     pitch += phase == 1 ? s.arpX : phase == 2 ? s.arpY : 0;
@@ -726,6 +813,10 @@ void Engine::updateChannel(int c) {
     if (s.macros[MACRO_DUTY].hasValue) w = s.macros[MACRO_DUTY].value;
     s.pw = std::clamp(w, 1, 255) / 256.0f;
   }
+  if (lfo[LFO_PULSE] != 0) {
+    float base = s.pw >= 0 ? s.pw : DUTY_TABLE[s.duty & 3];
+    s.pw = std::clamp(base + lfo[LFO_PULSE] * 0.5f, 0.02f, 0.98f);
+  }
   s.ring = ins && ins->ringMod;
   s.sync = ins && ins->sync;
   s.filterOn = ins && ins->filter.on;
@@ -733,6 +824,7 @@ void Engine::updateChannel(int c) {
     int cut = ins->filter.cutoff;
     if (s.cutoffOverride >= 0) cut = s.cutoffOverride;
     if (s.macros[MACRO_CUTOFF].hasValue) cut = s.macros[MACRO_CUTOFF].value;
+    cut += (int)std::lround(lfo[LFO_CUTOFF]);
     float hz = 30.0f * std::pow(2.0f, std::clamp(cut, 0, 255) / 255.0f * 9.2f);
     s.filterMode = ins->filter.mode;
     // Q from 0.707 to 2.5, a little past the SID's own range.
@@ -764,6 +856,35 @@ void Engine::updateChannel(int c) {
       }
       break;
     }
+    case INS_AY:
+    case INS_SN:
+    case INS_GB:
+    case INS_OPL: {
+      ChipFrame f;
+      f.ins = ins;
+      f.freq = s.freq;
+      f.gate = s.active && !s.released;
+      f.trigger = s.triggers;
+      int v = std::clamp(vol, 0, 127);
+      if (s.type == INS_OPL) {
+        f.vol = hasVolMacro ? v * std::clamp(macroVol, 0, 127) / 127 : v;
+      } else {
+        int base = hasVolMacro ? std::clamp(macroVol, 0, 15) : (ins ? std::clamp(ins->volume, 0, 15) : 15);
+        f.vol = (int)std::lround(base * v / 127.0);
+      }
+      f.chanScale = v / 127.0f;
+      f.macroVol = hasVolMacro ? std::clamp(macroVol, 0, 15) : -1;
+      f.duty = s.macros[MACRO_DUTY].hasValue ? s.macros[MACRO_DUTY].value : s.dutyOverride;
+      f.mixer = s.macros[MACRO_WAVE].hasValue ? s.macros[MACRO_WAVE].value : s.waveOverride;
+      f.morph = s.morphOn ? s.morphPos : -1.0f;
+      // The chip makes the volume steps; the gain only fades and mutes.
+      s.targetGain = s.active ? s.fade : 0.0f;
+      if (chips_[c]) {
+        chips_[c]->update(f);
+        if (s.active && chips_[c]->finished()) s.active = false;
+      }
+      break;
+    }
     case INS_SAMPLE: {
       float gain = lin;
       if (s.smp >= 0 && s.smp < (int)song_.samples.size()) gain *= song_.samples[s.smp].volume / 64.0f;
@@ -780,6 +901,16 @@ void Engine::updateChannel(int c) {
       s.targetGain = s.active ? gain * s.fade : 0.0f;
       break;
     }
+  }
+  s.targetGain *= lfoVol;
+
+  if (s.envOn && ins) {
+    const InsEnvelope& env = ins->env;
+    float sr = (float)sampleRate_;
+    s.envAtk = env.attack < 0.0005f ? 1.0f : 1.0f / (env.attack * sr);
+    s.envDecK = env.decay < 0.0005f ? 0.0f : std::exp(-4.6f / (env.decay * sr));
+    s.envSus = env.sustain;
+    s.envRelK = env.release < 0.0005f ? 0.0f : std::exp(-6.9f / (env.release * sr));
   }
 }
 
@@ -836,8 +967,11 @@ float Engine::oscillate(ChannelState& s) {
         const std::vector<float>& w = song_.wavetables[s.table].data;
         out = w[(size_t)(s.phase * w.size()) % w.size()];
       } else if (s.ins >= 0 && s.ins < (int)song_.instruments.size()) {
+        const Instrument& ins = song_.instruments[s.ins];
         int idx = (int)(s.phase * WAVETABLE_LEN) % WAVETABLE_LEN;
-        out = song_.instruments[s.ins].wavetable[idx] / 7.5f - 1.0f;
+        float a = (float)ins.wavetable[idx];
+        if (s.morphOn) a += (ins.morph.table[idx] - a) * s.morphPos;
+        out = a / 7.5f - 1.0f;
       }
       break;
     }
@@ -848,6 +982,42 @@ float Engine::oscillate(ChannelState& s) {
   s.wrapped = s.phase >= 1.0;
   if (s.wrapped) s.phase -= std::floor(s.phase);
   return out;
+}
+
+// ADSR level for this sample. The note ends when the release reaches silence.
+float Engine::envelope(ChannelState& s) {
+  switch (s.envStage) {
+    case 0:
+      s.envLevel += s.envAtk;
+      if (s.envLevel >= 1.0f) {
+        s.envLevel = 1.0f;
+        s.envStage = 1;
+      }
+      break;
+    case 1:
+      s.envLevel = s.envSus + (s.envLevel - s.envSus) * s.envDecK;
+      if (std::abs(s.envLevel - s.envSus) < 1e-4f) {
+        s.envLevel = s.envSus;
+        s.envStage = 2;
+      }
+      break;
+    case 2:
+      s.envLevel = s.envSus;  // follows a sustain changed while the note plays
+      break;
+    case 3:
+      s.envLevel *= s.envRelK;
+      if (s.envLevel < 1e-4f) {
+        s.envLevel = 0;
+        s.envStage = 4;
+        s.active = false;
+        s.targetGain = 0;
+      }
+      break;
+    default:
+      s.envLevel = 0;
+      break;
+  }
+  return s.envLevel;
 }
 
 float Engine::playSample(ChannelState& s) {
@@ -937,6 +1107,8 @@ void Engine::render(float* out, int frames) {
         } else if (s.type == INS_FM) {
           const Instrument* ins = instrument(c);
           if (ins) v = playFM(s, *ins) * s.gain;
+        } else if (isChipType(s.type)) {
+          if (chips_[c]) v = chips_[c]->render() * s.gain;
         } else if (s.ring || s.sync) {
           // The previous channel (the last one for channel 1) is the modulator.
           const ChannelState& m = ch_[c > 0 ? c - 1 : nch - 1];
@@ -948,14 +1120,21 @@ void Engine::render(float* out, int frames) {
           v = oscillate(s) * s.gain;
         }
         if (s.filterOn) v = s.filter.process(v, s.filterMode);
+        if (s.envOn) v *= envelope(s);
       } else {
         s.wrapped = false;
       }
+      // Insert effects (they also run on silence, for the chorus tail).
+      const std::vector<ChannelEffect>& effects = song_.channels[c].effects;
+      for (size_t k = 0; k < effects.size() && k < (size_t)MAX_CHANNEL_FX; k++)
+        if (effects[k].on) v = chanFx_[c][k].process(v, effects[k], (float)sampleRate_);
       v *= song_.channels[c].mix;
       s.scope[scopePos_] = v;
       const ChannelInfo& info = song_.channels[c];
       if (info.muted) continue;
       float vl = v * s.panL, vr = v * s.panR;
+      if (s.lfoPan > 0) vl *= 1.0f - s.lfoPan;
+      else if (s.lfoPan < 0) vr *= 1.0f + s.lfoPan;
       l += vl;
       r += vr;
       rvIn += (vl + vr) * info.reverbSend;

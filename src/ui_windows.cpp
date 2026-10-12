@@ -323,12 +323,13 @@ void App::mixerWindow() {
   }
 
   ImGui::Separator();
-  if (ImGui::BeginTable("sends", 6, ImGuiTableFlags_SizingStretchSame | ImGuiTableFlags_RowBg)) {
+  if (ImGui::BeginTable("sends", 7, ImGuiTableFlags_SizingStretchSame | ImGuiTableFlags_RowBg)) {
     ImGui::TableSetupColumn("Channel");
     ImGui::TableSetupColumn("Mix");
     ImGui::TableSetupColumn("Pan");
     ImGui::TableSetupColumn("Reverb send");
     ImGui::TableSetupColumn("Delay send");
+    ImGui::TableSetupColumn("Insert FX", ImGuiTableColumnFlags_WidthFixed);
     ImGui::TableSetupColumn("Mute", ImGuiTableColumnFlags_WidthFixed);
     ImGui::TableHeadersRow();
     for (int c = 0; c < song_.channelCount(); c++) {
@@ -351,10 +352,129 @@ void App::mixerWindow() {
       ImGui::SetNextItemWidth(-1);
       changed |= ImGui::SliderFloat("##dl", &info.delaySend, 0, 1, "%.2f");
       ImGui::TableNextColumn();
+      char fxLabel[32];
+      int active = 0;
+      for (const ChannelEffect& e : info.effects) active += e.on;
+      std::snprintf(fxLabel, sizeof(fxLabel), info.effects.empty() ? "FX" : "FX %d", active);
+      if (ImGui::SmallButton(fxLabel)) {
+        fxCh_ = c;
+        showChanFx_ = true;
+        ImGui::SetWindowFocus("Channel FX");
+      }
+      if (ImGui::IsItemHovered() && !info.effects.empty()) {
+        std::string list;
+        for (const ChannelEffect& e : info.effects)
+          list += std::string(CHAN_FX_INFO[e.type].name) + (e.on ? "\n" : " (off)\n");
+        ImGui::SetTooltip("%s", list.c_str());
+      }
+      ImGui::TableNextColumn();
       ImGui::Checkbox("##m", &info.muted);  // like the pattern header: not an edit
       ImGui::PopID();
     }
     ImGui::EndTable();
+  }
+  if (changed) {
+    dirty_ = true;
+    metaTouched_ = true;
+  }
+  ImGui::End();
+}
+
+// The insert effects of one channel, in processing order.
+void App::channelFxWindow() {
+  if (!ImGui::Begin("Channel FX", &showChanFx_)) {
+    ImGui::End();
+    return;
+  }
+  int nch = song_.channelCount();
+  fxCh_ = std::clamp(fxCh_, 0, std::max(0, nch - 1));
+  bool changed = false;
+  char label[96];
+  std::snprintf(label, sizeof(label), "%d %s", fxCh_ + 1, nch ? song_.channels[fxCh_].name.c_str() : "");
+  ImGui::SetNextItemWidth(220);
+  if (ImGui::BeginCombo("Channel", label)) {
+    for (int c = 0; c < nch; c++) {
+      std::snprintf(label, sizeof(label), "%d %s (%zu)", c + 1, song_.channels[c].name.c_str(), song_.channels[c].effects.size());
+      if (ImGui::Selectable(label, c == fxCh_)) fxCh_ = c;
+    }
+    ImGui::EndCombo();
+  }
+  ImGui::SameLine();
+  if (ImGui::SmallButton("Current")) fxCh_ = std::clamp(curCh_, 0, std::max(0, nch - 1));
+  if (ImGui::IsItemHovered()) ImGui::SetTooltip("Show the channel the cursor is on");
+  if (nch == 0) {
+    ImGui::End();
+    return;
+  }
+  std::vector<ChannelEffect>& fx = song_.channels[fxCh_].effects;
+  ImGui::SameLine();
+  ImGui::BeginDisabled((int)fx.size() >= MAX_CHANNEL_FX);
+  ImGui::SetNextItemWidth(150);
+  if (ImGui::BeginCombo("##add", "Add effect...")) {
+    for (int t = 0; t < CFX_COUNT; t++)
+      if (ImGui::Selectable(CHAN_FX_INFO[t].name)) {
+        fx.push_back(ChannelEffect::make(t));
+        changed = true;
+      }
+    ImGui::EndCombo();
+  }
+  ImGui::EndDisabled();
+  if (fx.empty()) ImGui::TextDisabled("No effect on this channel. The chain runs top to bottom, before the mixer.");
+
+  int moveFrom = -1, moveTo = -1, remove = -1;
+  const float w = 170;
+  if (ImGui::BeginTable("chain", std::max(1, (int)fx.size()), ImGuiTableFlags_BordersInnerV | ImGuiTableFlags_ScrollX)) {
+    for (int k = 0; k < (int)fx.size(); k++) ImGui::TableSetupColumn("", ImGuiTableColumnFlags_WidthFixed, w + 90);
+    ImGui::TableNextRow();
+    for (int k = 0; k < (int)fx.size(); k++) {
+      ChannelEffect& e = fx[k];
+      const ChanFxInfo& info = CHAN_FX_INFO[e.type];
+      ImGui::TableNextColumn();
+      ImGui::PushID(k);
+      changed |= ImGui::Checkbox(info.name, &e.on);
+      ImGui::SameLine();
+      if (ImGui::ArrowButton("##l", ImGuiDir_Left) && k > 0) {
+        moveFrom = k;
+        moveTo = k - 1;
+      }
+      ImGui::SameLine();
+      if (ImGui::ArrowButton("##r", ImGuiDir_Right) && k + 1 < (int)fx.size()) {
+        moveFrom = k;
+        moveTo = k + 1;
+      }
+      ImGui::SameLine();
+      if (ImGui::SmallButton("x")) remove = k;
+      ImGui::BeginDisabled(!e.on);
+      for (int i = 0; i < info.count; i++) {
+        const ChanFxParam& prm = info.params[i];
+        ImGui::SetNextItemWidth(w);
+        if (prm.choices) {
+          int v = (int)std::lround(e.p[i]);
+          if (ImGui::Combo(prm.name, &v, prm.choices)) {
+            e.p[i] = (float)v;
+            changed = true;
+          }
+        } else {
+          changed |= ImGui::SliderFloat(prm.name, &e.p[i], prm.min, prm.max, prm.format,
+                                        prm.log ? ImGuiSliderFlags_Logarithmic : 0);
+          if (ImGui::IsItemHovered() && ImGui::IsMouseDoubleClicked(ImGuiMouseButton_Left)) {
+            e.p[i] = prm.def;  // double-click: back to the default
+            changed = true;
+          }
+        }
+      }
+      ImGui::EndDisabled();
+      ImGui::PopID();
+    }
+    ImGui::EndTable();
+  }
+  if (moveFrom >= 0) {
+    std::swap(fx[moveFrom], fx[moveTo]);
+    changed = true;
+  }
+  if (remove >= 0) {
+    fx.erase(fx.begin() + remove);
+    changed = true;
   }
   if (changed) {
     dirty_ = true;
@@ -446,8 +566,8 @@ void App::effectsHelp() {
       {"0Cxx", "Retrigger the note every xx ticks"},
       {"0Dxx", "Go to row xx of the next order"},
       {"0Fxx", "Set speed (ticks per row)"},
-      {"10xx", "Set waveform (0 pulse..5 wavetable; wavetable index on wavetable channels)"},
-      {"12xx", "Set duty (0-3), or the pulse width (01-FF) with fine pulse width. Noise: 1 = metallic, 3 = periodic"},
+      {"10xx", "Set waveform (0 pulse..5 wavetable; wavetable index on wavetable channels). AY: mixer (1 tone, 2 noise, 4 envelope). OPL: waveform 0-7"},
+      {"12xx", "Set duty (0-3), or the pulse width (01-FF) with fine pulse width. Noise: 1 = metallic, 3 = periodic. AY: noise period. SN / Game Boy noise: mode"},
       {"13xx", "Set the instrument filter cutoff (00-FF)"},
       {"80xx", "Panning: 00 left, 80 center, FF right"},
       {"90xx-92xx", "Sample offset (byte 0, 1, 2 of the position)"},

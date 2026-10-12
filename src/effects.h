@@ -1,7 +1,10 @@
 // Audio effects: a resonant state-variable filter (also used per channel by
-// SID-style instruments), a Freeverb-style reverb and a stereo delay.
+// SID-style instruments), a Freeverb-style reverb, a stereo delay, and the
+// per-channel insert effects.
 #pragma once
 #include <vector>
+
+#include "song.h"
 
 // Topology-preserving state-variable filter (Zavalishin). One input sample
 // gives low-, band- and high-pass outputs at once.
@@ -50,4 +53,45 @@ class StereoDelay {
  private:
   std::vector<float> l_, r_;
   int pos_ = 0;
+};
+
+// Biquad (RBJ cookbook) for the channel EQ.
+struct Biquad {
+  float b0 = 1, b1 = 0, b2 = 0, a1 = 0, a2 = 0;
+  float z1 = 0, z2 = 0;
+  void lowShelf(float freq, float gainDb, float sampleRate);
+  void highShelf(float freq, float gainDb, float sampleRate);
+  void peak(float freq, float gainDb, float q, float sampleRate);
+  float process(float x) {
+    float y = b0 * x + z1;
+    z1 = b1 * x - a1 * y + z2;
+    z2 = b2 * x - a2 * y;
+    return y;
+  }
+  void clear() { z1 = z2 = 0; }
+};
+
+// One slot of a channel's insert chain: keeps the state of whichever effect
+// the slot holds (it starts clean when the effect type changes).
+class ChannelFxUnit {
+ public:
+  void clear();
+  float process(float x, const ChannelEffect& e, float sampleRate);
+
+ private:
+  int type_ = -1;
+  // Bitcrusher.
+  float hold_ = 0;
+  int count_ = 0;
+  // Distortion tone filter.
+  float lp_ = 0;
+  // Chorus.
+  std::vector<float> buf_;
+  int pos_ = 0;
+  double phase_ = 0;
+  // EQ, with the settings its coefficients were made for.
+  Biquad low_, mid_, high_;
+  float eqFor_[4] = {-1e9f, -1e9f, -1e9f, -1e9f};
+  // Compressor level follower.
+  float env_ = 0;
 };
