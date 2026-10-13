@@ -40,6 +40,10 @@ C++17 - ImGui + SDL2
 - **Pattern tools**: interpolate, humanize, scale, reverse, expand / shrink, find / replace, swing
 - **Metronome**, **loop** over a range of orders, **count-in** before recording, **quantization** of MIDI recording
 - Undo / redo everywhere: notes, instruments, orders, song settings, samples
+- **Settings**: audio output and latency, custom keyboard shortcuts, interface size (75 to 250 %), theme
+- **English or French interface**, with this built-in manual (Help > Manual, `F1`)
+- **Autosave** and recovery after a crash, recent files, drag and drop of songs, instruments and
+  samples onto the window
 - Per-channel order list (like Furnace), add / duplicate / clone
 - Per-channel oscilloscope, mute / solo
 - Saving in a `.dtk` text format, export to WAV (full mix or one track per channel), OGG, MIDI, XM, MOD, IT and VGM
@@ -74,6 +78,7 @@ downloaded automatically; so is SDL2 if it is not installed. On Linux, MIDI inpu
 cmake -S . -B build -DCMAKE_BUILD_TYPE=Release
 cmake --build build -j
 ./build/datrackarxd              # or build\Release\datrackarxd.exe on Windows
+ctest --test-dir build           # the tests (add -C Release on Windows)
 ```
 
 On Linux, installing `libsdl2-dev` saves you from compiling SDL2.
@@ -120,9 +125,47 @@ datrackarxd --save-demo demo.dtk           # write the demo to a file
 | `Insert` / `Backspace` | Insert / delete a row |
 | Numpad `/` `*` | Octave - / + |
 | `Ctrl+N / O / S` | New / open / save |
+| `Ctrl+Shift+S` | Save as |
+| `Ctrl+,` | Settings |
+| `F1` | Manual |
 | Click on a channel name | Mute (right-click: solo) |
 
 Outside the pattern editor, the note keys play the current instrument (handy in the instrument editor).
+
+These are the default keys: every shortcut except the notes and the cursor keys can be changed in
+**Settings > Keyboard**. On macOS, `Cmd` works like `Ctrl`.
+
+## Settings, autosave and files
+
+**File > Settings...** (`Ctrl+,`):
+
+- **Audio**: the output device (or the system's) and the buffer size, with the latency it gives. A
+  small buffer answers the keyboard faster; if the sound crackles, raise it. An unplugged device is
+  replaced by the system's one.
+- **Interface**: the language (English / Francais), the interface size (75 to 250 %, for big screens)
+  and the theme.
+- **Keyboard**: click a shortcut, then press the new key (with `Ctrl`, `Shift` or `Alt` if you like);
+  `Esc` cancels, `Backspace` removes the shortcut. Two actions on the same key are shown in orange. The
+  menus always show the keys you chose.
+- **Files**: autosave (off, or every 1, 2, 5 or 10 minutes) and clearing the recent files list.
+
+**Autosave**: unsaved changes are copied to the settings folder. If DATRACKARXD closes without saving
+(crash, power cut), the next start offers to **recover** that copy. Saving the song or quitting normally
+removes it. Songs are also written to a temporary file first, then moved over the old one: an
+interrupted save never leaves a half-written file.
+
+**File > Open recent** keeps the last 10 songs. You can also **drag and drop** onto the window a song
+(it opens, after asking if there are unsaved changes), an instrument (`.dti`, `.fui`, `.wav`, added to
+the list) or a sample (`.flac`, `.mp3`, `.ogg`, added to the samples).
+
+The settings folder (`datrackarxd.cfg`, the window layout `datrackarxd.ini` and the autosave) is:
+
+- Windows: `%APPDATA%\DATRACKARXD\datrackarxd\`
+- macOS: `~/Library/Application Support/DATRACKARXD/datrackarxd/`
+- Linux: `~/.local/share/DATRACKARXD/datrackarxd/`
+
+If a `datrackarxd.cfg` is in the current folder (portable use, or settings from earlier versions),
+everything stays in that folder.
 
 ## Effects
 
@@ -488,6 +531,10 @@ A volume macro with a release point gives a real "release" (fade-out after the n
 - `src/keygen_main.cpp`, `src/filebrowser.*`: the DATRACKARXD Keygen app
 - `src/theme.*`: color themes
 - `src/app.*`: application, menus, shortcuts, file dialog
+- `src/ui_settings.cpp`, `src/shortcuts.*`, `src/paths.*`: settings, shortcuts, autosave, recent files
+- `src/i18n.*`, `src/lang_fr.inc`: interface translation (French texts)
+- `src/ui_manual.cpp`, `docs/manual_en.md`: built-in manual (README.md in French, `docs/manual_en.md` in English)
+- `tests/`: tests (`ctest`) and translation checks
 - `src/ui_pattern.cpp`: pattern editor
 - `src/ui_instrument.cpp`: instrument list and editor (chip, FM, sample), Samples window
 - `src/ui_windows.cpp`: orders, song, mixer, oscilloscope, keygen scroller, help
