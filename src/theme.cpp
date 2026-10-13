@@ -7,6 +7,7 @@ namespace {
 ImVec4 rgb(int r, int g, int b, float a = 1.0f) { return ImVec4(r / 255.0f, g / 255.0f, b / 255.0f, a); }
 
 int current = 0;
+float uiScale = 1.0f;
 
 }  // namespace
 
@@ -67,8 +68,9 @@ int themeIndex() { return current; }
 void setTheme(int index) {
   current = std::clamp(index, 0, THEME_COUNT - 1);
   const Theme& t = THEMES[current];
-  ImGui::StyleColorsDark();
   ImGuiStyle& style = ImGui::GetStyle();
+  style = ImGuiStyle();  // sizes from scratch, so the scale doesn't add up
+  ImGui::StyleColorsDark();
   style.WindowRounding = t.rounding;
   style.FrameRounding = t.rounding * 0.75f;
   style.TabRounding = t.rounding;
@@ -103,4 +105,12 @@ void setTheme(int index) {
   c[ImGuiCol_Border] = dim(t.tabSelected, 0.8f);
   c[ImGuiCol_Separator] = dim(t.tabSelected, 0.8f);
   c[ImGuiCol_DockingPreview] = ImVec4(t.accent.x, t.accent.y, t.accent.z, 0.7f);
+  if (uiScale != 1.0f) style.ScaleAllSizes(uiScale);
+}
+
+float themeScale() { return uiScale; }
+
+void setThemeScale(float scale) {
+  uiScale = scale;
+  setTheme(current);
 }

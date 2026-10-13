@@ -7,14 +7,23 @@
 #include <cmath>
 #include <cstdio>
 #include <cstdlib>
+#include <cstring>
 #include <sstream>
 
 #include "app.h"
+#include "i18n.h"
 #include "player.h"
 #include "theme.h"
 
+// A combo item list ("A\0B\0") held in a variable, translated as a whole.
+static const char* trChoices(const char* items) {
+  const char* p = items;
+  while (*p) p += std::strlen(p) + 1;
+  return trItems(items, (size_t)(p - items) + 1);
+}
+
 void App::ordersWindow() {
-  if (!ImGui::Begin("Orders", &showOrders_)) {
+  if (!ImGui::Begin(TW("Orders").c_str(), &showOrders_)) {
     ImGui::End();
     return;
   }
@@ -25,15 +34,15 @@ void App::ordersWindow() {
 
   // Order list operations.
   if (ImGui::Button("+") && numOrders < MAX_ORDERS) orderInsertNew(curOrder_ + 1);
-  if (ImGui::IsItemHovered()) ImGui::SetTooltip("Add an order with new empty patterns");
+  if (ImGui::IsItemHovered()) ImGui::SetTooltip("%s", T("Add an order with new empty patterns"));
   ImGui::SameLine();
-  if (ImGui::Button("Dup") && numOrders < MAX_ORDERS) orderDuplicate(curOrder_, curOrder_);
-  if (ImGui::IsItemHovered()) ImGui::SetTooltip("Duplicate this order (same patterns)");
+  if (ImGui::Button(T("Dup")) && numOrders < MAX_ORDERS) orderDuplicate(curOrder_, curOrder_);
+  if (ImGui::IsItemHovered()) ImGui::SetTooltip("%s", T("Duplicate this order (same patterns)"));
   ImGui::SameLine();
-  if (ImGui::Button("Clone") && numOrders < MAX_ORDERS) orderClone(curOrder_);
-  if (ImGui::IsItemHovered()) ImGui::SetTooltip("Copy this order into new patterns");
+  if (ImGui::Button(T("Clone")) && numOrders < MAX_ORDERS) orderClone(curOrder_);
+  if (ImGui::IsItemHovered()) ImGui::SetTooltip("%s", T("Copy this order into new patterns"));
   ImGui::SameLine();
-  if (ImGui::Button("Del") && numOrders > 1) orderDelete(curOrder_, curOrder_);
+  if (ImGui::Button(T("Del")) && numOrders > 1) orderDelete(curOrder_, curOrder_);
   ImGui::SameLine();
   if (ImGui::ArrowButton("up", ImGuiDir_Up) && curOrder_ > 0) {
     orderSwap(curOrder_, curOrder_ - 1);
@@ -47,7 +56,7 @@ void App::ordersWindow() {
 
   // Change the selected cell's pattern number.
   uint8_t& sel = song_.orders[curOrder_][ordCh_];
-  ImGui::Text("Ch %d pattern:", ordCh_ + 1);
+  ImGui::Text(T("Ch %d pattern:"), ordCh_ + 1);
   ImGui::SameLine();
   if (ImGui::SmallButton("-##pat") && sel > 0) {
     sel--;
@@ -61,7 +70,7 @@ void App::ordersWindow() {
     changed = true;
   }
   ImGui::SameLine();
-  ImGui::TextDisabled("(wheel on a cell)");
+  ImGui::TextDisabled("%s", T("(wheel on a cell)"));
 
   int playingOrder = engine_->playing() ? engine_->order() : -1;
   if (ImGui::BeginTable("orders", nch + 1,
@@ -112,24 +121,24 @@ void App::ordersWindow() {
 }
 
 void App::songWindow() {
-  if (!ImGui::Begin("Song", &showSong_)) {
+  if (!ImGui::Begin(TW("Song").c_str(), &showSong_)) {
     ImGui::End();
     return;
   }
   bool changed = false;
   char buf[256];
   std::snprintf(buf, sizeof(buf), "%s", song_.name.c_str());
-  if (ImGui::InputText("Name", buf, sizeof(buf))) {
+  if (ImGui::InputText(T("Name"), buf, sizeof(buf))) {
     song_.name = buf;
     changed = true;
   }
   std::snprintf(buf, sizeof(buf), "%s", song_.author.c_str());
-  if (ImGui::InputText("Author", buf, sizeof(buf))) {
+  if (ImGui::InputText(T("Author"), buf, sizeof(buf))) {
     song_.author = buf;
     changed = true;
   }
-  ImGui::SetNextItemWidth(120);
-  if (ImGui::InputFloat("Tick rate (Hz)", &song_.tickRate, 1, 10, "%.2f")) {
+  ImGui::SetNextItemWidth(S(120));
+  if (ImGui::InputFloat(T("Tick rate (Hz)"), &song_.tickRate, 1, 10, "%.2f")) {
     song_.tickRate = std::clamp(song_.tickRate, 1.0f, 1000.0f);
     changed = true;
   }
@@ -143,10 +152,10 @@ void App::songWindow() {
       if (!t.empty()) t.pop_back();
       std::snprintf(speedBuf, sizeof(speedBuf), "%s", t.c_str());
     }
-    ImGui::SetNextItemWidth(120);
-    ImGui::InputText("Speed (ticks/row)", speedBuf, sizeof(speedBuf));
+    ImGui::SetNextItemWidth(S(120));
+    ImGui::InputText(T("Speed (ticks/row)"), speedBuf, sizeof(speedBuf));
     editingSpeed = ImGui::IsItemActive();
-    if (ImGui::IsItemHovered()) ImGui::SetTooltip("Ticks per row. Several values (e.g. \"6 5\") alternate row by row for swing.");
+    if (ImGui::IsItemHovered()) ImGui::SetTooltip("%s", T("Ticks per row. Several values (e.g. \"6 5\") alternate row by row for swing."));
     if (ImGui::IsItemDeactivatedAfterEdit()) {
       std::vector<int> sp;
       std::istringstream ss(speedBuf);
@@ -157,38 +166,38 @@ void App::songWindow() {
         changed = true;
       }
     }
-    if (ImGui::SmallButton("Swing...")) ImGui::OpenPopup("swing");
+    if (ImGui::SmallButton(T("Swing..."))) ImGui::OpenPopup("swing");
     if (ImGui::BeginPopup("swing")) {
       // Swing: long row then short row, the same tempo on average.
       int total = 0;
       for (int v : song_.speeds) total += v;
       int base = std::max(1, (int)std::lround(total / (float)std::max<size_t>(1, song_.speeds.size())));
       int amount = song_.speeds.size() == 2 ? std::abs(song_.speeds[0] - song_.speeds[1]) / 2 : 0;
-      ImGui::SetNextItemWidth(140);
-      bool c1 = ImGui::SliderInt("Speed", &base, 1, 32);
-      ImGui::SetNextItemWidth(140);
-      bool c2 = ImGui::SliderInt("Swing", &amount, 0, std::max(0, base - 1));
+      ImGui::SetNextItemWidth(S(140));
+      bool c1 = ImGui::SliderInt(T("Speed"), &base, 1, 32);
+      ImGui::SetNextItemWidth(S(140));
+      bool c2 = ImGui::SliderInt(T("Swing"), &amount, 0, std::max(0, base - 1));
       if (c1 || c2) {
         amount = std::min(amount, base - 1);
         song_.speeds = amount ? std::vector<int>{base + amount, base - amount} : std::vector<int>{base};
         changed = true;
       }
-      ImGui::TextDisabled("Rows alternate %d and %d ticks.", base + amount, base - amount);
+      ImGui::TextDisabled(T("Rows alternate %d and %d ticks."), base + amount, base - amount);
       ImGui::EndPopup();
     }
   }
-  ImGui::SetNextItemWidth(120);
-  if (ImGui::InputInt("Pattern length", &song_.patternLength)) {
+  ImGui::SetNextItemWidth(S(120));
+  if (ImGui::InputInt(T("Pattern length"), &song_.patternLength)) {
     song_.patternLength = std::clamp(song_.patternLength, 1, MAX_ROWS);
     changed = true;
   }
-  ImGui::SetNextItemWidth(120);
-  if (ImGui::InputInt("Highlight 1", &song_.highlight1)) {
+  ImGui::SetNextItemWidth(S(120));
+  if (ImGui::InputInt(T("Highlight 1"), &song_.highlight1)) {
     song_.highlight1 = std::clamp(song_.highlight1, 0, MAX_ROWS);
     changed = true;
   }
-  ImGui::SetNextItemWidth(120);
-  if (ImGui::InputInt("Highlight 2", &song_.highlight2)) {
+  ImGui::SetNextItemWidth(S(120));
+  if (ImGui::InputInt(T("Highlight 2"), &song_.highlight2)) {
     song_.highlight2 = std::clamp(song_.highlight2, 0, MAX_ROWS);
     changed = true;
   }
@@ -196,12 +205,12 @@ void App::songWindow() {
   for (int v : song_.speeds) avgSpeed += v;
   avgSpeed = song_.speeds.empty() ? 6 : avgSpeed / song_.speeds.size();
   float bpm = song_.tickRate * 60.0f / (std::max(avgSpeed, 1.0f) * std::max(song_.highlight1, 1));
-  ImGui::TextDisabled("= %.1f BPM (one beat = Highlight 1 rows)", bpm);
+  ImGui::TextDisabled(T("= %.1f BPM (one beat = Highlight 1 rows)"), bpm);
 
   ImGui::Separator();
   int nch = song_.channelCount();
-  ImGui::SetNextItemWidth(120);
-  if (ImGui::InputInt("Channels", &nch) && nch != song_.channelCount()) {
+  ImGui::SetNextItemWidth(S(120));
+  if (ImGui::InputInt(T("Channels"), &nch) && nch != song_.channelCount()) {
     pushFullUndo();
     engine_->stop();
     song_.setChannelCount(nch);
@@ -209,9 +218,9 @@ void App::songWindow() {
   }
   if (ImGui::BeginTable("chans", 4, ImGuiTableFlags_SizingStretchProp | ImGuiTableFlags_RowBg)) {
     ImGui::TableSetupColumn("#", ImGuiTableColumnFlags_WidthFixed);
-    ImGui::TableSetupColumn("Name");
-    ImGui::TableSetupColumn("FX cols", ImGuiTableColumnFlags_WidthFixed, 90);
-    ImGui::TableSetupColumn("Mix", ImGuiTableColumnFlags_WidthFixed, 70);
+    ImGui::TableSetupColumn(T("Name"));
+    ImGui::TableSetupColumn(T("FX cols"), ImGuiTableColumnFlags_WidthFixed, 90);
+    ImGui::TableSetupColumn(T("Mix"), ImGuiTableColumnFlags_WidthFixed, 70);
     ImGui::TableHeadersRow();
     for (int c = 0; c < song_.channelCount(); c++) {
       ChannelInfo& info = song_.channels[c];
@@ -249,63 +258,63 @@ void App::songWindow() {
 
 // Master effects and the per-channel levels and sends.
 void App::mixerWindow() {
-  if (!ImGui::Begin("Mixer", &showMixer_)) {
+  if (!ImGui::Begin(TW("Mixer").c_str(), &showMixer_)) {
     ImGui::End();
     return;
   }
   bool changed = false;
   MasterFx& fx = song_.fx;
-  const float w = 150;
+  const float w = S(150);
   if (ImGui::BeginTable("master", 3, ImGuiTableFlags_SizingStretchSame | ImGuiTableFlags_BordersInnerV)) {
     ImGui::TableNextRow();
     ImGui::TableNextColumn();
-    changed |= ImGui::Checkbox("Reverb", &fx.reverb);
+    changed |= ImGui::Checkbox(T("Reverb"), &fx.reverb);
     ImGui::BeginDisabled(!fx.reverb);
     ImGui::SetNextItemWidth(w);
-    changed |= ImGui::SliderFloat("Room size", &fx.roomSize, 0, 1, "%.2f");
+    changed |= ImGui::SliderFloat(T("Room size"), &fx.roomSize, 0, 1, "%.2f");
     ImGui::SetNextItemWidth(w);
-    changed |= ImGui::SliderFloat("Damping", &fx.damping, 0, 1, "%.2f");
+    changed |= ImGui::SliderFloat(T("Damping"), &fx.damping, 0, 1, "%.2f");
     ImGui::SetNextItemWidth(w);
-    changed |= ImGui::SliderFloat("Level##rv", &fx.reverbLevel, 0, 2, "%.2f");
+    changed |= ImGui::SliderFloat(T("Level##rv"), &fx.reverbLevel, 0, 2, "%.2f");
     ImGui::EndDisabled();
 
     ImGui::TableNextColumn();
-    changed |= ImGui::Checkbox("Delay", &fx.delay);
+    changed |= ImGui::Checkbox(T("Delay"), &fx.delay);
     ImGui::SameLine();
-    changed |= ImGui::Checkbox("Ping-pong", &fx.pingPong);
+    changed |= ImGui::Checkbox(T("Ping-pong"), &fx.pingPong);
     ImGui::BeginDisabled(!fx.delay);
     ImGui::SetNextItemWidth(w);
-    changed |= ImGui::SliderInt("Time (rows)", &fx.delayRows, 1, 16);
+    changed |= ImGui::SliderInt(T("Time (rows)"), &fx.delayRows, 1, 16);
     ImGui::SetNextItemWidth(w);
-    changed |= ImGui::SliderFloat("Feedback", &fx.delayFeedback, 0, 0.95f, "%.2f");
+    changed |= ImGui::SliderFloat(T("Feedback"), &fx.delayFeedback, 0, 0.95f, "%.2f");
     ImGui::SetNextItemWidth(w);
-    changed |= ImGui::SliderFloat("Level##dl", &fx.delayLevel, 0, 2, "%.2f");
+    changed |= ImGui::SliderFloat(T("Level##dl"), &fx.delayLevel, 0, 2, "%.2f");
     ImGui::EndDisabled();
 
     ImGui::TableNextColumn();
-    changed |= ImGui::Checkbox("Filter", &fx.filter);
+    changed |= ImGui::Checkbox(T("Filter"), &fx.filter);
     ImGui::BeginDisabled(!fx.filter);
     ImGui::SetNextItemWidth(w);
-    changed |= ImGui::Combo("Type", &fx.filterType, "Low-pass\0Band-pass\0High-pass\0");
+    changed |= ImGui::Combo(T("Type"), &fx.filterType, TC("Low-pass\0Band-pass\0High-pass\0"));
     ImGui::SetNextItemWidth(w);
-    changed |= ImGui::SliderFloat("Cutoff", &fx.cutoff, 20, 20000, "%.0f Hz", ImGuiSliderFlags_Logarithmic);
+    changed |= ImGui::SliderFloat(T("Cutoff"), &fx.cutoff, 20, 20000, "%.0f Hz", ImGuiSliderFlags_Logarithmic);
     ImGui::SetNextItemWidth(w);
-    changed |= ImGui::SliderFloat("Resonance", &fx.resonance, 0, 1, "%.2f");
+    changed |= ImGui::SliderFloat(T("Resonance"), &fx.resonance, 0, 1, "%.2f");
     ImGui::EndDisabled();
     ImGui::SetNextItemWidth(w);
-    changed |= ImGui::SliderFloat("Master", &fx.volume, 0, 2, "%.2f");
+    changed |= ImGui::SliderFloat(T("Master"), &fx.volume, 0, 2, "%.2f");
     ImGui::EndTable();
   }
 
   ImGui::Separator();
   if (ImGui::BeginTable("sends", 7, ImGuiTableFlags_SizingStretchSame | ImGuiTableFlags_RowBg)) {
-    ImGui::TableSetupColumn("Channel");
-    ImGui::TableSetupColumn("Mix");
-    ImGui::TableSetupColumn("Pan");
-    ImGui::TableSetupColumn("Reverb send");
-    ImGui::TableSetupColumn("Delay send");
-    ImGui::TableSetupColumn("Insert FX", ImGuiTableColumnFlags_WidthFixed);
-    ImGui::TableSetupColumn("Mute", ImGuiTableColumnFlags_WidthFixed);
+    ImGui::TableSetupColumn(T("Channel"));
+    ImGui::TableSetupColumn(T("Mix"));
+    ImGui::TableSetupColumn(T("Pan"));
+    ImGui::TableSetupColumn(T("Reverb send"));
+    ImGui::TableSetupColumn(T("Delay send"));
+    ImGui::TableSetupColumn(T("Insert FX"), ImGuiTableColumnFlags_WidthFixed);
+    ImGui::TableSetupColumn(T("Mute"), ImGuiTableColumnFlags_WidthFixed);
     ImGui::TableHeadersRow();
     for (int c = 0; c < song_.channelCount(); c++) {
       ChannelInfo& info = song_.channels[c];
@@ -318,7 +327,7 @@ void App::mixerWindow() {
       changed |= ImGui::SliderFloat("##mix", &info.mix, 0.0f, 2.0f, "%.2f");
       ImGui::TableNextColumn();
       ImGui::SetNextItemWidth(-1);
-      if (ImGui::SliderInt("##pan", &info.pan, 0, 255, info.pan == 128 ? "C" : info.pan < 128 ? "L%d" : "R%d")) changed = true;
+      if (ImGui::SliderInt("##pan", &info.pan, 0, 255, info.pan == 128 ? "C" : info.pan < 128 ? T("L%d") : T("R%d"))) changed = true;
       if (ImGui::IsItemActive()) engine_->resetPan(c);  // hear it right away
       ImGui::TableNextColumn();
       ImGui::SetNextItemWidth(-1);
@@ -334,12 +343,12 @@ void App::mixerWindow() {
       if (ImGui::SmallButton(fxLabel)) {
         fxCh_ = c;
         showChanFx_ = true;
-        ImGui::SetWindowFocus("Channel FX");
+        ImGui::SetWindowFocus("###Channel FX");
       }
       if (ImGui::IsItemHovered() && !info.effects.empty()) {
         std::string list;
         for (const ChannelEffect& e : info.effects)
-          list += std::string(CHAN_FX_INFO[e.type].name) + (e.on ? "\n" : " (off)\n");
+          list += std::string(T(CHAN_FX_INFO[e.type].name)) + (e.on ? "\n" : T(" (off)\n"));
         ImGui::SetTooltip("%s", list.c_str());
       }
       ImGui::TableNextColumn();
@@ -357,7 +366,7 @@ void App::mixerWindow() {
 
 // The insert effects of one channel, in processing order.
 void App::channelFxWindow() {
-  if (!ImGui::Begin("Channel FX", &showChanFx_)) {
+  if (!ImGui::Begin(TW("Channel FX").c_str(), &showChanFx_)) {
     ImGui::End();
     return;
   }
@@ -366,8 +375,8 @@ void App::channelFxWindow() {
   bool changed = false;
   char label[96];
   std::snprintf(label, sizeof(label), "%d %s", fxCh_ + 1, nch ? song_.channels[fxCh_].name.c_str() : "");
-  ImGui::SetNextItemWidth(220);
-  if (ImGui::BeginCombo("Channel", label)) {
+  ImGui::SetNextItemWidth(S(220));
+  if (ImGui::BeginCombo(T("Channel"), label)) {
     for (int c = 0; c < nch; c++) {
       std::snprintf(label, sizeof(label), "%d %s (%zu)", c + 1, song_.channels[c].name.c_str(), song_.channels[c].effects.size());
       if (ImGui::Selectable(label, c == fxCh_)) fxCh_ = c;
@@ -375,8 +384,8 @@ void App::channelFxWindow() {
     ImGui::EndCombo();
   }
   ImGui::SameLine();
-  if (ImGui::SmallButton("Current")) fxCh_ = std::clamp(curCh_, 0, std::max(0, nch - 1));
-  if (ImGui::IsItemHovered()) ImGui::SetTooltip("Show the channel the cursor is on");
+  if (ImGui::SmallButton(T("Current"))) fxCh_ = std::clamp(curCh_, 0, std::max(0, nch - 1));
+  if (ImGui::IsItemHovered()) ImGui::SetTooltip("%s", T("Show the channel the cursor is on"));
   if (nch == 0) {
     ImGui::End();
     return;
@@ -384,20 +393,20 @@ void App::channelFxWindow() {
   std::vector<ChannelEffect>& fx = song_.channels[fxCh_].effects;
   ImGui::SameLine();
   ImGui::BeginDisabled((int)fx.size() >= MAX_CHANNEL_FX);
-  ImGui::SetNextItemWidth(150);
-  if (ImGui::BeginCombo("##add", "Add effect...")) {
+  ImGui::SetNextItemWidth(S(150));
+  if (ImGui::BeginCombo("##add", T("Add effect..."))) {
     for (int t = 0; t < CFX_COUNT; t++)
-      if (ImGui::Selectable(CHAN_FX_INFO[t].name)) {
+      if (ImGui::Selectable(T(CHAN_FX_INFO[t].name))) {
         fx.push_back(ChannelEffect::make(t));
         changed = true;
       }
     ImGui::EndCombo();
   }
   ImGui::EndDisabled();
-  if (fx.empty()) ImGui::TextDisabled("No effect on this channel. The chain runs top to bottom, before the mixer.");
+  if (fx.empty()) ImGui::TextDisabled("%s", T("No effect on this channel. The chain runs top to bottom, before the mixer."));
 
   int moveFrom = -1, moveTo = -1, remove = -1;
-  const float w = 170;
+  const float w = S(170);
   if (ImGui::BeginTable("chain", std::max(1, (int)fx.size()), ImGuiTableFlags_BordersInnerV | ImGuiTableFlags_ScrollX)) {
     for (int k = 0; k < (int)fx.size(); k++) ImGui::TableSetupColumn("", ImGuiTableColumnFlags_WidthFixed, w + 90);
     ImGui::TableNextRow();
@@ -406,7 +415,7 @@ void App::channelFxWindow() {
       const ChanFxInfo& info = CHAN_FX_INFO[e.type];
       ImGui::TableNextColumn();
       ImGui::PushID(k);
-      changed |= ImGui::Checkbox(info.name, &e.on);
+      changed |= ImGui::Checkbox(T(info.name), &e.on);
       ImGui::SameLine();
       if (ImGui::ArrowButton("##l", ImGuiDir_Left) && k > 0) {
         moveFrom = k;
@@ -425,12 +434,12 @@ void App::channelFxWindow() {
         ImGui::SetNextItemWidth(w);
         if (prm.choices) {
           int v = (int)std::lround(e.p[i]);
-          if (ImGui::Combo(prm.name, &v, prm.choices)) {
+          if (ImGui::Combo(T(prm.name), &v, trChoices(prm.choices))) {
             e.p[i] = (float)v;
             changed = true;
           }
         } else {
-          changed |= ImGui::SliderFloat(prm.name, &e.p[i], prm.min, prm.max, prm.format,
+          changed |= ImGui::SliderFloat(T(prm.name), &e.p[i], prm.min, prm.max, prm.format,
                                         prm.log ? ImGuiSliderFlags_Logarithmic : 0);
           if (ImGui::IsItemHovered() && ImGui::IsMouseDoubleClicked(ImGuiMouseButton_Left)) {
             e.p[i] = prm.def;  // double-click: back to the default
@@ -459,7 +468,7 @@ void App::channelFxWindow() {
 }
 
 void App::scopeWindow() {
-  if (!ImGui::Begin("Oscilloscope", &showScope_)) {
+  if (!ImGui::Begin(TW("Oscilloscope").c_str(), &showScope_)) {
     ImGui::End();
     return;
   }
@@ -493,14 +502,14 @@ void App::scopeWindow() {
   };
   for (int c = 0; c < nch; c++)
     drawScope(c, engine_->channel(c).scope, song_.channels[c].muted ? theme().scopeMuted : theme().scope, song_.channels[c].name.c_str());
-  drawScope(nch, engine_->masterScope(), theme().scopeMaster, "Master");
+  drawScope(nch, engine_->masterScope(), theme().scopeMaster, T("Master"));
   ImGui::Dummy(avail);
   ImGui::End();
 }
 
 // Keygen-style intro screen (the same scene as the exported players).
 void App::scrollerWindow() {
-  if (!ImGui::Begin("Keygen", &showScroller_)) {
+  if (!ImGui::Begin(TW("Keygen").c_str(), &showScroller_)) {
     ImGui::End();
     return;
   }
@@ -510,11 +519,11 @@ void App::scrollerWindow() {
   size.y = std::max(size.y, 50.0f);
   float peak = 0;
   for (float v : engine_->masterScope()) peak = std::max(peak, std::abs(v));
-  std::string text = "      *** DATRACKARXD ***   NOW PLAYING: " + song_.name;
-  if (!song_.author.empty()) text += "  BY " + song_.author;
-  text += "   ***   " + std::to_string(song_.channelCount()) + " CHANNELS OF PURE CHIP POWER   ***   " +
-          std::to_string(song_.instruments.size()) + " INSTRUMENTS   ***   PRESS ENTER TO PLAY   ***   "
-          "GREETINGS TO ALL TRACKER MUSICIANS, DEMOSCENERS AND FURNACE USERS   ***   ";
+  std::string text = T("      *** DATRACKARXD ***   NOW PLAYING: ") + song_.name;
+  if (!song_.author.empty()) text += T("  BY ") + song_.author;
+  text += "   ***   " + std::to_string(song_.channelCount()) + T(" CHANNELS OF PURE CHIP POWER   ***   ") +
+          std::to_string(song_.instruments.size()) + T(" INSTRUMENTS   ***   PRESS ENTER TO PLAY   ***   "
+          "GREETINGS TO ALL TRACKER MUSICIANS, DEMOSCENERS AND FURNACE USERS   ***   ");
   keygen_.scroll = text;
   channelLevels(*engine_, song_.channelCount(), keygen_.levels);
   keygen_.draw(ImGui::GetWindowDrawList(), p0, size, (float)ImGui::GetTime(), ImGui::GetIO().DeltaTime, peak);
@@ -523,7 +532,7 @@ void App::scrollerWindow() {
 }
 
 void App::effectsHelp() {
-  if (!ImGui::Begin("Effects", &showEffects_)) {
+  if (!ImGui::Begin(TW("Effects").c_str(), &showEffects_)) {
     ImGui::End();
     return;
   }
@@ -566,17 +575,17 @@ void App::effectsHelp() {
       ImGui::TableNextColumn();
       ImGui::TextColored(ImVec4(1, 0.65f, 0.3f, 1), "%s", r[0]);
       ImGui::TableNextColumn();
-      ImGui::TextWrapped("%s", r[1]);
+      ImGui::TextWrapped("%s", T(r[1]));
     }
     ImGui::EndTable();
   }
   ImGui::Separator();
-  ImGui::TextWrapped("Volume column: 00-7F. Effects with value 00 stop the effect (arpeggio, slides, vibrato).");
+  ImGui::TextWrapped("%s", T("Volume column: 00-7F. Effects with value 00 stop the effect (arpeggio, slides, vibrato)."));
   ImGui::End();
 }
 
 void App::keysHelp() {
-  if (!ImGui::Begin("Keyboard", &showKeys_)) {
+  if (!ImGui::Begin(TW("Keyboard").c_str(), &showKeys_)) {
     ImGui::End();
     return;
   }
@@ -609,13 +618,14 @@ void App::keysHelp() {
       {"Piano roll: arrows", "Move selection (Up/Down: semitone, Shift: octave)"},
       {"Piano roll: wheel", "Scroll; Shift: horizontal, Ctrl: zoom time, Alt: zoom pitch"},
   };
+  ImGui::TextDisabled("%s", T("These are the default keys: they can be changed in Settings > Keyboard."));
   if (ImGui::BeginTable("keys", 2, ImGuiTableFlags_RowBg | ImGuiTableFlags_SizingStretchProp)) {
     for (auto& r : rows) {
       ImGui::TableNextRow();
       ImGui::TableNextColumn();
-      ImGui::TextColored(ImVec4(0.5f, 0.8f, 1, 1), "%s", r[0]);
+      ImGui::TextColored(ImVec4(0.5f, 0.8f, 1, 1), "%s", T(r[0]));
       ImGui::TableNextColumn();
-      ImGui::TextWrapped("%s", r[1]);
+      ImGui::TextWrapped("%s", T(r[1]));
     }
     ImGui::EndTable();
   }
@@ -623,13 +633,13 @@ void App::keysHelp() {
 }
 
 void App::aboutWindow() {
-  ImGui::SetNextWindowSize(ImVec2(380, 0), ImGuiCond_Appearing);
-  if (ImGui::Begin("About", &showAbout_, ImGuiWindowFlags_NoDocking)) {
-    ImGui::Text("DATRACKARXD %s", DATRACKARXD_VERSION);
-    ImGui::TextWrapped("A small tracker in the spirit of Furnace: chip waves (pulse, triangle, saw, noise, sine, "
+  ImGui::SetNextWindowSize(ImVec2(S(380), 0), ImGuiCond_Appearing);
+  if (ImGui::Begin(TW("About").c_str(), &showAbout_, ImGuiWindowFlags_NoDocking)) {
+    ImGui::Text(T("DATRACKARXD %s"), DATRACKARXD_VERSION);
+    ImGui::TextWrapped("%s", T("A small tracker in the spirit of Furnace: chip waves (pulse, triangle, saw, noise, sine, "
                        "wavetable), 4-operator FM, SID-style filter, ring mod and sync, and samples, with Furnace-style "
                        "macros, master effects and MIDI input. Imports FUR, DMF, FTM, MOD, XM, IT, S3M and MIDI; exports "
-                       "WAV, OGG, MIDI and standalone keygen players.");
+                       "WAV, OGG, MIDI and standalone keygen players."));
   }
   ImGui::End();
 }

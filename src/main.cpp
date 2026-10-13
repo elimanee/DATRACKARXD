@@ -13,6 +13,7 @@
 #include "import.h"
 #include "midifile.h"
 #include "modexport.h"
+#include "paths.h"
 #include "payload.h"
 #include "vgmexport.h"
 #include "player.h"
@@ -196,14 +197,17 @@ int main(int argc, char** argv) {
   ImGui::CreateContext();
   ImGuiIO& io = ImGui::GetIO();
   io.ConfigFlags |= ImGuiConfigFlags_DockingEnable;
-  io.IniFilename = "datrackarxd.ini";
+  static std::string iniPath = configPath("datrackarxd.ini");
+  io.IniFilename = iniPath.c_str();
   ImGui_ImplSDL2_InitForSDLRenderer(window, renderer);
   ImGui_ImplSDLRenderer2_Init(renderer);
 
   App app;
   app.loadSettings();
+  app.checkRecovery();
   if (argc >= 2) app.loadFile(argv[1]);
   app.openAudio();
+  SDL_EventState(SDL_DROPFILE, SDL_ENABLE);
 
   std::string title;
   while (!app.quit) {
@@ -215,12 +219,18 @@ int main(int argc, char** argv) {
         app.requestQuit();
       if (ev.type == SDL_KEYDOWN || ev.type == SDL_KEYUP)
         app.queueKey({ev.key.keysym.scancode, ev.key.keysym.sym, ev.key.keysym.mod, ev.type == SDL_KEYDOWN, ev.key.repeat != 0});
+      if (ev.type == SDL_DROPFILE) {
+        std::lock_guard<std::mutex> lock(app.engine().mutex);
+        app.dropFile(ev.drop.file);
+        SDL_free(ev.drop.file);
+      }
     }
     if (SDL_GetWindowFlags(window) & SDL_WINDOW_MINIMIZED) {
       SDL_Delay(20);
       continue;
     }
 
+    app.beforeFrame();
     ImGui_ImplSDLRenderer2_NewFrame();
     ImGui_ImplSDL2_NewFrame();
     {

@@ -40,6 +40,10 @@ FamiTracker, MOD, XM, IT, S3M et MIDI.
 - **Outils de pattern** : interpoler, humaniser, mettre à l'échelle, inverser, étirer / compresser, chercher / remplacer, swing
 - **Métronome**, **boucle** sur une plage d'orders, **décompte** avant l'enregistrement, **quantification** de l'enregistrement MIDI
 - Annuler / refaire partout : notes, instruments, orders, réglages du morceau, samples
+- **Réglages** : sortie audio et latence, raccourcis clavier personnalisables, taille de l'interface (75 à 250 %), thème
+- **Interface en français ou en anglais**, avec ce manuel intégré (Aide > Manuel, `F1`)
+- **Sauvegarde automatique** et récupération après un plantage, fichiers récents, glisser-déposer de
+  morceaux, d'instruments et de samples sur la fenêtre
 - Liste d'orders par canal (comme Furnace), ajout / duplication / clonage
 - Oscilloscope par canal, mute / solo
 - Sauvegarde dans un format texte `.dtk`, export WAV (mix complet ou une piste par canal), OGG, MIDI, XM, MOD, IT et VGM
@@ -74,6 +78,7 @@ téléchargés automatiquement ; SDL2 aussi s'il n'est pas installé. Sous Linux
 cmake -S . -B build -DCMAKE_BUILD_TYPE=Release
 cmake --build build -j
 ./build/datrackarxd              # ou build\Release\datrackarxd.exe sous Windows
+ctest --test-dir build           # les tests (ajouter -C Release sous Windows)
 ```
 
 Sous Linux, installer `libsdl2-dev` évite de recompiler SDL2.
@@ -120,9 +125,50 @@ datrackarxd --save-demo demo.dtk           # écrire la démo dans un fichier
 | `Inser` / `Retour arrière` | Insérer / supprimer une ligne |
 | Pavé num. `/` `*` | Octave - / + |
 | `Ctrl+N / O / S` | Nouveau / ouvrir / sauvegarder |
+| `Ctrl+Shift+S` | Enregistrer sous |
+| `Ctrl+,` | Réglages |
+| `F1` | Manuel |
 | Clic sur un nom de canal | Mute (clic droit : solo) |
 
 Hors de l'éditeur de patterns, les touches de notes jouent l'instrument courant (pratique dans l'éditeur d'instruments).
+
+Ce sont les touches par défaut : tous les raccourcis, sauf les notes et le déplacement du curseur, se
+changent dans **Réglages > Clavier**. Sur macOS, `Cmd` marche comme `Ctrl`.
+
+## Réglages, sauvegarde automatique et fichiers
+
+**Fichier > Réglages...** (`Ctrl+,`) :
+
+- **Audio** : la sortie (ou celle du système) et la taille du tampon, avec la latence qu'elle donne. Un
+  petit tampon répond plus vite au clavier ; s'il y a des craquements, l'augmenter. Une sortie débranchée
+  est remplacée par celle du système.
+- **Interface** : la langue (English / Français), la taille de l'interface (75 à 250 %, pour les grands
+  écrans) et le thème.
+- **Clavier** : cliquer sur un raccourci puis appuyer sur la nouvelle touche (avec `Ctrl`, `Shift` ou `Alt`
+  si on veut) ; `Échap` annule, `Retour arrière` retire le raccourci. Deux actions sur la même touche sont
+  signalées en orange. Les menus affichent toujours les touches choisies.
+- **Fichiers** : la sauvegarde automatique (désactivée, ou toutes les 1, 2, 5 ou 10 minutes) et le
+  vidage de la liste des fichiers récents.
+
+**Sauvegarde automatique** : les changements non enregistrés sont copiés dans le dossier des réglages.
+Si DATRACKARXD se ferme sans avoir enregistré (plantage, coupure de courant), le prochain démarrage
+propose de **récupérer** cette copie. Enregistrer le morceau ou quitter normalement l'efface. Les morceaux
+sont aussi écrits dans un fichier temporaire puis mis à la place de l'ancien : une sauvegarde interrompue
+ne laisse jamais un fichier à moitié écrit.
+
+**Fichier > Ouvrir un fichier récent** garde les 10 derniers morceaux. On peut aussi **glisser-déposer**
+sur la fenêtre un morceau (il s'ouvre, après confirmation s'il y a des changements), un instrument (`.dti`,
+`.fui`, `.wav`, ajouté à la liste) ou un sample (`.flac`, `.mp3`, `.ogg`, ajouté aux samples).
+
+Le dossier des réglages (`datrackarxd.cfg`, la disposition des fenêtres `datrackarxd.ini` et la sauvegarde
+automatique) est :
+
+- Windows : `%APPDATA%\DATRACKARXD\datrackarxd\`
+- macOS : `~/Library/Application Support/DATRACKARXD/datrackarxd/`
+- Linux : `~/.local/share/DATRACKARXD/datrackarxd/`
+
+Si un `datrackarxd.cfg` se trouve dans le dossier courant (utilisation portable, ou réglages des
+versions précédentes), tout reste dans ce dossier.
 
 ## Effets
 
@@ -488,6 +534,10 @@ La macro volume avec un point de release donne un vrai « release » (fondu apr�
 - `src/keygen_main.cpp`, `src/filebrowser.*` : l'appli DATRACKARXD Keygen
 - `src/theme.*` : thèmes de couleurs
 - `src/app.*` : application, menus, raccourcis, dialogue de fichiers
+- `src/ui_settings.cpp`, `src/shortcuts.*`, `src/paths.*` : réglages, raccourcis, sauvegarde automatique, fichiers récents
+- `src/i18n.*`, `src/lang_fr.inc` : traduction de l'interface (textes français)
+- `src/ui_manual.cpp`, `docs/manual_en.md` : manuel intégré (ce README en français, `docs/manual_en.md` en anglais)
+- `tests/` : tests (`ctest`) et vérification des traductions
 - `src/ui_pattern.cpp` : éditeur de patterns
 - `src/ui_instrument.cpp` : liste et éditeur d'instruments (puce, FM, sample), fenêtre Samples
 - `src/ui_windows.cpp` : orders, song, mixer, oscilloscope, scroller keygen, aide

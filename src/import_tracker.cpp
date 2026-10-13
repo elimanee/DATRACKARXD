@@ -396,6 +396,12 @@ bool importS3M(const std::vector<uint8_t>& data, Song& song, std::string& err) {
   r.u8();  // master volume
   r.u8();
   int defaultPan = r.u8();
+  // Scream Tracker stops at 256 orders and 100 instruments / patterns; a
+  // damaged header would otherwise ask for millions of empty rows.
+  if (data.size() < 0x60 || ordNum > 256 || insNum > 256 || patNum > 256) {
+    err = "Not a valid S3M file";
+    return false;
+  }
   r.seek(0x40);
   int chanSet[32];
   for (int& c : chanSet) c = r.u8();

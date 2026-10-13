@@ -9,6 +9,7 @@
 #include <cstdio>
 
 #include "app.h"
+#include "i18n.h"
 #include "theme.h"
 
 namespace {
@@ -161,12 +162,12 @@ bool isBlack(int note) {
 void App::pianoRollWindow() {
   // First time ever (no saved layout for it): open as a tab next to Pattern.
   if (patternDockId_) ImGui::SetNextWindowDockID(patternDockId_, ImGuiCond_FirstUseEver);
-  if (!ImGui::Begin("Piano roll", &showPianoRoll_)) {
+  if (!ImGui::Begin(TW("Piano roll").c_str(), &showPianoRoll_)) {
     ImGui::End();
     return;
   }
   ImGuiIO& io = ImGui::GetIO();
-  const Theme& T = theme();
+  const Theme& TH = theme();
   int nch = song_.channelCount();
   curCh_ = std::clamp(curCh_, 0, nch - 1);
   curOrder_ = std::clamp(curOrder_, 0, (int)song_.orders.size() - 1);
@@ -179,8 +180,8 @@ void App::pianoRollWindow() {
   }
 
   // Toolbar.
-  ImGui::SetNextItemWidth(160);
-  if (ImGui::BeginCombo("Channel", song_.channels[ch].name.c_str())) {
+  ImGui::SetNextItemWidth(S(160));
+  if (ImGui::BeginCombo(T("Channel"), song_.channels[ch].name.c_str())) {
     for (int c = 0; c < nch; c++) {
       char buf[96];
       std::snprintf(buf, sizeof(buf), "%d: %s", c + 1, song_.channels[c].name.c_str());
@@ -192,30 +193,30 @@ void App::pianoRollWindow() {
     ImGui::EndCombo();
   }
   ImGui::SameLine();
-  ImGui::SetNextItemWidth(80);
-  ImGui::InputInt("Length", &prLength_);
+  ImGui::SetNextItemWidth(S(80));
+  ImGui::InputInt(T("Length"), &prLength_);
   prLength_ = std::clamp(prLength_, 1, MAX_ROWS);
   ImGui::SameLine();
-  ImGui::SetNextItemWidth(80);
-  ImGui::InputInt("Voices", &prVoices_);
+  ImGui::SetNextItemWidth(S(80));
+  ImGui::InputInt(T("Voices"), &prVoices_);
   prVoices_ = std::clamp(prVoices_, 1, 8);
   if (ImGui::IsItemHovered())
-    ImGui::SetTooltip("Chords: notes that overlap are spread over this channel and the next ones");
+    ImGui::SetTooltip("%s", T("Chords: notes that overlap are spread over this channel and the next ones"));
   ImGui::SameLine();
-  ImGui::Checkbox("Ghosts", &prGhosts_);
+  ImGui::Checkbox(T("Ghosts"), &prGhosts_);
   ImGui::SameLine();
-  ImGui::Checkbox("MPE", &prMpe_);
+  ImGui::Checkbox(T("MPE"), &prMpe_);
   if (ImGui::IsItemHovered())
-    ImGui::SetTooltip("Per-note expression, like MPE in Ableton:\n"
+    ImGui::SetTooltip("%s", T("Per-note expression, like MPE in Ableton:\n"
                       "drag on a note to bend its pitch (Ctrl: whole semitones), right-drag to clear,\n"
                       "double-click to reset it. The Press and Slide lanes edit each note's volume and\n"
-                      "timbre (filter cutoff, 13xx). Use Voices for chords: each note gets its own channel.");
+                      "timbre (filter cutoff, 13xx). Use Voices for chords: each note gets its own channel."));
   ImGui::SameLine();
   curIns_ = std::clamp(curIns_, 0, std::max(0, (int)song_.instruments.size() - 1));
   char insLabel[128];
   std::snprintf(insLabel, sizeof(insLabel), "%02X: %s", curIns_, song_.instruments.empty() ? "" : song_.instruments[curIns_].name.c_str());
-  ImGui::SetNextItemWidth(170);
-  if (ImGui::BeginCombo("Instrument##pr", insLabel)) {
+  ImGui::SetNextItemWidth(S(170));
+  if (ImGui::BeginCombo(T("Instrument##pr"), insLabel)) {
     for (int i = 0; i < (int)song_.instruments.size(); i++) {
       char buf[128];
       std::snprintf(buf, sizeof(buf), "%02X: %s", i, song_.instruments[i].name.c_str());
@@ -224,7 +225,7 @@ void App::pianoRollWindow() {
     ImGui::EndCombo();
   }
   ImGui::SameLine();
-  ImGui::TextDisabled("Order %02X  |  Ctrl+wheel: zoom, Shift+wheel: scroll", curOrder_);
+  ImGui::TextDisabled(T("Order %02X  |  Ctrl+wheel: zoom, Shift+wheel: scroll"), curOrder_);
 
   // Channels edited together: this one, plus the next ones for chords.
   int voices = std::min(prVoices_, nch - ch);
@@ -247,7 +248,7 @@ void App::pianoRollWindow() {
     ImGui::End();
     return;
   }
-  const float keyW = 46, rulerH = 18, velH = std::min(100.0f, avail.y * 0.25f), gap = 4;
+  const float keyW = S(46), rulerH = S(18), velH = std::min(S(100), avail.y * 0.25f), gap = S(4);
   ImVec2 g0(p0.x + keyW, p0.y + rulerH), g1(p0.x + avail.x, p0.y + avail.y - velH - gap);
   ImVec2 v0(g0.x, g1.y + gap), v1(g1.x, p0.y + avail.y);
   float zx = prZoomX_, zy = prZoomY_;
@@ -282,21 +283,21 @@ void App::pianoRollWindow() {
   bool focused = ImGui::IsWindowFocused();
   ImDrawList* dl = ImGui::GetWindowDrawList();
   dl->PushClipRect(p0, ImVec2(p0.x + avail.x, p0.y + avail.y), true);
-  dl->AddRectFilled(p0, ImVec2(p0.x + avail.x, p0.y + avail.y), T.patBg);
+  dl->AddRectFilled(p0, ImVec2(p0.x + avail.x, p0.y + avail.y), TH.patBg);
 
   // Grid: key lanes, then row lines.
   dl->PushClipRect(g0, g1, true);
   int topNote = (int)std::ceil(prTop_), botNote = (int)std::floor(prTop_ - visKeys) - 1;
   for (int n = std::max(botNote, 0); n <= std::min(topNote, NOTE_COUNT - 1); n++) {
     float y = noteY((float)n);
-    if (isBlack(n)) dl->AddRectFilled(ImVec2(g0.x, y), ImVec2(g1.x, y + zy), T.rowHi1);
-    if (n % 12 == 0) dl->AddLine(ImVec2(g0.x, y + zy), ImVec2(g1.x, y + zy), T.separator);
+    if (isBlack(n)) dl->AddRectFilled(ImVec2(g0.x, y), ImVec2(g1.x, y + zy), TH.rowHi1);
+    if (n % 12 == 0) dl->AddLine(ImVec2(g0.x, y + zy), ImVec2(g1.x, y + zy), TH.separator);
   }
   for (int r = std::max(0, (int)prScrollX_); r <= len && rowX((float)r) <= g1.x; r++) {
     float x = rowX((float)r);
-    ImU32 col = (song_.highlight2 > 0 && r % song_.highlight2 == 0) ? T.rowNum
-                : (song_.highlight1 > 0 && r % song_.highlight1 == 0) ? T.separator
-                                                                       : (T.rowHi2 & 0x80FFFFFF);
+    ImU32 col = (song_.highlight2 > 0 && r % song_.highlight2 == 0) ? TH.rowNum
+                : (song_.highlight1 > 0 && r % song_.highlight1 == 0) ? TH.separator
+                                                                       : (TH.rowHi2 & 0x80FFFFFF);
     dl->AddLine(ImVec2(x, g0.y), ImVec2(x, g1.y), col);
   }
   // Area past the end of the pattern.
@@ -359,10 +360,10 @@ void App::pianoRollWindow() {
   // Playback position and tracker cursor.
   if (playing && engine_->order() == curOrder_) {
     float x = rowX((float)engine_->row());
-    dl->AddRectFilled(ImVec2(x, g0.y), ImVec2(x + zx, g1.y), T.playRow);
+    dl->AddRectFilled(ImVec2(x, g0.y), ImVec2(x + zx, g1.y), TH.playRow);
   }
   float cx = rowX((float)curRow_);
-  dl->AddLine(ImVec2(cx, g0.y), ImVec2(cx, g1.y), T.cursorBox, 1.0f);
+  dl->AddLine(ImVec2(cx, g0.y), ImVec2(cx, g1.y), TH.cursorBox, 1.0f);
 
   // Selection rectangle.
   if (prDrag_ == PRDrag::Select)
@@ -370,7 +371,7 @@ void App::pianoRollWindow() {
   dl->PopClipRect();
 
   // Ruler.
-  dl->AddRectFilled(ImVec2(g0.x, p0.y), ImVec2(g1.x, g0.y), T.header);
+  dl->AddRectFilled(ImVec2(g0.x, p0.y), ImVec2(g1.x, g0.y), TH.header);
   dl->PushClipRect(ImVec2(g0.x, p0.y), ImVec2(g1.x, g0.y), true);
   int bar = std::max(1, song_.highlight2), beat = std::max(1, song_.highlight1);
   for (int r = std::max(0, (int)prScrollX_); r < len && rowX((float)r) <= g1.x; r++) {
@@ -378,10 +379,10 @@ void App::pianoRollWindow() {
     if (r % bar == 0) {
       char buf[16];
       std::snprintf(buf, sizeof(buf), "%d", r / bar + 1);
-      dl->AddLine(ImVec2(x, p0.y), ImVec2(x, g0.y), T.headerText);
-      dl->AddText(ImVec2(x + 3, p0.y + 1), T.headerText, buf);
+      dl->AddLine(ImVec2(x, p0.y), ImVec2(x, g0.y), TH.headerText);
+      dl->AddText(ImVec2(x + 3, p0.y + 1), TH.headerText, buf);
     } else if (r % beat == 0) {
-      dl->AddLine(ImVec2(x, g0.y - 6), ImVec2(x, g0.y), T.headerText);
+      dl->AddLine(ImVec2(x, g0.y - 6), ImVec2(x, g0.y), TH.headerText);
     }
   }
   dl->PopClipRect();
@@ -392,25 +393,25 @@ void App::pianoRollWindow() {
     float y = noteY((float)n);
     bool black = isBlack(n);
     bool down = prPreview_ == n;
-    ImU32 col = down ? T.cursorBox : black ? IM_COL32(25, 25, 30, 255) : IM_COL32(225, 225, 230, 255);
+    ImU32 col = down ? TH.cursorBox : black ? IM_COL32(25, 25, 30, 255) : IM_COL32(225, 225, 230, 255);
     dl->AddRectFilled(ImVec2(p0.x, y), ImVec2(black ? g0.x - 14 : g0.x - 1, y + zy), col);
     dl->AddLine(ImVec2(p0.x, y + zy), ImVec2(g0.x - 1, y + zy), IM_COL32(90, 90, 100, 255));
     if (n % 12 == 0 && zy >= 9) {
       std::string label = noteName(n);
-      dl->AddText(ImVec2(g0.x - 26, y + (zy - ImGui::GetFontSize()) / 2), IM_COL32(40, 40, 50, 255), label.c_str());
+      dl->AddText(ImVec2(g0.x - ImGui::CalcTextSize(label.c_str()).x - S(3), y + (zy - ImGui::GetFontSize()) / 2), IM_COL32(40, 40, 50, 255), label.c_str());
     }
   }
   dl->PopClipRect();
 
   // Lane under the notes: velocity (volume column), the channel's pitch
   // bend (E8/E9), or the notes' pressure (volume) and slide (13xx cutoff).
-  dl->AddRectFilled(v0, v1, T.scopeBg);
+  dl->AddRectFilled(v0, v1, TH.scopeBg);
   ImVec2 lk0(p0.x, v0.y);
   auto laneLabel = [&](int i, const char* label) {
     ImVec2 a(lk0.x + 2, v0.y + 2 + i * 17.0f);
     bool on = i == prLane_;
-    if (on) dl->AddRectFilled(a, ImVec2(g0.x - 3, a.y + 16), T.header, 3);
-    dl->AddText(ImVec2(a.x + 3, a.y + 1), on ? T.headerText : T.rowNum, label);
+    if (on) dl->AddRectFilled(a, ImVec2(g0.x - 3, a.y + 16), TH.header, 3);
+    dl->AddText(ImVec2(a.x + 3, a.y + 1), on ? TH.headerText : TH.rowNum, T(label));
   };
   laneLabel(0, "Vol");
   laneLabel(1, "Pitch");
@@ -455,13 +456,13 @@ void App::pianoRollWindow() {
         if (set) dl->AddCircleFilled(ImVec2(x0 + 2, y), 3.0f, col);
       }
     }
-    dl->AddText(ImVec2(v1.x - 330, v0.y + 2), T.rowNum,
-                press ? "Pressure: each note's volume over time" : "Slide: each note's filter cutoff (13xx, filter on)");
+    const char* hint = press ? T("Pressure: each note's volume over time") : T("Slide: each note's filter cutoff (13xx, filter on)");
+    dl->AddText(ImVec2(v1.x - ImGui::CalcTextSize(hint).x - S(6), v0.y + 2), TH.rowNum, hint);
   } else {
     // Semitone lines, the zero line, then the bend as the engine plays it:
     // each E8xx glides over its row and the value stays.
     for (int k = -prBendView_; k <= prBendView_; k++) {
-      ImU32 col = k == 0 ? T.rowNum : (T.rowHi2 & 0x80FFFFFF);
+      ImU32 col = k == 0 ? TH.rowNum : (TH.rowHi2 & 0x80FFFFFF);
       if (prBendView_ <= 4 || k % 2 == 0) dl->AddLine(ImVec2(v0.x, bendY(k)), ImVec2(v1.x, bendY(k)), col);
     }
     double cur = 0;
@@ -487,7 +488,7 @@ void App::pianoRollWindow() {
       double semis = std::clamp((double)(mid - m.y) / half * prBendView_, -8.0, 7.9375);
       char buf[32];
       std::snprintf(buf, sizeof(buf), "%+.2f", io.KeyCtrl ? std::round(semis) : std::round(semis * 16) / 16);
-      dl->AddText(ImVec2(m.x + 10, std::max(v0.y, m.y - 16)), T.headerText, buf);
+      dl->AddText(ImVec2(m.x + 10, std::max(v0.y, m.y - 16)), TH.headerText, buf);
     }
   }
   dl->PopClipRect();
