@@ -161,6 +161,10 @@ add_library(dtcore STATIC
   src/vgmexport.cpp)
 target_include_directories(dtcore PUBLIC src)
 target_link_libraries(dtcore PUBLIC imgui ymfm)
+if(MSVC)
+  # The French texts are UTF-8 string literals.
+  target_compile_options(dtcore PUBLIC /utf-8)
+endif()
 target_compile_definitions(dtcore PUBLIC DATRACKARXD_VERSION="${PROJECT_VERSION}")
 
 # --- the built-in manual: README.md (French) and docs/manual_en.md ---

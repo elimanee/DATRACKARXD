@@ -24,6 +24,39 @@ env:
   VERSION: ${{ github.ref_type == 'tag' && github.ref_name || inputs.version }}
 
 jobs:
+  # The tests and the exports again, with AddressSanitizer and
+  # UndefinedBehaviorSanitizer watching every memory access.
+  sanitizers:
+    runs-on: ubuntu-22.04
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install Linux build dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libx11-dev libxext-dev libxrandr-dev libxcursor-dev libxi-dev \
+            libxss-dev libxinerama-dev libxkbcommon-dev libwayland-dev libasound2-dev libpulse-dev \
+            libgl1-mesa-dev
+      - name: Configure
+        run: >
+          cmake -S . -B build -DCMAKE_BUILD_TYPE=Debug -DCMAKE_DISABLE_FIND_PACKAGE_SDL2=ON
+          "-DCMAKE_CXX_FLAGS=-fsanitize=address,undefined -fno-sanitize-recover=undefined -O1 -g"
+          "-DCMAKE_C_FLAGS=-fsanitize=address,undefined -O1 -g"
+          "-DCMAKE_EXE_LINKER_FLAGS=-fsanitize=address,undefined"
+      - name: Build
+        run: cmake --build build --parallel --target datrackarxd datrackarxd-tests
+      - name: Tests
+        env:
+          ASAN_OPTIONS: detect_leaks=1
+          UBSAN_OPTIONS: print_stacktrace=1
+        run: |
+          ctest --test-dir build --output-on-failure
+          exe=build/datrackarxd
+          for f in xm mod it; do "$exe" --export-module songs/chips.dtk "chips.$f"; "$exe" --convert "chips.$f" "back-$f.dtk"; done
+          "$exe" --export-vgm songs/chips.dtk chips.vgm
+          "$exe" --export songs/demo.dtk demo.ogg
+          "$exe" --export-midi songs/demo.dtk demo.mid
+          "$exe" --convert demo.mid back-mid.dtk
+
   build:
     strategy:
       fail-fast: false
@@ -54,6 +87,9 @@ jobs:
 
       - name: Build
         run: cmake --build build --config Release --parallel
+
+      - name: Tests
+        run: ctest --test-dir build -C Release --output-on-failure
 
       - name: Smoke test
         shell: bash
@@ -131,7 +167,7 @@ jobs:
             datrackarxd-*.tar.gz
 
   release:
-    needs: build
+    needs: [build, sanitizers]
     if: startsWith(github.ref_type == 'tag' && github.ref_name || inputs.version, 'v')
     runs-on: ubuntu-latest
     steps:
