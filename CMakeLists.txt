@@ -163,6 +163,16 @@ target_include_directories(dtcore PUBLIC src)
 target_link_libraries(dtcore PUBLIC imgui ymfm)
 target_compile_definitions(dtcore PUBLIC DATRACKARXD_VERSION="${PROJECT_VERSION}")
 
+# --- the built-in manual: README.md (French) and docs/manual_en.md ---
+set(MANUAL_CPP ${CMAKE_BINARY_DIR}/generated/manual_data.cpp)
+add_custom_command(
+  OUTPUT ${MANUAL_CPP}
+  COMMAND ${CMAKE_COMMAND} -DOUT=${MANUAL_CPP}
+          "-DFILES=${CMAKE_SOURCE_DIR}/README.md;MANUAL_FR;${CMAKE_SOURCE_DIR}/docs/manual_en.md;MANUAL_EN"
+          -P ${CMAKE_SOURCE_DIR}/cmake/embed.cmake
+  DEPENDS ${CMAKE_SOURCE_DIR}/README.md ${CMAKE_SOURCE_DIR}/docs/manual_en.md ${CMAKE_SOURCE_DIR}/cmake/embed.cmake
+  VERBATIM)
+
 # --- the tracker ---
 add_executable(datrackarxd
   src/main.cpp
@@ -176,6 +186,7 @@ add_executable(datrackarxd
   src/ui_arrange.cpp
   src/ui_settings.cpp
   src/ui_manual.cpp
+  ${MANUAL_CPP}
   src/paths.cpp
   src/shortcuts.cpp
   src/audiofile.cpp
@@ -215,3 +226,14 @@ foreach(t datrackarxd datrackarxd-keygen)
     target_link_libraries(${t} PRIVATE SDL2::SDL2main)
   endif()
 endforeach()
+
+# --- tests (ctest) ---
+enable_testing()
+add_executable(datrackarxd-tests tests/tests.cpp src/shortcuts.cpp)
+target_include_directories(datrackarxd-tests PRIVATE src)
+target_link_libraries(datrackarxd-tests PRIVATE dtcore)
+add_test(NAME tests COMMAND datrackarxd-tests ${CMAKE_SOURCE_DIR}/songs ${CMAKE_BINARY_DIR}/test-tmp)
+find_package(Python3 COMPONENTS Interpreter QUIET)
+if(Python3_FOUND)
+  add_test(NAME translations COMMAND ${Python3_EXECUTABLE} ${CMAKE_SOURCE_DIR}/tests/check_translations.py ${CMAKE_SOURCE_DIR}/src)
+endif()

@@ -500,7 +500,7 @@ void App::copySelection(bool cut) {
     if (src) copyField(clipboard_.cells[c - ch0][r - row0], *src, f);
   });
   if (cut) clearSelection();
-  setStatus(cut ? "Cut" : "Copied");
+  setStatus(cut ? T("Cut") : T("Copied"));
 }
 
 void App::clearSelection() {
@@ -589,7 +589,7 @@ void App::interpolateSelection() {
     }
   }
   dirty_ = true;
-  setStatus("Interpolated");
+  setStatus(T("Interpolated"));
 }
 
 // Volumes of the notes (and set volumes) scaled, or randomly nudged.
@@ -688,8 +688,8 @@ int App::findReplace(bool apply) {
 }
 
 void App::selectionToolsMenu() {
-  if (ImGui::MenuItem(T("Interpolate"), "Ctrl+I")) interpolateSelection();
-  if (ImGui::IsItemHovered()) ImGui::SetTooltip(T("Fill the volumes and effect values between the first and last ones"));
+  if (ImGui::MenuItem(T("Interpolate"), keyLabel(Action::Interpolate).c_str())) interpolateSelection();
+  if (ImGui::IsItemHovered()) ImGui::SetTooltip("%s", T("Fill the volumes and effect values between the first and last ones"));
   if (ImGui::BeginMenu(T("Scale volumes"))) {
     for (int pct : {25, 50, 75, 125, 150, 200}) {
       std::string l = std::to_string(pct) + "%";
@@ -698,14 +698,14 @@ void App::selectionToolsMenu() {
     ImGui::EndMenu();
   }
   if (ImGui::MenuItem(T("Humanize volumes"))) volumeTool(1.0f, 8);
-  if (ImGui::IsItemHovered()) ImGui::SetTooltip(T("Nudge each note's volume randomly (+-8)"));
+  if (ImGui::IsItemHovered()) ImGui::SetTooltip("%s", T("Nudge each note's volume randomly (+-8)"));
   if (ImGui::MenuItem(T("Reverse rows"))) rowTool(0);
   if (ImGui::MenuItem(T("Expand x2"))) rowTool(1);
-  if (ImGui::IsItemHovered()) ImGui::SetTooltip(T("Spread the rows out to every other row (half speed)"));
+  if (ImGui::IsItemHovered()) ImGui::SetTooltip("%s", T("Spread the rows out to every other row (half speed)"));
   if (ImGui::MenuItem(T("Shrink /2"))) rowTool(2);
-  if (ImGui::IsItemHovered()) ImGui::SetTooltip(T("Keep one row in two, packed together (double speed)"));
+  if (ImGui::IsItemHovered()) ImGui::SetTooltip("%s", T("Keep one row in two, packed together (double speed)"));
   ImGui::Separator();
-  if (ImGui::MenuItem(T("Find & replace..."), "Ctrl+H")) showFindReplace_ = true;
+  if (ImGui::MenuItem(T("Find & replace..."), keyLabel(Action::FindReplace).c_str())) showFindReplace_ = true;
 }
 
 void App::findReplaceWindow() {
@@ -716,7 +716,7 @@ void App::findReplaceWindow() {
   FindReplace& fr = findReplace_;
   ImGui::TextUnformatted(T("Find cells with"));
   char noteBuf[16];
-  std::snprintf(noteBuf, sizeof(noteBuf), "%s", fr.note == -1 ? "anything" : fr.note == -2 ? "any note" : noteName(fr.note).c_str());
+  std::snprintf(noteBuf, sizeof(noteBuf), "%s", fr.note == -1 ? T("anything") : fr.note == -2 ? T("any note") : noteName(fr.note).c_str());
   ImGui::SetNextItemWidth(S(120));
   if (ImGui::BeginCombo(T("Note"), noteBuf)) {
     if (ImGui::Selectable(T("anything"), fr.note == -1)) fr.note = -1;
@@ -730,7 +730,7 @@ void App::findReplaceWindow() {
   fr.ins = std::clamp(fr.ins, -1, MAX_INSTRUMENTS - 1);
   auto hexField = [](const char* check, const char* id, int& v) {
     bool on = v >= 0;
-    if (ImGui::Checkbox(check, &on)) v = on ? 0 : -1;
+    if (ImGui::Checkbox(T(check), &on)) v = on ? 0 : -1;
     if (on) {
       ImGui::SameLine();
       uint8_t b = (uint8_t)v;
@@ -754,9 +754,9 @@ void App::findReplaceWindow() {
   ImGui::EndDisabled();
   ImGui::Separator();
   ImGui::Combo(T("In"), &fr.scope, TC("Selection (or this channel)\0Current pattern of this channel\0Whole song\0"));
-  if (ImGui::Button(T("Count"))) setStatus(std::to_string(findReplace(false)) + " matching cells");
+  if (ImGui::Button(T("Count"))) setStatus(std::to_string(findReplace(false)) + T(" matching cells"));
   ImGui::SameLine();
-  if (ImGui::Button(T("Replace all"))) setStatus("Replaced in " + std::to_string(findReplace(true)) + " cells");
+  if (ImGui::Button(T("Replace all"))) setStatus(T("Replaced in ") + std::to_string(findReplace(true)) + T(" cells"));
   ImGui::End();
 }
 
@@ -1075,16 +1075,16 @@ void App::patternWindow() {
   }
   if (hovered && io.MouseWheel != 0 && !(playing && follow_)) moveRows(-(int)io.MouseWheel * 4);
   // Right-click: the selection tools.
-  if (hovered && ImGui::IsMouseClicked(ImGuiMouseButton_Right)) ImGui::OpenPopup(T("patctx"));
-  if (ImGui::BeginPopup(T("patctx"))) {
-    if (ImGui::MenuItem(T("Cut"), "Ctrl+X")) copySelection(true);
-    if (ImGui::MenuItem(T("Copy"), "Ctrl+C")) copySelection(false);
-    if (ImGui::MenuItem(T("Paste"), "Ctrl+V")) paste();
+  if (hovered && ImGui::IsMouseClicked(ImGuiMouseButton_Right)) ImGui::OpenPopup("patctx");
+  if (ImGui::BeginPopup("patctx")) {
+    if (ImGui::MenuItem(T("Cut"), keyLabel(Action::Cut).c_str())) copySelection(true);
+    if (ImGui::MenuItem(T("Copy"), keyLabel(Action::Copy).c_str())) copySelection(false);
+    if (ImGui::MenuItem(T("Paste"), keyLabel(Action::Paste).c_str())) paste();
     ImGui::Separator();
     if (ImGui::MenuItem(T("Transpose +1"))) transpose(1);
     if (ImGui::MenuItem(T("Transpose -1"))) transpose(-1);
     ImGui::Separator();
-    ImGui::TextDisabled(hasSel_ ? "Selection" : "No selection: the whole channel");
+    ImGui::TextDisabled("%s", hasSel_ ? T("Selection") : T("No selection: the whole channel"));
     selectionToolsMenu();
     ImGui::EndPopup();
   }

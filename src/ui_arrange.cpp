@@ -97,17 +97,17 @@ void App::orderSwap(int a, int b) {
 // ---------------------------------------------------------------------------
 
 std::string App::laneLabel(const AutomationLane& lane) const {
-  if (lane.isMaster()) return AUTO_TARGET_NAMES[lane.target];
+  if (lane.isMaster()) return T(AUTO_TARGET_NAMES[lane.target]);
   std::string ch = std::to_string(lane.channel + 1);
   if (lane.channel < song_.channelCount()) ch += " " + song_.channels[lane.channel].name;
-  if (lane.target != AUTO_FX) return ch + ": " + AUTO_TARGET_NAMES[lane.target];
+  if (lane.target != AUTO_FX) return ch + ": " + T(AUTO_TARGET_NAMES[lane.target]);
   const ChannelInfo* info = lane.channel < song_.channelCount() ? &song_.channels[lane.channel] : nullptr;
   if (info && lane.fxSlot < (int)info->effects.size()) {
     const ChanFxInfo& fx = CHAN_FX_INFO[info->effects[lane.fxSlot].type];
-    const char* param = lane.fxParam < fx.count ? fx.params[lane.fxParam].name : "?";
-    return ch + ": " + fx.name + " " + param;
+    const char* param = lane.fxParam < fx.count ? T(fx.params[lane.fxParam].name) : "?";
+    return ch + ": " + T(fx.name) + " " + param;
   }
-  return ch + ": effect " + std::to_string(lane.fxSlot + 1) + " (missing)";
+  return ch + T(": effect ") + std::to_string(lane.fxSlot + 1) + T(" (missing)");
 }
 
 std::string App::laneValueText(const AutomationLane& lane, float v) const {
@@ -116,8 +116,8 @@ std::string App::laneValueText(const AutomationLane& lane, float v) const {
     case AUTO_VOLUME: std::snprintf(buf, sizeof(buf), "%.0f%%", v * 100); break;
     case AUTO_PAN: {
       int p = (int)std::lround(v * 255);
-      if (p == 128) std::snprintf(buf, sizeof(buf), "center");
-      else std::snprintf(buf, sizeof(buf), "%s %d", p < 128 ? "L" : "R", std::abs(p - 128));
+      if (p == 128) std::snprintf(buf, sizeof(buf), "%s", T("center"));
+      else std::snprintf(buf, sizeof(buf), p < 128 ? T("L %d") : T("R %d"), std::abs(p - 128));
       break;
     }
     case AUTO_CUTOFF: std::snprintf(buf, sizeof(buf), "cutoff %d", (int)std::lround(v * 255)); break;
@@ -186,7 +186,7 @@ void App::arrangementWindow() {
     char label[160];
     auto subLabel = [&](int i) {
       std::string n = song_.subsongNameAt(i);
-      std::snprintf(label, sizeof(label), "%d: %s", i + 1, n.empty() ? "(untitled)" : n.c_str());
+      std::snprintf(label, sizeof(label), "%d: %s", i + 1, n.empty() ? T("(untitled)") : n.c_str());
       return label;
     };
     ImGui::SetNextItemWidth(S(180));
@@ -205,7 +205,7 @@ void App::arrangementWindow() {
         }
       ImGui::EndCombo();
     }
-    if (ImGui::IsItemHovered()) ImGui::SetTooltip(T("Subsongs: each has its own orders, patterns, tempo and automation"));
+    if (ImGui::IsItemHovered()) ImGui::SetTooltip("%s", T("Subsongs: each has its own orders, patterns, tempo and automation"));
     ImGui::SameLine();
     if (ImGui::Button("+##sub") && song_.subsongCount() < 256) {
       pushFullUndo();
@@ -219,7 +219,7 @@ void App::arrangementWindow() {
       engine_->setLoopRange(-1, -1);
       engine_->reset();
     }
-    if (ImGui::IsItemHovered()) ImGui::SetTooltip(T("New subsong"));
+    if (ImGui::IsItemHovered()) ImGui::SetTooltip("%s", T("New subsong"));
     ImGui::SameLine();
     ImGui::BeginDisabled(song_.subsongCount() <= 1);
     if (ImGui::Button("-##sub")) {
@@ -233,12 +233,12 @@ void App::arrangementWindow() {
       engine_->reset();
     }
     ImGui::EndDisabled();
-    if (ImGui::IsItemHovered(ImGuiHoveredFlags_AllowWhenDisabled)) ImGui::SetTooltip(T("Delete this subsong (Ctrl+Z brings it back)"));
+    if (ImGui::IsItemHovered(ImGuiHoveredFlags_AllowWhenDisabled)) ImGui::SetTooltip("%s", T("Delete this subsong (Ctrl+Z brings it back)"));
     ImGui::SameLine();
     char name[128];
     std::snprintf(name, sizeof(name), "%s", song_.subsongName.c_str());
     ImGui::SetNextItemWidth(S(150));
-    if (ImGui::InputTextWithHint("##subname", "subsong name", name, sizeof(name))) {
+    if (ImGui::InputTextWithHint("##subname", T("subsong name"), name, sizeof(name))) {
       song_.subsongName = name;
       dirty_ = metaTouched_ = true;
     }
@@ -256,20 +256,20 @@ void App::arrangementWindow() {
     orderInsertNew(selB + 1);
     arrSelA_ = arrSelB_ = curOrder_;
   }
-  if (ImGui::IsItemHovered()) ImGui::SetTooltip(T("Insert an order with new empty patterns after the selection"));
+  if (ImGui::IsItemHovered()) ImGui::SetTooltip("%s", T("Insert an order with new empty patterns after the selection"));
   ImGui::SameLine();
   if (ImGui::SmallButton(T("Dup"))) {
     orderDuplicate(selA, selB);
     arrSelA_ = selB + 1;
     arrSelB_ = selB + 1 + (selB - selA);
   }
-  if (ImGui::IsItemHovered()) ImGui::SetTooltip(T("Repeat the selected orders (same patterns) after them"));
+  if (ImGui::IsItemHovered()) ImGui::SetTooltip("%s", T("Repeat the selected orders (same patterns) after them"));
   ImGui::SameLine();
   if (ImGui::SmallButton(T("Clone"))) {
     orderClone(selA);
     arrSelA_ = arrSelB_ = curOrder_;
   }
-  if (ImGui::IsItemHovered()) ImGui::SetTooltip(T("Copy the first selected order into new patterns"));
+  if (ImGui::IsItemHovered()) ImGui::SetTooltip("%s", T("Copy the first selected order into new patterns"));
   ImGui::SameLine();
   if (ImGui::SmallButton(T("Del")) && numOrders > 1) {
     orderDelete(selA, selB);
@@ -289,7 +289,7 @@ void App::arrangementWindow() {
   }
   ImGui::SameLine();
   ImGui::Checkbox(T("Loop"), &loopRange_);
-  if (ImGui::IsItemHovered()) ImGui::SetTooltip(T("Playback loops over the selected orders"));
+  if (ImGui::IsItemHovered()) ImGui::SetTooltip("%s", T("Playback loops over the selected orders"));
   numOrders = (int)song_.orders.size();
   selA = std::clamp(std::min(arrSelA_, arrSelB_), 0, numOrders - 1);
   selB = std::clamp(std::max(arrSelA_, arrSelB_), 0, numOrders - 1);
@@ -441,7 +441,7 @@ void App::arrangementWindow() {
   if (overCell && ImGui::IsMouseClicked(ImGuiMouseButton_Right)) {
     arrMenuOrder_ = mo;
     arrMenuCh_ = mc;
-    ImGui::OpenPopup(T("arrcell"));
+    ImGui::OpenPopup("arrcell");
   }
   if (overCell && !ImGui::IsPopupOpen("arrcell")) {
     const Pattern* p = song_.pattern(mc, song_.orders[mo][mc]);
@@ -452,7 +452,7 @@ void App::arrangementWindow() {
                       "Right-click: pattern menu, Alt+wheel: pattern number, Ctrl+wheel: zoom"),
                       mo, mc + 1, song_.orders[mo][mc], notes);
   }
-  if (ImGui::BeginPopup(T("arrcell"))) {
+  if (ImGui::BeginPopup("arrcell")) {
     int o = std::clamp(arrMenuOrder_, 0, (int)song_.orders.size() - 1), c = std::clamp(arrMenuCh_, 0, nch - 1);
     uint8_t& pat = song_.orders[o][c];
     ImGui::TextDisabled(T("Order %02X, channel %d, pattern %02X"), o, c + 1, pat);
@@ -474,7 +474,7 @@ void App::arrangementWindow() {
       if (const Pattern* src = song_.pattern(c, pat)) *song_.pattern(c, np, true) = *src;
       pat = (uint8_t)np;
     }
-    if (ImGui::IsItemHovered()) ImGui::SetTooltip(T("Copy the pattern so editing it here leaves the other orders alone"));
+    if (ImGui::IsItemHovered()) ImGui::SetTooltip("%s", T("Copy the pattern so editing it here leaves the other orders alone"));
     if (ImGui::MenuItem(T("Clear pattern"))) {
       pushUndo(c, c, o);
       if (Pattern* p = song_.pattern(c, pat, false)) p->rows.assign(MAX_ROWS, Cell());
@@ -504,20 +504,22 @@ void App::automationEditor(float orderW, float leftW, float playPos) {
   ImGui::TextUnformatted(T("Automation"));
   ImGui::SameLine();
   ImGui::SetNextItemWidth(S(220));
-  std::string cur = autoLane_ >= 0 ? laneLabel(lanes[autoLane_]) : std::string("(no lane)");
+  std::string cur = autoLane_ >= 0 ? laneLabel(lanes[autoLane_]) : std::string(T("(no lane)"));
   if (ImGui::BeginCombo("##lane", cur.c_str())) {
     for (int i = 0; i < (int)lanes.size(); i++) {
-      std::string l = laneLabel(lanes[i]) + (lanes[i].on ? "" : " (off)") + "##l" + std::to_string(i);
+      std::string l = laneLabel(lanes[i]) + (lanes[i].on ? "" : T(" (off)")) + "##l" + std::to_string(i);
       if (ImGui::Selectable(l.c_str(), i == autoLane_)) autoLane_ = i;
     }
     ImGui::EndCombo();
   }
   ImGui::SameLine();
-  if (ImGui::SmallButton(T("Add lane"))) ImGui::OpenPopup(T("addlane"));
-  if (ImGui::BeginPopup(T("addlane"))) {
+  if (ImGui::SmallButton(T("Add lane"))) ImGui::OpenPopup("addlane");
+  if (ImGui::BeginPopup("addlane")) {
     AutomationLane& n = newLane_;
     ImGui::SetNextItemWidth(S(160));
-    ImGui::Combo(T("Target"), &n.target, AUTO_TARGET_NAMES, AUTO_TARGET_COUNT);
+    const char* targets[AUTO_TARGET_COUNT];
+    for (int i = 0; i < AUTO_TARGET_COUNT; i++) targets[i] = T(AUTO_TARGET_NAMES[i]);
+    ImGui::Combo(T("Target"), &n.target, targets, AUTO_TARGET_COUNT);
     if (!n.isMaster()) {
       n.channel = std::clamp(n.channel, 0, nch - 1);
       char buf[64];
@@ -535,17 +537,17 @@ void App::automationEditor(float orderW, float leftW, float playPos) {
     if (n.target == AUTO_FX) {
       const auto& effects = song_.channels[n.channel].effects;
       if (effects.empty()) {
-        ImGui::TextDisabled(T("This channel has no insert effect (Channel FX)."));
+        ImGui::TextDisabled("%s", T("This channel has no insert effect (Channel FX)."));
         canAdd = false;
       } else {
         n.fxSlot = std::clamp(n.fxSlot, 0, (int)effects.size() - 1);
         const ChanFxInfo& fx = CHAN_FX_INFO[effects[n.fxSlot].type];
         char buf[64];
-        std::snprintf(buf, sizeof(buf), "%d %s", n.fxSlot + 1, fx.name);
+        std::snprintf(buf, sizeof(buf), "%d %s", n.fxSlot + 1, T(fx.name));
         ImGui::SetNextItemWidth(S(160));
         if (ImGui::BeginCombo(T("Effect"), buf)) {
           for (int k = 0; k < (int)effects.size(); k++) {
-            std::snprintf(buf, sizeof(buf), "%d %s", k + 1, CHAN_FX_INFO[effects[k].type].name);
+            std::snprintf(buf, sizeof(buf), "%d %s", k + 1, T(CHAN_FX_INFO[effects[k].type].name));
             if (ImGui::Selectable(buf, k == n.fxSlot)) n.fxSlot = k;
           }
           ImGui::EndCombo();
@@ -553,15 +555,15 @@ void App::automationEditor(float orderW, float leftW, float playPos) {
         const ChanFxInfo& fx2 = CHAN_FX_INFO[effects[n.fxSlot].type];
         n.fxParam = std::clamp(n.fxParam, 0, fx2.count - 1);
         ImGui::SetNextItemWidth(S(160));
-        if (ImGui::BeginCombo(T("Parameter"), fx2.params[n.fxParam].name)) {
+        if (ImGui::BeginCombo(T("Parameter"), T(fx2.params[n.fxParam].name))) {
           for (int i = 0; i < fx2.count; i++)
-            if (ImGui::Selectable(fx2.params[i].name, i == n.fxParam)) n.fxParam = i;
+            if (ImGui::Selectable(T(fx2.params[i].name), i == n.fxParam)) n.fxParam = i;
           ImGui::EndCombo();
         }
       }
     }
-    if (n.target == AUTO_CUTOFF) ImGui::TextDisabled(T("Moves the instrument filter (turn it on in the SID section)."));
-    if (n.target == AUTO_MASTER_CUTOFF) ImGui::TextDisabled(T("Moves the master filter (turn it on in the Mixer)."));
+    if (n.target == AUTO_CUTOFF) ImGui::TextDisabled("%s", T("Moves the instrument filter (turn it on in the SID section)."));
+    if (n.target == AUTO_MASTER_CUTOFF) ImGui::TextDisabled("%s", T("Moves the master filter (turn it on in the Mixer)."));
     ImGui::BeginDisabled(!canAdd || lanes.size() >= 256);
     if (ImGui::Button(T("Add"))) {
       AutomationLane lane = n;
@@ -594,7 +596,7 @@ void App::automationEditor(float orderW, float leftW, float playPos) {
   ImGui::SameLine();
   ImGui::TextDisabled("(?)");
   if (ImGui::IsItemHovered())
-    ImGui::SetTooltip(T("Click: add a point, drag: move it, right-click: delete it.\n"
+    ImGui::SetTooltip("%s", T("Click: add a point, drag: move it, right-click: delete it.\n"
                       "Points snap to rows (Alt: free). Shift+wheel: scroll, Ctrl+wheel: zoom.\n"
                       "The value holds before the first point and after the last one."));
 
@@ -703,7 +705,7 @@ void App::automationEditor(float orderW, float leftW, float playPos) {
     }
   } else {
     dl->AddText(ImVec2(pos.x + leftW + 8, pos.y + 8), IM_COL32(140, 140, 160, 255),
-                "No automation lane. \"Add lane\" draws a volume, pan, cutoff, send, effect or master curve.");
+                T("No automation lane. \"Add lane\" draws a volume, pan, cutoff, send, effect or master curve."));
   }
   // Labels on the left.
   dl->AddRectFilled(pos, ImVec2(pos.x + leftW, pos.y + size.y), IM_COL32(22, 22, 32, 255));

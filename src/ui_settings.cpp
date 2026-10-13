@@ -260,7 +260,7 @@ void App::settingsWindow() {
       ImGui::EndCombo();
     }
     char scaleText[16];
-    std::snprintf(scaleText, sizeof(scaleText), "%d%%", (int)std::lround(100));
+    std::snprintf(scaleText, sizeof(scaleText), "%d%%", (int)std::lround(uiScale_ * 100));
     ImGui::SetNextItemWidth(S(220));
     if (ImGui::BeginCombo(T("Interface size"), scaleText)) {
       for (float s : UI_SCALES) {

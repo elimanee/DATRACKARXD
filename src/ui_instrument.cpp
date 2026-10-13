@@ -56,7 +56,7 @@ bool barGraph(const char* id, std::vector<int>& values, int lo, int hi, float he
   dl->AddRectFilled(pos, ImVec2(pos.x + width, pos.y + height), IM_COL32(20, 20, 30, 255));
   int n = (int)values.size();
   if (n == 0) {
-    dl->AddText(ImVec2(pos.x + 8, pos.y + height / 2 - 7), IM_COL32(120, 120, 140, 255), "(empty - set a length or type values)");
+    dl->AddText(ImVec2(pos.x + 8, pos.y + height / 2 - 7), IM_COL32(120, 120, 140, 255), T("(empty - set a length or type values)"));
     return false;
   }
   float bw = width / n;
@@ -105,6 +105,9 @@ bool barGraph(const char* id, std::vector<int>& values, int lo, int hi, float he
   return edited;
 }
 
+// Combo getter that translates the items of a name table.
+const char* trItem(void* items, int i) { return T(((const char* const*)items)[i]); }
+
 }  // namespace
 
 void App::instrumentsWindow() {
@@ -146,17 +149,17 @@ void App::instrumentsWindow() {
     dirty_ = true;
   }
   if (ImGui::Button(T("Load..."))) openFileDialog(FileDialogMode::LoadInstrument);
-  if (ImGui::IsItemHovered()) ImGui::SetTooltip(T("Add an instrument from a .dti preset, a Furnace .fui or a .wav"));
+  if (ImGui::IsItemHovered()) ImGui::SetTooltip("%s", T("Add an instrument from a .dti preset, a Furnace .fui or a .wav"));
   ImGui::SameLine();
   if (ImGui::Button(T("Save...")) && curIns_ < n) openFileDialog(FileDialogMode::SaveInstrument);
-  if (ImGui::IsItemHovered()) ImGui::SetTooltip(T("Save the selected instrument as a .dti preset"));
+  if (ImGui::IsItemHovered()) ImGui::SetTooltip("%s", T("Save the selected instrument as a .dti preset"));
   ImGui::BeginChild("list");
   for (int i = 0; i < (int)song_.instruments.size(); i++) {
     char buf[128];
     const Instrument& in = song_.instruments[i];
     static const char* const KIND[INS_TYPE_COUNT] = {nullptr, "FM", "Sample", "AY", "SN", "GB", "OPL"};
     const char* kind = in.type > 0 && in.type < INS_TYPE_COUNT ? KIND[in.type] : WAVE_NAMES[std::clamp(in.wave, 0, WAVE_COUNT - 1)];
-    std::snprintf(buf, sizeof(buf), "%02X  %-9s %s", i, kind, in.name.c_str());
+    std::snprintf(buf, sizeof(buf), "%02X  %-9s %s", i, T(kind), in.name.c_str());
     if (ImGui::Selectable(buf, i == curIns_, ImGuiSelectableFlags_AllowDoubleClick)) {
       curIns_ = i;
       if (ImGui::IsMouseDoubleClicked(0)) {
@@ -178,7 +181,7 @@ bool App::wavetableEditor(Instrument& ins) {
     changed = true;
   }
   auto preset = [&](const char* label, auto fn) {
-    if (ImGui::SmallButton(label)) {
+    if (ImGui::SmallButton(T(label))) {
       for (int i = 0; i < WAVETABLE_LEN; i++) ins.wavetable[i] = std::clamp((int)std::lround(fn(i / (double)WAVETABLE_LEN)), 0, 15);
       changed = true;
     }
@@ -206,7 +209,7 @@ bool App::macroEditor(Instrument& ins, int type) {
   static bool editing[MACRO_COUNT];
   if (!editing[type]) std::snprintf(bufs[type], sizeof(bufs[type]), "%s", macroToText(m).c_str());
   ImGui::SetNextItemWidth(-1);
-  ImGui::InputTextWithHint("##seq", "values, e.g. 15 12 10 | 8 6 / 3 0", bufs[type], sizeof(bufs[type]));
+  ImGui::InputTextWithHint("##seq", T("values, e.g. 15 12 10 | 8 6 / 3 0"), bufs[type], sizeof(bufs[type]));
   editing[type] = ImGui::IsItemActive();
   if (ImGui::IsItemDeactivatedAfterEdit()) {
     int lo, hi;
@@ -215,7 +218,7 @@ bool App::macroEditor(Instrument& ins, int type) {
     changed = true;
   }
   if (ImGui::IsItemHovered())
-    ImGui::SetTooltip(T("Type values separated by spaces.\n'|' marks the loop start, '/' after a value holds it until note off."));
+    ImGui::SetTooltip("%s", T("Type values separated by spaces.\n'|' marks the loop start, '/' after a value holds it until note off."));
 
   // Keeps the next widget on the same line when it fits.
   auto sameLineIfFits = [](float width) {
@@ -282,32 +285,32 @@ bool App::macroEditor(Instrument& ins, int type) {
     if (m.release >= 0)
       dl->AddRectFilled(ImVec2(pos.x + m.release * bw, pos.y + 6), ImVec2(pos.x + (m.release + 1) * bw, pos.y + 11), IM_COL32(255, 90, 90, 255));
     ImGui::Dummy(ImVec2(width, 12));
-    ImGui::TextDisabled(T("blue = loop, red = release (hold until note off)"));
+    ImGui::TextDisabled("%s", T("blue = loop, red = release (hold until note off)"));
   }
 
   switch (type) {
     case MACRO_VOL: ImGui::TextDisabled(T("Volume 0-%d per tick, multiplied with the channel volume."), hi); break;
     case MACRO_ARP: ImGui::TextDisabled(T("Semitone offset per tick. %d+n plays the fixed note n."), ARP_FIXED); break;
     case MACRO_DUTY:
-      if (ins.type == INS_AY) ImGui::TextDisabled(T("Noise period 0-31 per tick (lower = higher pitched noise)."));
-      else if (ins.type == INS_SN) ImGui::TextDisabled(T("Noise mode per tick: 0 periodic, 1 white."));
-      else if (ins.type == INS_GB && ins.chip.gbChannel == 2) ImGui::TextDisabled(T("Noise per tick: 0 long, 1 short (metallic)."));
-      else if (ins.type == INS_GB) ImGui::TextDisabled(T("Pulse duty: 0=12.5%% 1=25%% 2=50%% 3=75%%."));
-      else if (ins.pulseWidth >= 0) ImGui::TextDisabled(T("Fine pulse width 1-255 (128 = square)."));
-      else ImGui::TextDisabled(T("Pulse duty: 0=12.5%% 1=25%% 2=50%% 3=75%%. Noise: 1 = metallic, 3 = periodic."));
+      if (ins.type == INS_AY) ImGui::TextDisabled("%s", T("Noise period 0-31 per tick (lower = higher pitched noise)."));
+      else if (ins.type == INS_SN) ImGui::TextDisabled("%s", T("Noise mode per tick: 0 periodic, 1 white."));
+      else if (ins.type == INS_GB && ins.chip.gbChannel == 2) ImGui::TextDisabled("%s", T("Noise per tick: 0 long, 1 short (metallic)."));
+      else if (ins.type == INS_GB) ImGui::TextDisabled("%s", T("Pulse duty: 0=12.5% 1=25% 2=50% 3=75%."));
+      else if (ins.pulseWidth >= 0) ImGui::TextDisabled("%s", T("Fine pulse width 1-255 (128 = square)."));
+      else ImGui::TextDisabled("%s", T("Pulse duty: 0=12.5% 1=25% 2=50% 3=75%. Noise: 1 = metallic, 3 = periodic."));
       break;
-    case MACRO_CUTOFF: ImGui::TextDisabled(T("Filter cutoff 0-255 per tick (needs the filter on).")); break;
+    case MACRO_CUTOFF: ImGui::TextDisabled("%s", T("Filter cutoff 0-255 per tick (needs the filter on).")); break;
     case MACRO_WAVE:
       if (ins.type == INS_AY) {
-        ImGui::TextDisabled(T("Mixer per tick: add 1 tone, 2 noise, 4 envelope (7 = all)."));
+        ImGui::TextDisabled("%s", T("Mixer per tick: add 1 tone, 2 noise, 4 envelope (7 = all)."));
       } else if (ins.type == INS_OPL) {
-        ImGui::TextDisabled(T("OPL waveform 0-7 for every operator."));
+        ImGui::TextDisabled("%s", T("OPL waveform 0-7 for every operator."));
       } else {
-        ImGui::TextDisabled(T("0 pulse, 1 triangle, 2 saw, 3 noise, 4 sine, 5 wavetable."));
-        ImGui::TextDisabled(T("On a wavetable channel: index of a song wavetable."));
+        ImGui::TextDisabled("%s", T("0 pulse, 1 triangle, 2 saw, 3 noise, 4 sine, 5 wavetable."));
+        ImGui::TextDisabled("%s", T("On a wavetable channel: index of a song wavetable."));
       }
       break;
-    case MACRO_PITCH: ImGui::TextDisabled(T("Pitch change per tick in 1/32 semitone (adds up).")); break;
+    case MACRO_PITCH: ImGui::TextDisabled("%s", T("Pitch change per tick in 1/32 semitone (adds up).")); break;
   }
   return changed;
 }
@@ -348,10 +351,10 @@ bool App::fmEditor(Instrument& ins) {
   ImGui::SetNextItemWidth(w);
   changed |= ImGui::SliderInt(T("Feedback"), &fm.fb, 0, 7);
   ImGui::SameLine();
-  ImGui::TextDisabled(T("Presets:"));
+  ImGui::TextDisabled("%s", T("Presets:"));
   for (const FMPreset& p : FM_PRESETS) {
     ImGui::SameLine();
-    if (ImGui::SmallButton(p.name)) {
+    if (ImGui::SmallButton(T(p.name))) {
       fm.alg = p.alg;
       fm.fb = p.fb;
       for (int o = 0; o < 4; o++) {
@@ -392,14 +395,14 @@ bool App::fmEditor(Instrument& ins) {
       bool carrier = ALG_CARRIERS[std::clamp(fm.alg, 0, 7)][o];
       changed |= ImGui::Checkbox("##en", &fm.ops[o].enabled);
       ImGui::SameLine();
-      ImGui::TextColored(carrier ? ImVec4(1, 0.8f, 0.3f, 1) : ImVec4(0.6f, 0.8f, 1, 1), T("OP%d %s"), o + 1, carrier ? "out" : "mod");
+      ImGui::TextColored(carrier ? ImVec4(1, 0.8f, 0.3f, 1) : ImVec4(0.6f, 0.8f, 1, 1), T("OP%d %s"), o + 1, carrier ? T("out") : T("mod"));
       ImGui::PopID();
     }
     for (const Param& p : params) {
       ImGui::TableNextRow();
       ImGui::TableNextColumn();
       ImGui::TextUnformatted(p.name);
-      if (ImGui::IsItemHovered()) ImGui::SetTooltip("%s", p.help);
+      if (ImGui::IsItemHovered()) ImGui::SetTooltip("%s", T(p.help));
       for (int o = 0; o < 4; o++) {
         ImGui::TableNextColumn();
         ImGui::PushID(o * 100 + (int)(&p - params));
@@ -410,7 +413,7 @@ bool App::fmEditor(Instrument& ins) {
     }
     ImGui::EndTable();
   }
-  ImGui::TextDisabled(T("Orange = carriers (heard), blue = modulators. Lower TL on a modulator = brighter."));
+  ImGui::TextDisabled("%s", T("Orange = carriers (heard), blue = modulators. Lower TL on a modulator = brighter."));
   return changed;
 }
 
@@ -419,7 +422,7 @@ bool App::sampleInsEditor(Instrument& ins) {
   char label[160];
   auto smpLabel = [&](int i) {
     if (i < 0 || i >= (int)song_.samples.size())
-      std::snprintf(label, sizeof(label), "(none)");
+      std::snprintf(label, sizeof(label), "%s", T("(none)"));
     else
       std::snprintf(label, sizeof(label), "%02X: %s", i, song_.samples[i].name.c_str());
     return label;
@@ -454,7 +457,7 @@ bool App::sampleInsEditor(Instrument& ins) {
     ins.fadeout = fade / 1000;
     changed = true;
   }
-  if (ImGui::IsItemHovered()) ImGui::SetTooltip(T("Volume lost per tick after note off (0 = cut at note off unless the volume macro has a release)"));
+  if (ImGui::IsItemHovered()) ImGui::SetTooltip("%s", T("Volume lost per tick after note off (0 = cut at note off unless the volume macro has a release)"));
   if (!ins.sampleMap.empty()) {
     int used = 0;
     for (int v : ins.sampleMap) used += v >= 0;
@@ -465,7 +468,7 @@ bool App::sampleInsEditor(Instrument& ins) {
       changed = true;
     }
   }
-  ImGui::TextDisabled(T("The sample plays at its own rate on C-5."));
+  ImGui::TextDisabled("%s", T("The sample plays at its own rate on C-5."));
   return changed;
 }
 
@@ -488,7 +491,7 @@ bool App::sidEditor(Instrument& ins) {
   ImGui::SetNextItemWidth(w);
   changed |= ImGui::SliderInt(T("Resonance"), &ins.filter.resonance, 0, 15);
   ImGui::EndDisabled();
-  if (ins.filter.on) ImGui::TextDisabled(T("The Cutoff macro and 13xx move the cutoff."));
+  if (ins.filter.on) ImGui::TextDisabled("%s", T("The Cutoff macro and 13xx move the cutoff."));
 
   if (ins.type == INS_STANDARD) {
     changed |= ImGui::Checkbox(T("Ring mod"), &ins.ringMod);
@@ -497,7 +500,7 @@ bool App::sidEditor(Instrument& ins) {
     ImGui::SameLine();
     ImGui::TextDisabled("(?)");
     if (ImGui::IsItemHovered())
-      ImGui::SetTooltip(T("Both use the previous channel (channel 1 uses the last one).\n"
+      ImGui::SetTooltip("%s", T("Both use the previous channel (channel 1 uses the last one).\n"
                         "Ring mod: multiplies by its square wave (bell sounds, best on triangle).\n"
                         "Sync: restarts this waveform with it (play a higher note here)."));
     bool fine = ins.pulseWidth >= 0;
@@ -514,7 +517,7 @@ bool App::sidEditor(Instrument& ins) {
       changed |= ImGui::SliderInt(T("Pulse width"), &ins.pulseWidth, 1, 255);
       ImGui::SetNextItemWidth(w);
       changed |= ImGui::SliderInt(T("PWM sweep"), &ins.pwmSweep, -16, 16);
-      if (ImGui::IsItemHovered()) ImGui::SetTooltip(T("Pulse width change per tick, bouncing between thin and wide."));
+      if (ImGui::IsItemHovered()) ImGui::SetTooltip("%s", T("Pulse width change per tick, bouncing between thin and wide."));
     }
   }
   return changed;
@@ -547,7 +550,7 @@ bool App::chipEditor(Instrument& ins) {
     changed |= ImGui::Checkbox(T("Noise"), &c.ayNoise);
     ImGui::SameLine();
     changed |= ImGui::Checkbox(T("Envelope"), &c.ayEnv);
-    if (ImGui::IsItemHovered()) ImGui::SetTooltip(T("The hardware envelope sets the volume (the Volume slider is ignored)."));
+    if (ImGui::IsItemHovered()) ImGui::SetTooltip("%s", T("The hardware envelope sets the volume (the Volume slider is ignored)."));
     ImGui::BeginDisabled(!c.ayNoise);
     ImGui::SetNextItemWidth(w);
     changed |= ImGui::SliderInt(T("Noise period"), &c.ayNoiseFreq, 0, 31);
@@ -557,21 +560,21 @@ bool App::chipEditor(Instrument& ins) {
                                        "7  /___", "8  \\\\\\\\ saw down", "9  \\___", "10 \\/\\/ triangle",
                                        "11 \\^^^", "12 //// saw up", "13 /^^^", "14 /\\/\\ triangle", "15 /___"};
       ImGui::SetNextItemWidth(w);
-      changed |= ImGui::Combo(T("Shape"), &c.ayEnvShape, shapes, 16);
+      changed |= ImGui::Combo(T("Shape"), &c.ayEnvShape, trItem, (void*)shapes, 16);
       ImGui::SetNextItemWidth(w);
       changed |= ImGui::Combo(T("Env. pitch"), &c.ayEnvAuto, TC("Manual period\0Note x1/4\0Note x1/2\0Note x1\0Note x2\0Note x4\0"));
       if (ImGui::IsItemHovered())
-        ImGui::SetTooltip(T("Following the note turns the envelope into a waveform: the AY \"buzzer\" bass.\n"
+        ImGui::SetTooltip("%s", T("Following the note turns the envelope into a waveform: the AY \"buzzer\" bass.\n"
                           "Try Tone off, Envelope on, saw shape, Note x1."));
       if (c.ayEnvAuto == 0) {
         ImGui::SetNextItemWidth(w);
         changed |= ImGui::InputInt(T("Env. period"), &c.ayEnvPeriod, 10, 100);
         c.ayEnvPeriod = std::clamp(c.ayEnvPeriod, 1, 65535);
         ImGui::SameLine();
-        ImGui::TextDisabled(T("%.2f Hz"), chipClockHz(INS_AY, c.clock) / (256.0 * c.ayEnvPeriod));
+        ImGui::TextDisabled("%.2f Hz", chipClockHz(INS_AY, c.clock) / (256.0 * c.ayEnvPeriod));
       }
     }
-    ImGui::TextDisabled(T("Macros: Duty = noise period, Waveform = mixer (1 tone, 2 noise, 4 envelope)."));
+    ImGui::TextDisabled("%s", T("Macros: Duty = noise period, Waveform = mixer (1 tone, 2 noise, 4 envelope)."));
   } else if (ins.type == INS_SN) {
     ImGui::SetNextItemWidth(w);
     changed |= ImGui::SliderInt(T("Volume"), &ins.volume, 0, 15);
@@ -582,7 +585,7 @@ bool App::chipEditor(Instrument& ins) {
       c.snWhite = kind == 1;
       changed = true;
     }
-    ImGui::TextDisabled(T("Volume in 2 dB steps. Duty macro on noise: 0 periodic, 1 white."));
+    ImGui::TextDisabled("%s", T("Volume in 2 dB steps. Duty macro on noise: 0 periodic, 1 white."));
   } else if (ins.type == INS_GB) {
     ImGui::SetNextItemWidth(w);
     changed |= ImGui::Combo(T("Channel"), &c.gbChannel, TC("Pulse\0Wave (wavetable)\0Noise\0"));
@@ -594,9 +597,9 @@ bool App::chipEditor(Instrument& ins) {
       changed |= ImGui::Checkbox(T("Short noise (7-bit, metallic)"), &c.gbShortNoise);
     }
     ImGui::SetNextItemWidth(w);
-    changed |= ImGui::SliderInt(c.gbChannel == 1 ? "Volume" : "Start volume", &ins.volume, 0, 15);
+    changed |= ImGui::SliderInt(c.gbChannel == 1 ? T("Volume") : T("Start volume"), &ins.volume, 0, 15);
     if (c.gbChannel == 1) {
-      ImGui::TextDisabled(T("The wave channel has 4 volumes: off, 25%%, 50%%, 100%%."));
+      ImGui::TextDisabled("%s", T("The wave channel has 4 volumes: off, 25%, 50%, 100%."));
       changed |= wavetableEditor(ins);
       changed |= morphEditor(ins);
     } else {
@@ -605,11 +608,11 @@ bool App::chipEditor(Instrument& ins) {
       ImGui::SameLine();
       ImGui::SetNextItemWidth(w * 0.5f - ImGui::GetStyle().ItemSpacing.x);
       char fmt[48];
-      std::snprintf(fmt, sizeof(fmt), c.gbEnvLen ? "%%d (%.0f ms/step)" : "off", c.gbEnvLen * 1000.0f / 64);
+      std::snprintf(fmt, sizeof(fmt), c.gbEnvLen ? T("%%d (%.0f ms/step)") : T("off"), c.gbEnvLen * 1000.0f / 64);
       changed |= ImGui::SliderInt(T("Envelope"), &c.gbEnvLen, 0, 7, fmt);
       if (c.gbChannel == 0) {
         ImGui::SetNextItemWidth(w * 0.5f);
-        std::snprintf(fmt, sizeof(fmt), c.gbSweepTime ? "%%d (%.0f ms)" : "sweep off", c.gbSweepTime * 1000.0f / 128);
+        std::snprintf(fmt, sizeof(fmt), c.gbSweepTime ? "%%d (%.0f ms)" : T("sweep off"), c.gbSweepTime * 1000.0f / 128);
         changed |= ImGui::SliderInt("##swt", &c.gbSweepTime, 0, 7, fmt);
         ImGui::SameLine();
         ImGui::SetNextItemWidth(w * 0.25f);
@@ -617,9 +620,9 @@ bool App::chipEditor(Instrument& ins) {
         ImGui::SameLine();
         ImGui::SetNextItemWidth(w * 0.25f - ImGui::GetStyle().ItemSpacing.x * 2);
         changed |= ImGui::SliderInt(T("Sweep"), &c.gbSweepShift, 0, 7);
-        if (ImGui::IsItemHovered()) ImGui::SetTooltip(T("Hardware pitch sweep: time, direction and shift (bigger shift = slower)."));
+        if (ImGui::IsItemHovered()) ImGui::SetTooltip("%s", T("Hardware pitch sweep: time, direction and shift (bigger shift = slower)."));
       }
-      ImGui::TextDisabled(T("A Volume macro replaces the hardware envelope."));
+      ImGui::TextDisabled("%s", T("A Volume macro replaces the hardware envelope."));
     }
   }
   return changed;
@@ -680,13 +683,13 @@ bool App::oplEditor(Instrument& ins) {
     ImGui::TableNextColumn();
     for (int o = 0; o < nops; o++) {
       ImGui::TableNextColumn();
-      ImGui::TextColored(carrier[o] ? ImVec4(1, 0.8f, 0.3f, 1) : ImVec4(0.6f, 0.8f, 1, 1), T("OP%d %s"), o + 1, carrier[o] ? "out" : "mod");
+      ImGui::TextColored(carrier[o] ? ImVec4(1, 0.8f, 0.3f, 1) : ImVec4(0.6f, 0.8f, 1, 1), T("OP%d %s"), o + 1, carrier[o] ? T("out") : T("mod"));
     }
     for (const Param& prm : params) {
       ImGui::TableNextRow();
       ImGui::TableNextColumn();
       ImGui::TextUnformatted(prm.name);
-      if (ImGui::IsItemHovered()) ImGui::SetTooltip("%s", prm.help);
+      if (ImGui::IsItemHovered()) ImGui::SetTooltip("%s", T(prm.help));
       for (int o = 0; o < nops; o++) {
         ImGui::TableNextColumn();
         ImGui::PushID(o * 100 + (int)(&prm - params));
@@ -699,7 +702,7 @@ bool App::oplEditor(Instrument& ins) {
       ImGui::TableNextRow();
       ImGui::TableNextColumn();
       ImGui::TextUnformatted(fl.name);
-      if (ImGui::IsItemHovered()) ImGui::SetTooltip("%s", fl.help);
+      if (ImGui::IsItemHovered()) ImGui::SetTooltip("%s", T(fl.help));
       for (int o = 0; o < nops; o++) {
         ImGui::TableNextColumn();
         ImGui::PushID(o * 100 + 50 + (int)(&fl - flags));
@@ -713,7 +716,7 @@ bool App::oplEditor(Instrument& ins) {
     }
     ImGui::EndTable();
   }
-  ImGui::TextDisabled(T("Orange = carriers (heard). The Waveform macro and 10xx set every operator's wave."));
+  ImGui::TextDisabled("%s", T("Orange = carriers (heard). The Waveform macro and 10xx set every operator's wave."));
   return changed;
 }
 
@@ -728,7 +731,7 @@ bool App::modulationEditor(Instrument& ins) {
 
   changed |= ImGui::Checkbox(T("ADSR"), &ins.env.on);
   if (ImGui::IsItemHovered())
-    ImGui::SetTooltip(T("Volume envelope on top of the instrument's volume.\nThe note rings out for the release time after note off."));
+    ImGui::SetTooltip("%s", T("Volume envelope on top of the instrument's volume.\nThe note rings out for the release time after note off."));
   if (ins.env.on) {
     InsEnvelope& e = ins.env;
     // Shape preview.
@@ -762,7 +765,7 @@ bool App::modulationEditor(Instrument& ins) {
     if (lfo.on) {
       ImGui::SameLine();
       ImGui::SetNextItemWidth(w * 0.55f);
-      if (ImGui::Combo("##target", &lfo.target, LFO_TARGET_NAMES, LFO_TARGET_COUNT)) {
+      if (ImGui::Combo("##target", &lfo.target, trItem, (void*)LFO_TARGET_NAMES, LFO_TARGET_COUNT)) {
         // A sensible depth for the new target.
         static const float defaults[LFO_TARGET_COUNT] = {0.3f, 0.5f, 0.3f, 40.0f, 0.5f};
         lfo.depth = defaults[std::clamp(lfo.target, 0, LFO_TARGET_COUNT - 1)];
@@ -770,21 +773,21 @@ bool App::modulationEditor(Instrument& ins) {
       }
       ImGui::SameLine();
       ImGui::SetNextItemWidth(w * 0.45f);
-      changed |= ImGui::Combo("##shape", &lfo.shape, LFO_SHAPE_NAMES, LFO_SHAPE_COUNT);
+      changed |= ImGui::Combo("##shape", &lfo.shape, trItem, (void*)LFO_SHAPE_NAMES, LFO_SHAPE_COUNT);
       ImGui::SetNextItemWidth(w);
       changed |= ImGui::SliderFloat(T("Rate"), &lfo.rate, 0.05f, 30.0f, "%.2f Hz", logFlags);
       ImGui::SetNextItemWidth(w);
       switch (lfo.target) {
-        case LFO_PITCH: changed |= ImGui::SliderFloat(T("Depth"), &lfo.depth, 0, 12, "%.2f semitones", logFlags); break;
+        case LFO_PITCH: changed |= ImGui::SliderFloat(T("Depth"), &lfo.depth, 0, 12, T("%.2f semitones"), logFlags); break;
         case LFO_CUTOFF: changed |= ImGui::SliderFloat(T("Depth"), &lfo.depth, 0, 255, "%.0f"); break;
         default: changed |= ImGui::SliderFloat(T("Depth"), &lfo.depth, 0, 1, "%.2f"); break;
       }
-      if (lfo.target == LFO_CUTOFF && !ins.filter.on) ImGui::TextDisabled(T("Turn the filter on (SID section) to hear it."));
+      if (lfo.target == LFO_CUTOFF && !ins.filter.on) ImGui::TextDisabled("%s", T("Turn the filter on (SID section) to hear it."));
       if (lfo.target == LFO_PULSE && !(ins.type == INS_STANDARD && ins.wave == WAVE_PULSE))
-        ImGui::TextDisabled(T("Pulse width only changes pulse waves."));
+        ImGui::TextDisabled("%s", T("Pulse width only changes pulse waves."));
       ImGui::SetNextItemWidth(w);
       changed |= ImGui::SliderFloat(T("Delay"), &lfo.delay, 0, 5, "%.2f s");
-      if (ImGui::IsItemHovered()) ImGui::SetTooltip(T("Time after the note starts before the LFO fades in."));
+      if (ImGui::IsItemHovered()) ImGui::SetTooltip("%s", T("Time after the note starts before the LFO fades in."));
     }
     ImGui::PopID();
   }
@@ -794,7 +797,7 @@ bool App::modulationEditor(Instrument& ins) {
 // Second wavetable the wave morphs to over time.
 bool App::morphEditor(Instrument& ins) {
   bool changed = ImGui::Checkbox(T("Morph"), &ins.morph.on);
-  if (ImGui::IsItemHovered()) ImGui::SetTooltip(T("Each note morphs from the wavetable above to this one."));
+  if (ImGui::IsItemHovered()) ImGui::SetTooltip("%s", T("Each note morphs from the wavetable above to this one."));
   if (!ins.morph.on) return changed;
   ImGui::SameLine();
   ImGui::SetNextItemWidth(S(110));
@@ -830,7 +833,7 @@ void App::instrumentEditor() {
     return;
   }
   if (song_.instruments.empty()) {
-    ImGui::TextDisabled(T("No instrument"));
+    ImGui::TextDisabled("%s", T("No instrument"));
     ImGui::End();
     return;
   }
@@ -850,11 +853,11 @@ void App::instrumentEditor() {
 
   float w = std::min(ImGui::GetContentRegionAvail().x - 90.0f, 260.0f);
   ImGui::SetNextItemWidth(w);
-  changed |= ImGui::Combo(T("Type"), &ins.type, INS_TYPE_NAMES, INS_TYPE_COUNT);
+  changed |= ImGui::Combo(T("Type"), &ins.type, trItem, (void*)INS_TYPE_NAMES, INS_TYPE_COUNT);
 
   if (ins.type == INS_STANDARD) {
     ImGui::SetNextItemWidth(w);
-    changed |= ImGui::Combo(T("Waveform"), &ins.wave, WAVE_NAMES, WAVE_COUNT);
+    changed |= ImGui::Combo(T("Waveform"), &ins.wave, trItem, (void*)WAVE_NAMES, WAVE_COUNT);
     static const char* dutyNames[4] = {"12.5%%", "25%%", "50%%", "75%%"};
     ImGui::BeginDisabled(ins.pulseWidth >= 0 && ins.wave == WAVE_PULSE);  // the fine width wins
     ImGui::SetNextItemWidth(w);
@@ -888,7 +891,7 @@ void App::instrumentEditor() {
   }
   changed |= sidEditor(ins);
   changed |= modulationEditor(ins);
-  ImGui::TextDisabled(T("Play it with the keyboard: Z S X D C... / Q 2 W 3 E..."));
+  ImGui::TextDisabled("%s", T("Play it with the keyboard: Z S X D C... / Q 2 W 3 E..."));
 
   ImGui::Separator();
   if (ImGui::BeginTabBar("macros")) {
@@ -914,7 +917,7 @@ void App::instrumentEditor() {
       }
       if (!useful && ins.macros[t].values.empty()) continue;
       if (t == MACRO_CUTOFF && !ins.filter.on && ins.macros[t].values.empty()) continue;
-      std::string label = name;
+      std::string label = T(name);
       if (!ins.macros[t].values.empty()) label += " *";
       label += "###mac" + std::to_string(t);
       if (ImGui::BeginTabItem(label.c_str())) {
@@ -979,7 +982,7 @@ void App::sampleEditor(Sample& smp) {
   ImGui::SameLine();
   wrapFor(160);
   ImGui::SetNextItemWidth(S(120));
-  changed |= ImGui::Combo(T("Loop"), &smp.loopMode, LOOP_NAMES, 4);
+  changed |= ImGui::Combo(T("Loop"), &smp.loopMode, trItem, (void*)LOOP_NAMES, 4);
   if (smp.loopMode) {
     ImGui::SetNextItemWidth(S(160));
     changed |= ImGui::SliderInt(T("Loop start"), &smp.loopStart, 0, std::max(0, len - 1));
@@ -993,11 +996,11 @@ void App::sampleEditor(Sample& smp) {
 
   // Edit tools: on the selection, or on the whole sample.
   auto edit = [&](const char* label, const char* tip, auto fn, bool needSel = false) {
-    wrapFor(buttonWidth(label));
+    wrapFor(buttonWidth(T(label)));
     ImGui::BeginDisabled(needSel && !hasSel);
-    bool clicked = ImGui::SmallButton(label);
+    bool clicked = ImGui::SmallButton(T(label));
     ImGui::EndDisabled();
-    if (ImGui::IsItemHovered(ImGuiHoveredFlags_AllowWhenDisabled)) ImGui::SetTooltip("%s", tip);
+    if (ImGui::IsItemHovered(ImGuiHoveredFlags_AllowWhenDisabled)) ImGui::SetTooltip("%s", T(tip));
     if (clicked) {
       pushFullUndo();
       fn();
@@ -1006,7 +1009,7 @@ void App::sampleEditor(Sample& smp) {
     }
     ImGui::SameLine();
   };
-  const char* scope = hasSel ? "the selection" : "the whole sample";
+  const char* scope = hasSel ? T("the selection") : T("the whole sample");
   std::string t;
   edit("Cut", "Copy the selection and remove it", [&] {
     smpClipboard_ = sampleops::copy(smp, a, b);
@@ -1014,7 +1017,7 @@ void App::sampleEditor(Sample& smp) {
     smpCursor_ = a;
     smpSelA_ = smpSelB_ = a;
   }, true);
-  wrapFor(buttonWidth("Copy"));
+  wrapFor(buttonWidth(T("Copy")));
   if (ImGui::SmallButton(T("Copy")) && hasSel) smpClipboard_ = sampleops::copy(smp, a, b);
   ImGui::SameLine();
   ImGui::BeginDisabled(smpClipboard_.empty());
@@ -1039,21 +1042,21 @@ void App::sampleEditor(Sample& smp) {
     smpSelA_ = smpSelB_ = 0;
     smpViewLen_ = 0;
   }, true);
-  edit("Silence", (t = std::string("Set ") + scope + " to silence").c_str(), [&] { sampleops::silence(smp, a, b); });
+  edit("Silence", (t = std::string(T("Set ")) + scope + T(" to silence")).c_str(), [&] { sampleops::silence(smp, a, b); });
   ImGui::NewLine();
-  edit("Normalize", (t = std::string("Bring the peak of ") + scope + " to full scale").c_str(), [&] { sampleops::normalize(smp, a, b); });
+  edit("Normalize", (t = std::string(T("Bring the peak of ")) + scope + T(" to full scale")).c_str(), [&] { sampleops::normalize(smp, a, b); });
   edit("Fade in", "Fade in over the selection (or the whole sample)", [&] { sampleops::fadeIn(smp, a, b); });
   edit("Fade out", "Fade out over the selection (or the whole sample)", [&] { sampleops::fadeOut(smp, a, b); });
-  edit("Reverse", (t = std::string("Play ") + scope + " backwards").c_str(), [&] { sampleops::reverse(smp, a, b); });
+  edit("Reverse", (t = std::string(T("Play ")) + scope + T(" backwards")).c_str(), [&] { sampleops::reverse(smp, a, b); });
   edit("Invert", "Flip the polarity", [&] { sampleops::invert(smp, a, b); });
   edit("Remove DC", "Center the waveform on zero", [&] { sampleops::removeDc(smp, a, b); });
   ImGui::NewLine();
   ImGui::SetNextItemWidth(S(90));
   ImGui::DragFloat("##gain", &smpGainPct_, 1, 0, 1000, "%.0f %%");
   ImGui::SameLine();
-  edit("Amplify", (t = std::string("Multiply ") + scope + " by this amount").c_str(),
+  edit("Amplify", (t = std::string(T("Multiply ")) + scope + T(" by this amount")).c_str(),
        [&] { sampleops::amplify(smp, a, b, smpGainPct_ / 100.0f); });
-  wrapFor(90 + buttonWidth("Resample"));
+  wrapFor(90 + buttonWidth(T("Resample")));
   ImGui::SetNextItemWidth(S(90));
   ImGui::InputInt("##rate", &smpNewRate_, 0, 0);
   smpNewRate_ = std::clamp(smpNewRate_, 1000, 192000);
@@ -1067,11 +1070,11 @@ void App::sampleEditor(Sample& smp) {
   }, true);
   ImGui::NewLine();
   ImGui::Checkbox(T("Pencil"), &smpDraw_);
-  if (ImGui::IsItemHovered()) ImGui::SetTooltip(T("Draw on the waveform (zoom in for detail)"));
+  if (ImGui::IsItemHovered()) ImGui::SetTooltip("%s", T("Draw on the waveform (zoom in for detail)"));
   ImGui::SameLine();
   if (ImGui::SmallButton(T("Show all"))) smpViewLen_ = 0;
   ImGui::SameLine();
-  wrapFor(buttonWidth("Zoom to selection"));
+  wrapFor(buttonWidth(T("Zoom to selection")));
   if (ImGui::SmallButton(T("Zoom to selection")) && hasSel) {
     smpViewStart_ = a;
     smpViewLen_ = b - a;
@@ -1192,13 +1195,13 @@ void App::sampleEditor(Sample& smp) {
       dl->AddRectFilled(ImVec2(x0, pos.y + size.y - 4), ImVec2(std::max(x1, x0 + 3), pos.y + size.y), IM_COL32(255, 255, 255, 90));
     }
   } else {
-    dl->AddText(ImVec2(pos.x + 8, pos.y + 8), IM_COL32(150, 150, 170, 255), "Empty sample");
+    dl->AddText(ImVec2(pos.x + 8, pos.y + 8), IM_COL32(150, 150, 170, 255), T("Empty sample"));
   }
   dl->PopClipRect();
   if (hovered && len > 0) {
     int f = std::clamp((int)frameAt(io.MousePos.x), 0, len - 1);
     ImGui::SetTooltip(T("%d  (%.3f s)\nWheel: zoom, Shift+wheel: scroll%s"), f, f / (float)std::max(smp.rate, 1),
-                      smpDraw_ ? "\nDrag: draw" : "\nDrag: select, Shift+click: extend");
+                      smpDraw_ ? T("\nDrag: draw") : T("\nDrag: select, Shift+click: extend"));
   }
   if (changed) {
     dirty_ = true;
@@ -1246,22 +1249,22 @@ void App::samplesWindow() {
   }
 
   ImGui::SameLine();
-  wrapFor(buttonWidth("Record"));
+  wrapFor(buttonWidth(T("Record")));
   if (!recorder_.recording()) {
     if (ImGui::Button(T("Record"))) {
       std::string err;
-      if (recorder_.start(recDevice_, 44100, err)) setStatus("Recording... press Stop to keep it");
-      else setStatus("Cannot record: " + err);
+      if (recorder_.start(recDevice_, 44100, err)) setStatus(T("Recording... press Stop to keep it"));
+      else setStatus(std::string(T("Cannot record: ")) + err);
     }
-    if (ImGui::IsItemHovered()) ImGui::SetTooltip(T("Record a new sample from the microphone or line input"));
+    if (ImGui::IsItemHovered()) ImGui::SetTooltip("%s", T("Record a new sample from the microphone or line input"));
     ImGui::SameLine();
     std::vector<std::string> devs = Recorder::devices();
     ImGui::SetNextItemWidth(std::max(80.0f, ImGui::GetContentRegionAvail().x));
-    if (ImGui::BeginCombo("##recdev", recDevice_.empty() ? "Default input" : recDevice_.c_str())) {
+    if (ImGui::BeginCombo("##recdev", recDevice_.empty() ? T("Default input") : recDevice_.c_str())) {
       if (ImGui::Selectable(T("Default input"), recDevice_.empty())) recDevice_.clear();
       for (const std::string& d : devs)
         if (ImGui::Selectable(d.c_str(), d == recDevice_)) recDevice_ = d;
-      if (devs.empty()) ImGui::TextDisabled(T("No input device found"));
+      if (devs.empty()) ImGui::TextDisabled("%s", T("No input device found"));
       ImGui::EndCombo();
     }
   } else {
@@ -1279,7 +1282,7 @@ void App::samplesWindow() {
       int rate = recorder_.rate();
       std::vector<float> data = recorder_.stop();
       if (data.empty()) {
-        setStatus("Nothing was recorded");
+        setStatus(T("Nothing was recorded"));
       } else if ((int)song_.samples.size() < MAX_SAMPLES) {
         pushFullUndo();
         Sample smp;
@@ -1290,7 +1293,7 @@ void App::samplesWindow() {
         song_.samples.push_back(std::move(smp));
         curSample_ = (int)song_.samples.size() - 1;
         changed = true;
-        setStatus("Recorded " + song_.samples.back().name);
+        setStatus(std::string(T("Recorded ")) + song_.samples.back().name);
       }
     }
   }
@@ -1301,7 +1304,7 @@ void App::samplesWindow() {
     std::snprintf(buf, sizeof(buf), "%02X  %s  (%zu)", i, song_.samples[i].name.c_str(), song_.samples[i].data.size());
     if (ImGui::Selectable(buf, i == curSample_)) curSample_ = i;
   }
-  if (song_.samples.empty()) ImGui::TextDisabled(T("No samples. Load a WAV file, or import a MOD/XM/IT/S3M."));
+  if (song_.samples.empty()) ImGui::TextDisabled("%s", T("No samples. Load a WAV file, or import a MOD/XM/IT/S3M."));
   ImGui::EndChild();
 
   if (curSample_ >= 0 && curSample_ < (int)song_.samples.size()) sampleEditor(song_.samples[curSample_]);

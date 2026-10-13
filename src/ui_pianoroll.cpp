@@ -201,13 +201,13 @@ void App::pianoRollWindow() {
   ImGui::InputInt(T("Voices"), &prVoices_);
   prVoices_ = std::clamp(prVoices_, 1, 8);
   if (ImGui::IsItemHovered())
-    ImGui::SetTooltip(T("Chords: notes that overlap are spread over this channel and the next ones"));
+    ImGui::SetTooltip("%s", T("Chords: notes that overlap are spread over this channel and the next ones"));
   ImGui::SameLine();
   ImGui::Checkbox(T("Ghosts"), &prGhosts_);
   ImGui::SameLine();
   ImGui::Checkbox(T("MPE"), &prMpe_);
   if (ImGui::IsItemHovered())
-    ImGui::SetTooltip(T("Per-note expression, like MPE in Ableton:\n"
+    ImGui::SetTooltip("%s", T("Per-note expression, like MPE in Ableton:\n"
                       "drag on a note to bend its pitch (Ctrl: whole semitones), right-drag to clear,\n"
                       "double-click to reset it. The Press and Slide lanes edit each note's volume and\n"
                       "timbre (filter cutoff, 13xx). Use Voices for chords: each note gets its own channel."));
@@ -411,7 +411,7 @@ void App::pianoRollWindow() {
     ImVec2 a(lk0.x + 2, v0.y + 2 + i * 17.0f);
     bool on = i == prLane_;
     if (on) dl->AddRectFilled(a, ImVec2(g0.x - 3, a.y + 16), TH.header, 3);
-    dl->AddText(ImVec2(a.x + 3, a.y + 1), on ? TH.headerText : TH.rowNum, label);
+    dl->AddText(ImVec2(a.x + 3, a.y + 1), on ? TH.headerText : TH.rowNum, T(label));
   };
   laneLabel(0, "Vol");
   laneLabel(1, "Pitch");
@@ -456,7 +456,7 @@ void App::pianoRollWindow() {
         if (set) dl->AddCircleFilled(ImVec2(x0 + 2, y), 3.0f, col);
       }
     }
-    const char* hint = press ? "Pressure: each note's volume over time" : "Slide: each note's filter cutoff (13xx, filter on)";
+    const char* hint = press ? T("Pressure: each note's volume over time") : T("Slide: each note's filter cutoff (13xx, filter on)");
     dl->AddText(ImVec2(v1.x - ImGui::CalcTextSize(hint).x - S(6), v0.y + 2), TH.rowNum, hint);
   } else {
     // Semitone lines, the zero line, then the bend as the engine plays it:

@@ -91,7 +91,7 @@ void App::loadSettings() {
   setLanguage(language_);
   fontDirty_ = true;
   // The keyboard may be unplugged: keep the name so it reconnects next time.
-  if (!midiPort_.empty() && midi_.open(midiPort_)) setStatus("MIDI input: " + midiPort_);
+  if (!midiPort_.empty() && midi_.open(midiPort_)) setStatus(std::string(T("MIDI input: ")) + midiPort_);
 }
 
 void App::saveSettings() {
@@ -137,12 +137,12 @@ void App::openAudio() {
   audioDev_ = SDL_OpenAudioDevice(dev, 0, &want, &have, 0);
   if (!audioDev_ && dev) audioDev_ = SDL_OpenAudioDevice(nullptr, 0, &want, &have, 0);
   if (!audioDev_) {
-    audioStatus_ = std::string("No audio: ") + SDL_GetError();
+    audioStatus_ = std::string(T("No audio: ")) + SDL_GetError();
     setStatus(audioStatus_);
     return;
   }
   audioLatencyMs_ = have.samples * 1000.0f / std::max(have.freq, 1);
-  audioStatus_ = "Audio: " + std::to_string(have.freq) + " Hz, " + std::to_string(have.samples) + " frames";
+  audioStatus_ = std::string(T("Audio: ")) + std::to_string(have.freq) + " Hz, " + std::to_string(have.samples) + T(" frames");
   SDL_PauseAudioDevice(audioDev_, 0);
 }
 
@@ -191,7 +191,7 @@ void App::afterSongReplaced() {
 bool App::loadFile(const std::string& path) {
   std::string err;
   if (!loadAnySong(path, song_, err)) {
-    setStatus("Load failed: " + err);
+    setStatus(std::string(T("Load failed: ")) + err);
     return false;
   }
   afterSongReplaced();
@@ -200,7 +200,7 @@ bool App::loadFile(const std::string& path) {
   dialogDir_ = fs::path(path).parent_path().string();
   if (dialogDir_.empty()) dialogDir_ = ".";
   addRecent(path);
-  setStatus("Loaded " + path);
+  setStatus(std::string(T("Loaded ")) + path);
   return true;
 }
 
@@ -213,9 +213,9 @@ void App::saveSong(bool forceDialog) {
   if (song_.save(filePath_, err)) {
     dirty_ = false;
     addRecent(filePath_);
-    setStatus("Saved " + filePath_);
+    setStatus(std::string(T("Saved ")) + filePath_);
   } else {
-    setStatus("Save failed: " + err);
+    setStatus(std::string(T("Save failed: ")) + err);
   }
 }
 
@@ -247,7 +247,7 @@ void App::doAction(PendingAction a) {
       song_.reset();
       filePath_.clear();
       afterSongReplaced();
-      setStatus("New song");
+      setStatus(T("New song"));
       break;
     case PendingAction::Open:
       openFileDialog(FileDialogMode::Open);
@@ -261,7 +261,7 @@ void App::doAction(PendingAction a) {
       loadDemoSong(song_);
       filePath_.clear();
       afterSongReplaced();
-      setStatus("Demo song loaded");
+      setStatus(T("Demo song loaded"));
       break;
     case PendingAction::Quit:
       quit = true;
@@ -277,7 +277,7 @@ void App::confirmPopup() {
     confirmRequest_ = false;
   }
   if (ImGui::BeginPopupModal(T("Unsaved changes"), nullptr, ImGuiWindowFlags_AlwaysAutoResize)) {
-    ImGui::Text(T("The song has unsaved changes. Discard them?"));
+    ImGui::Text("%s", T("The song has unsaved changes. Discard them?"));
     if (ImGui::Button(T("Discard"), ImVec2(S(120), 0))) {
       ImGui::CloseCurrentPopup();
       doAction(pending_);
@@ -323,9 +323,9 @@ void App::playerExportPopup() {
   }
   ImGui::SetNextWindowSize(ImVec2(S(520), 0), ImGuiCond_Appearing);
   if (!ImGui::BeginPopupModal(T("Export keygen player"), nullptr)) return;
-  ImGui::TextWrapped(T("A standalone program that plays this song with the keygen intro: starfield, logo and scroller. "
+  ImGui::TextWrapped("%s", T("A standalone program that plays this song with the keygen intro: starfield, logo and scroller. "
                      "It runs on its own, without DATRACKARXD."));
-  ImGui::TextDisabled(T("For colors, speeds and a live preview, use the DATRACKARXD Keygen app."));
+  ImGui::TextDisabled("%s", T("For colors, speeds and a live preview, use the DATRACKARXD Keygen app."));
   ImGui::Separator();
   ImGui::InputText(T("Logo"), playerLogo_, sizeof(playerLogo_));
   ImGui::InputText(T("Window title"), playerTitle_, sizeof(playerTitle_));
@@ -341,23 +341,24 @@ void App::playerExportPopup() {
 }
 
 void App::fileDialog() {
-  const char* title = dialogMode_ == FileDialogMode::Open        ? "Open song / import module###filedlg"
-                      : dialogMode_ == FileDialogMode::Save      ? "Save song###filedlg"
-                      : dialogMode_ == FileDialogMode::LoadSample ? "Load sample (WAV, FLAC, MP3, OGG)###filedlg"
-                      : dialogMode_ == FileDialogMode::LoadInstrument ? "Load instrument###filedlg"
-                      : dialogMode_ == FileDialogMode::SaveInstrument ? "Save instrument###filedlg"
-                      : dialogMode_ == FileDialogMode::ExportMidi ? "Export MIDI###filedlg"
-                      : dialogMode_ == FileDialogMode::ExportOgg ? "Export OGG###filedlg"
-                      : dialogMode_ == FileDialogMode::ExportModule ? "Export module (XM, MOD, IT)###filedlg"
-                      : dialogMode_ == FileDialogMode::ExportVgm ? "Export VGM###filedlg"
-                      : dialogMode_ == FileDialogMode::ExportPlayer ? "Export keygen player###filedlg"
-                                                                 : "Export WAV###filedlg";
+  const char* titleEn = dialogMode_ == FileDialogMode::Open        ? "Open song / import module"
+                      : dialogMode_ == FileDialogMode::Save      ? "Save song"
+                      : dialogMode_ == FileDialogMode::LoadSample ? "Load sample (WAV, FLAC, MP3, OGG)"
+                      : dialogMode_ == FileDialogMode::LoadInstrument ? "Load instrument"
+                      : dialogMode_ == FileDialogMode::SaveInstrument ? "Save instrument"
+                      : dialogMode_ == FileDialogMode::ExportMidi ? "Export MIDI"
+                      : dialogMode_ == FileDialogMode::ExportOgg ? "Export OGG"
+                      : dialogMode_ == FileDialogMode::ExportModule ? "Export module (XM, MOD, IT)"
+                      : dialogMode_ == FileDialogMode::ExportVgm ? "Export VGM"
+                      : dialogMode_ == FileDialogMode::ExportPlayer ? "Export keygen player"
+                                                                 : "Export WAV";
+  std::string title = std::string(T(titleEn)) + "###filedlg";
   if (dialogOpenRequest_) {
     ImGui::OpenPopup("###filedlg");
     dialogOpenRequest_ = false;
   }
   ImGui::SetNextWindowSize(ImVec2(S(560), S(420)), ImGuiCond_Appearing);
-  if (!ImGui::BeginPopupModal(title, nullptr)) return;
+  if (!ImGui::BeginPopupModal(title.c_str(), nullptr)) return;
 
   std::vector<std::string> exts;
   if (dialogMode_ == FileDialogMode::Open) exts = supportedSongExtensions();
@@ -457,7 +458,7 @@ void App::fileDialog() {
     ImGui::SetNextItemWidth(S(120));
     ImGui::SliderFloat(T("Note held"), &moduleHold_, 0.2f, 4.0f, "%.1f s");
     if (ImGui::IsItemHovered())
-      ImGui::SetTooltip(T("Instruments that aren't samples are rendered: one note held this long, then\n"
+      ImGui::SetTooltip("%s", T("Instruments that aren't samples are rendered: one note held this long, then\n"
                         "looped if it still sounds. MOD resamples everything to 8363 Hz, 8-bit."));
   }
   if (dialogMode_ == FileDialogMode::ExportOgg) {
@@ -469,7 +470,7 @@ void App::fileDialog() {
   }
   bool opening = dialogMode_ == FileDialogMode::Open || dialogMode_ == FileDialogMode::LoadSample ||
                  dialogMode_ == FileDialogMode::LoadInstrument;
-  if (ImGui::Button(opening ? "Open" : "Save", ImVec2(S(100), 0))) accept = true;
+  if (ImGui::Button(opening ? T("Open") : T("Save"), ImVec2(S(100), 0))) accept = true;
   ImGui::SameLine();
   bool cancel = ImGui::Button(T("Cancel"), ImVec2(S(100), 0)) || ImGui::IsKeyPressed(ImGuiKey_Escape);
 
@@ -487,7 +488,7 @@ void App::fileDialog() {
     } else if (dialogMode_ == FileDialogMode::LoadSample) {
       Sample smp;
       if ((int)song_.samples.size() >= MAX_SAMPLES) {
-        setStatus("Too many samples");
+        setStatus(T("Too many samples"));
       } else if (loadAudioSample(path, smp, err)) {
         pushFullUndo();
         song_.samples.push_back(std::move(smp));
@@ -495,10 +496,10 @@ void App::fileDialog() {
         if (loadSampleIntoIns_ >= 0 && loadSampleIntoIns_ < (int)song_.instruments.size())
           song_.instruments[loadSampleIntoIns_].sample = curSample_;
         dirty_ = true;
-        setStatus("Loaded sample " + path);
+        setStatus(std::string(T("Loaded sample ")) + path);
         cancel = true;
       } else {
-        setStatus("Sample load failed: " + err);
+        setStatus(std::string(T("Sample load failed: ")) + err);
       }
     } else if (dialogMode_ == FileDialogMode::LoadInstrument) {
       Song next = song_;
@@ -508,17 +509,17 @@ void App::fileDialog() {
         song_ = std::move(next);
         curIns_ = idx;
         dirty_ = true;
-        setStatus("Loaded instrument " + song_.instruments[idx].name);
+        setStatus(std::string(T("Loaded instrument ")) + song_.instruments[idx].name);
         cancel = true;
       } else {
-        setStatus("Instrument load failed: " + err);
+        setStatus(std::string(T("Instrument load failed: ")) + err);
       }
     } else if (dialogMode_ == FileDialogMode::SaveInstrument) {
       if (saveInstrumentFile(song_, curIns_, path, err)) {
-        setStatus("Saved instrument " + path);
+        setStatus(std::string(T("Saved instrument ")) + path);
         cancel = true;
       } else {
-        setStatus("Instrument save failed: " + err);
+        setStatus(std::string(T("Instrument save failed: ")) + err);
       }
     } else if (dialogMode_ == FileDialogMode::ExportPlayer) {
       PlayerPayload p;
@@ -528,18 +529,18 @@ void App::fileDialog() {
       p.scroll = playerScroll_;
       // The DATRACKARXD Keygen app makes lighter players than the tracker.
       if (writePlayer(path, p, err, findKeygenApp()))
-        setStatus("Exported player " + path);
+        setStatus(std::string(T("Exported player ")) + path);
       else
-        setStatus("Player export failed: " + err);
+        setStatus(std::string(T("Player export failed: ")) + err);
       cancel = true;
     } else if (dialogMode_ == FileDialogMode::ExportVgm) {
       std::string report;
       if (exportVGM(song_, path, err, report)) {
-        setStatus("Exported " + path);
+        setStatus(std::string(T("Exported ")) + path);
         exportReport_ = report;
         showExportReport_ = !report.empty();
       } else {
-        setStatus("VGM export failed: " + err);
+        setStatus(std::string(T("VGM export failed: ")) + err);
       }
       cancel = true;
     } else if (dialogMode_ == FileDialogMode::ExportModule) {
@@ -549,24 +550,24 @@ void App::fileDialog() {
       opt.holdSeconds = moduleHold_;
       std::string report;
       if (exportModule(song_, path, opt, err, report)) {
-        setStatus("Exported " + path);
+        setStatus(std::string(T("Exported ")) + path);
         exportReport_ = report;
         showExportReport_ = !report.empty();
       } else {
-        setStatus("Module export failed: " + err);
+        setStatus(std::string(T("Module export failed: ")) + err);
       }
       cancel = true;
     } else if (dialogMode_ == FileDialogMode::ExportOgg) {
       if (exportOgg(song_, path, 44100, exportLoops_, oggQuality_, err))
-        setStatus("Exported " + path);
+        setStatus(std::string(T("Exported ")) + path);
       else
-        setStatus("OGG export failed: " + err);
+        setStatus(std::string(T("OGG export failed: ")) + err);
       cancel = true;
     } else if (dialogMode_ == FileDialogMode::ExportMidi) {
       if (exportMIDI(song_, path, exportLoops_, err))
-        setStatus("Exported " + path);
+        setStatus(std::string(T("Exported ")) + path);
       else
-        setStatus("MIDI export failed: " + err);
+        setStatus(std::string(T("MIDI export failed: ")) + err);
       cancel = true;
     } else if (dialogMode_ == FileDialogMode::Save) {
       filePath_ = path;
@@ -574,9 +575,9 @@ void App::fileDialog() {
       cancel = !dirty_;
     } else {
       if (exportWav(song_, path, 44100, exportLoops_, err))
-        setStatus("Exported " + path);
+        setStatus(std::string(T("Exported ")) + path);
       else
-        setStatus("Export failed: " + err);
+        setStatus(std::string(T("Export failed: ")) + err);
       cancel = true;
     }
   }
@@ -612,7 +613,7 @@ void App::menuBar() {
     if (ImGui::MenuItem(T("Export MIDI..."))) openFileDialog(FileDialogMode::ExportMidi);
     if (ImGui::MenuItem(T("Export module (XM, MOD, IT)..."))) openFileDialog(FileDialogMode::ExportModule);
     if (ImGui::MenuItem(T("Export VGM..."))) openFileDialog(FileDialogMode::ExportVgm);
-    if (ImGui::IsItemHovered()) ImGui::SetTooltip(T("Register log of the emulated chips (AY, SN76489, Game Boy, OPL3)"));
+    if (ImGui::IsItemHovered()) ImGui::SetTooltip("%s", T("Register log of the emulated chips (AY, SN76489, Game Boy, OPL3)"));
     if (ImGui::MenuItem(T("Export keygen player..."))) {
       std::snprintf(playerTitle_, sizeof(playerTitle_), "%s", song_.name.c_str());
       if (!playerScroll_[0]) {
@@ -642,7 +643,7 @@ void App::menuBar() {
     if (ImGui::MenuItem(T("Transpose +12"), keyLabel(Action::TransposeOctUp).c_str())) transpose(12);
     if (ImGui::MenuItem(T("Transpose -12"), keyLabel(Action::TransposeOctDown).c_str())) transpose(-12);
     ImGui::Separator();
-    ImGui::TextDisabled(T("Selection (or the channel)"));
+    ImGui::TextDisabled("%s", T("Selection (or the channel)"));
     selectionToolsMenu();
     ImGui::EndMenu();
   }
@@ -683,7 +684,7 @@ void App::menuBar() {
   // Transport controls.
   ImGui::Separator();
   bool playing = engine_->playing();
-  if (ImGui::MenuItem(playing ? "[Stop]" : "[Play]")) togglePlay(false);
+  if (ImGui::MenuItem(playing ? T("[Stop]") : T("[Play]"))) togglePlay(false);
   if (ImGui::MenuItem(T("[Play row]"))) {
     engine_->stop();
     togglePlay(true);
@@ -697,10 +698,10 @@ void App::menuBar() {
   if (ImGui::BeginMenu(T("Rec. options"))) {
     ImGui::SetNextItemWidth(S(140));
     ImGui::Combo(T("Count-in"), &countInBars_, TC("Off\0" "1 bar\0" "2 bars\0" "3 bars\0" "4 bars\0"));
-    if (ImGui::IsItemHovered()) ImGui::SetTooltip(T("Clicks before playback starts in Record mode (a bar = Highlight 2 rows)"));
+    if (ImGui::IsItemHovered()) ImGui::SetTooltip("%s", T("Clicks before playback starts in Record mode (a bar = Highlight 2 rows)"));
     ImGui::SetNextItemWidth(S(140));
     ImGui::Combo(T("MIDI quantize"), &midiQuantize_, TC("Off\0" "Nearest row\0" "2 rows\0" "Beat\0"));
-    if (ImGui::IsItemHovered()) ImGui::SetTooltip(T("Live MIDI notes go to the nearest row of this grid instead of the row playing"));
+    if (ImGui::IsItemHovered()) ImGui::SetTooltip("%s", T("Live MIDI notes go to the nearest row of this grid instead of the row playing"));
     ImGui::SetNextItemWidth(S(140));
     ImGui::SliderFloat(T("Metronome volume"), &metronomeVol_, 0, 1, "%.2f");
     ImGui::EndMenu();
@@ -736,29 +737,29 @@ void App::midiMenu() {
     if (ImGui::MenuItem(p.c_str(), nullptr, midi_.portName() == p) && midi_.portName() != p) {
       if (midi_.open(p)) {
         midiPort_ = p;
-        setStatus("MIDI input: " + p);
+        setStatus(std::string(T("MIDI input: ")) + p);
       } else {
         setStatus(midi_.error());
       }
     }
   }
-  if (midiPorts_.empty()) ImGui::TextDisabled("%s", midi_.error().empty() ? "No MIDI input found" : midi_.error().c_str());
+  if (midiPorts_.empty()) ImGui::TextDisabled("%s", midi_.error().empty() ? T("No MIDI input found") : midi_.error().c_str());
   ImGui::Separator();
   if (ImGui::MenuItem(T("Rescan"))) midiPorts_ = midi_.ports();
   ImGui::MenuItem(T("Velocity -> volume"), nullptr, &midiVelocity_);
   ImGui::SetNextItemWidth(S(120));
-  ImGui::SliderInt(T("Pitch wheel range"), &midiBendRange_, 1, 24, "%d semitones");
-  if (ImGui::IsItemHovered()) ImGui::SetTooltip(T("In Record mode, while playing, the wheel is written as E8xx bends."));
+  ImGui::SliderInt(T("Pitch wheel range"), &midiBendRange_, 1, 24, T("%d semitones"));
+  if (ImGui::IsItemHovered()) ImGui::SetTooltip("%s", T("In Record mode, while playing, the wheel is written as E8xx bends."));
   ImGui::Separator();
   ImGui::MenuItem(T("MPE controller"), nullptr, &midiMpe_);
   if (ImGui::IsItemHovered())
-    ImGui::SetTooltip(T("For MPE keyboards (Seaboard, Linnstrument, Osmose...): every note gets its own channel,\n"
+    ImGui::SetTooltip("%s", T("For MPE keyboards (Seaboard, Linnstrument, Osmose...): every note gets its own channel,\n"
                       "pitch bend, slide (CC74 -> filter cutoff) and pressure (-> volume).\n"
                       "Notes use the piano roll's Voices channels (8 if Voices is 1).\n"
                       "In Record mode while playing, all of it is written to the pattern."));
   ImGui::BeginDisabled(!midiMpe_);
   ImGui::SetNextItemWidth(S(120));
-  ImGui::SliderInt(T("MPE pitch range"), &midiMpeRange_, 1, 96, "%d semitones");
+  ImGui::SliderInt(T("MPE pitch range"), &midiMpeRange_, 1, 96, T("%d semitones"));
   ImGui::EndDisabled();
   ImGui::EndMenu();
 }
@@ -1092,7 +1093,7 @@ void App::frame() {
   if (showExportReport_) {
     ImGui::SetNextWindowSize(ImVec2(S(460), 0), ImGuiCond_Appearing);
     if (ImGui::Begin(TW("Export report").c_str(), &showExportReport_)) {
-      ImGui::TextWrapped(T("Exported. These parts had no equivalent in the format and were left out:"));
+      ImGui::TextWrapped("%s", T("Exported. These parts had no equivalent in the format and were left out:"));
       ImGui::Separator();
       ImGui::TextUnformatted(exportReport_.c_str());
       if (ImGui::Button(T("OK"))) showExportReport_ = false;
