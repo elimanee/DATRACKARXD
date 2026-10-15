@@ -16,7 +16,8 @@ C++17 - ImGui + SDL2
   - **FM** 4 operators in the style of the Yamaha OPN (Mega Drive): 8 algorithms, feedback, AR/DR/SL/D2R/RR envelopes, presets
   - **Sample**: `.wav`, `.flac`, `.mp3`, `.ogg` files or microphone recordings, loops (forward, ping-pong, backward), multi-samples per note, fadeout
   - **Real emulated chips**: **AY-3-8910 / YM2149** (ZX Spectrum, CPC, Atari ST, with the "buzzer" envelope),
-    **SN76489** (Master System), **Game Boy** (pulse with sweep, wave, noise) and **OPL3** (AdLib, 2 or 4 operators)
+    **SN76489** (Master System), **Game Boy** (pulse with sweep, wave, noise), **OPL3** (AdLib, 2 or 4 operators),
+    **YM2612** (Mega Drive), **NES 2A03** (pulses, triangle, noise, DPCM), **Konami SCC** (MSX) and **PC Engine**
 - **ADSR envelope**, two **LFOs** (pitch, volume, pulse width, cutoff, panning) and **wavetable morphing** on instruments
 - **Per-channel effects**: bitcrusher, distortion, chorus, 3-band EQ, compressor
 - **Sample editor**: selection, zoom, cut / copy / paste, crop, normalize, fades, reverse,
@@ -47,7 +48,7 @@ C++17 - ImGui + SDL2
 - Per-channel order list (like Furnace), add / duplicate / clone
 - Per-channel oscilloscope, mute / solo
 - Saving in a `.dtk` text format, export to WAV (full mix or one track per channel), OGG, MIDI, XM, MOD, IT and VGM
-- A built-in keygen demo that loads at startup, and `songs/chips.dtk` to hear the emulated chips
+- A built-in keygen demo that loads at startup, `songs/chips.dtk` and `songs/consoles.dtk` to hear the emulated chips
 
 ## Download
 
@@ -354,13 +355,22 @@ machine), 16-step volume, and the original noise generators and hardware envelop
 | **SN76489** | clock (NTSC, PAL, BBC), tone, white or periodic noise | noise mode |
 | **Game Boy** | pulse channel (duty, envelope, sweep), wave (the instrument's wavetable, 4 volumes) or noise (short or long) | duty / - |
 | **OPL3** (AdLib) | 2 or 4 operators, algorithm, feedback, and per operator MULT, TL, AR, DR, SL, RR, KSL, waveform (8), sustain, tremolo, vibrato, KSR | - / waveform |
+| **YM2612** (Mega Drive) | clock (NTSC, PAL), model (YM2612 with its "ladder" distortion, or the clean YM3438), the chip's LFO and its depth on pitch (FMS) and volume (AMS, per operator), and the FM editor: 4 operators, 8 algorithms, feedback, MULT, DT, TL, AR, DR, SL, D2R, RR, KSR, SSG-EG | - |
+| **NES 2A03** | clock (NTSC, PAL), pulse channel (duty, hardware envelope with loop, sweep), triangle (no volume), noise (long or short, 16 pitches) or DPCM (the instrument's sample as 1-bit delta, at the 2A03's 16 rates) | duty or noise mode / - |
+| **Konami SCC** (MSX) | the instrument's wavetable as 8-bit waves, 16-step volume | - |
+| **PC Engine** (HuC6280) | the instrument's wavetable as 5-bit waves, volume in 1.5 dB steps, noise | noise (0 wave, 1 noise) / - |
 
 AY tip: the Atari ST **buzzer** sound is obtained with Tone and Noise unchecked, Envelope checked, a
 sawtooth (8) or triangle (10) shape and "Env. pitch" set to "Note x1": the envelope becomes the
 waveform and follows the note. On Game Boy, a volume macro replaces the hardware envelope.
 
-The OPL3 is emulated by ymfm (https://github.com/aaronsgiles/ymfm). The SID filter, ADSR, LFOs and
-per-channel effects also work on the chips.
+On the NES, the hardware envelope fades the note out by itself (a volume macro replaces it); the
+triangle has no volume. DPCM plays the instrument's sample (picked in the editor) converted to 1-bit
+delta at the 2A03 rate closest to the note; a forward loop makes the whole sample loop.
+
+The OPL3 and the YM2612 are emulated by ymfm (https://github.com/aaronsgiles/ymfm). The SID filter, ADSR,
+LFOs and per-channel effects also work on the chips. `songs/consoles.dtk` plays the YM2612, the NES,
+the SCC and the PC Engine together.
 
 ## Envelope, LFO and morphing
 
@@ -449,7 +459,12 @@ that play an **emulated chip** instrument are exported:
 - AY-3-8910 / YM2149: 6 voices (two chips);
 - SN76489: 3 square voices, or 2 voices + noise;
 - Game Boy: the two pulses, the wave and the noise;
-- OPL3: 18 2-operator voices or 6 4-operator voices.
+- OPL3: 18 2-operator voices or 6 4-operator voices;
+- YM2612: 12 voices (two chips), in left / center / right stereo from the channel's panning;
+- NES 2A03: two chips of 2 pulses, a triangle, a noise and a DPCM (the DPCM samples go into the first
+  one's 16 KB of memory);
+- Konami SCC: 10 voices (two chips); on the chip, voices 4 and 5 share their wave;
+- PC Engine: 12 voices (two chips), noise on voices 5 and 6, with the channel's panning.
 
 Channel effects, the mixer and automation do not exist on the chips and are therefore not in the
 VGM; the report lists them, along with the channels that were left out.

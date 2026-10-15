@@ -26,6 +26,7 @@
 #include "midifile.h"
 #include "modexport.h"
 #include "shortcuts.h"
+#include "vgmexport.h"
 #include "song.h"
 
 namespace fs = std::filesystem;
@@ -64,7 +65,7 @@ bool loadSong(const std::string& name, Song& s) {
 // --- tests ---
 
 void songFormatRoundTrip() {
-  for (const char* name : {"demo.dtk", "chips.dtk"}) {
+  for (const char* name : {"demo.dtk", "chips.dtk", "consoles.dtk"}) {
     Song a;
     CHECK(loadSong(name, a));
     std::string t1 = a.toText();
@@ -94,8 +95,9 @@ void songFormatRoundTrip() {
 }
 
 void engineOutput() {
+  for (const char* name : {"chips.dtk", "consoles.dtk"}) {
   Song s;
-  CHECK(loadSong("chips.dtk", s));
+  CHECK(loadSong(name, s));
   auto render = [&] {
     Engine e(s, 44100);
     e.play(0, 0);
@@ -113,6 +115,59 @@ void engineOutput() {
   }
   CHECK(finite);
   CHECK(peak > 0.01f && peak < 4.0f);
+  }
+}
+
+// The emulated chips: every type makes sound at the note's pitch, and the
+// VGM export declares the chips the song uses.
+void chipsAndVgm() {
+  for (int type = INS_AY; type < INS_TYPE_COUNT; type++) {
+    Song s;
+    s.reset(1);
+    s.instruments.assign(1, Instrument());
+    Instrument& ins = s.instruments[0];
+    ins.type = type;
+    ins.volume = 15;
+    if (type == INS_GB || type == INS_SCC || type == INS_PCE)
+      for (int i = 0; i < 32; i++) ins.wavetable[i] = i < 16 ? 15 : 0;
+    ins.chip.gbEnvLen = 0;  // no fade
+    // FM chips: one sine carrier, so the zero crossings give the pitch.
+    ins.opl.alg = 1;
+    ins.opl.ops[0].tl = 63;
+    ins.opl.ops[1] = OPLOperator();
+    ins.fm.alg = 7;
+    for (int k = 0; k < 3; k++) ins.fm.ops[k].enabled = false;
+    ins.fm.ops[3] = FMOperator();
+    Cell* c = s.cell(0, 0, 0, true);
+    c->note = 57;  // A-4, 440 Hz
+    c->ins = 0;
+    Engine e(s, 44100);
+    e.play(0, 0);
+    std::vector<float> buf(44100 * 2 / 2);
+    e.render(buf.data(), (int)buf.size() / 2);
+    // Zero crossings of the second half (after the attack) give the pitch.
+    int cross = 0;
+    size_t half = buf.size() / 4;
+    double mean = 0;
+    for (size_t i = half; i < buf.size() / 2; i++) mean += buf[i * 2];
+    mean /= (double)(buf.size() / 2 - half);
+    for (size_t i = half + 1; i < buf.size() / 2; i++) cross += (buf[(i - 1) * 2] < mean) != (buf[i * 2] < mean);
+    double hz = cross / 2.0 / ((buf.size() / 2 - half) / 44100.0);
+    bool ok = std::abs(hz - 440) < 440 * 0.03;
+    if (!ok) std::printf("  type %d plays %.1f Hz instead of 440\n", type, hz);
+    CHECK(ok);
+  }
+  Song s;
+  CHECK(loadSong("consoles.dtk", s));
+  std::string err, report, path = tmpDir + "/consoles.vgm";
+  CHECK(exportVGM(s, path, err, report));
+  std::vector<uint8_t> v = readFile(path);
+  auto u32 = [&](size_t at) { return v.size() >= at + 4 ? (uint32_t)(v[at] | v[at + 1] << 8 | v[at + 2] << 16 | (uint32_t)v[at + 3] << 24) : 0u; };
+  CHECK(v.size() > 0x100 && v[0] == 'V' && v[1] == 'g' && v[2] == 'm');
+  CHECK(u32(0x2C) != 0);  // YM2612
+  CHECK(u32(0x84) != 0);  // NES APU
+  CHECK(u32(0x9C) != 0);  // K051649
+  CHECK(u32(0xA4) != 0);  // HuC6280
 }
 
 void zlibRoundTrip() {
@@ -322,6 +377,7 @@ int main(int argc, char** argv) {
     std::function<void()> run;
   } tests[] = {
       {"song format", songFormatRoundTrip}, {"engine output", engineOutput},     {"zlib", zlibRoundTrip},
+      {"chips and VGM", chipsAndVgm},
       {"module round trip", moduleRoundTrip}, {"importers vs. broken files", importerFuzz},
       {"translations", translations},       {"shortcuts", shortcuts},
   };

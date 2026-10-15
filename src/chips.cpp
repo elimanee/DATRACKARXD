@@ -4,6 +4,7 @@
 #include <cmath>
 
 #include "ymfm_opl.h"
+#include "ymfm_opn.h"
 
 namespace {
 
@@ -560,6 +561,534 @@ class OPLVoice : public ChipVoice, public ymfm::ymfm_interface {
   uint32_t lastTrigger_ = 0, retriggers_ = 0;
 };
 
+// ---------------------------------------------------------------------------
+// YM2612 / YM3438 through ymfm: one chip per voice, using channel 1
+// ---------------------------------------------------------------------------
+
+constexpr uint32_t OPN_NTSC = 7670453;
+
+class OPNVoice : public ChipVoice, public ymfm::ymfm_interface {
+ public:
+  explicit OPNVoice(int sampleRate) : ChipVoice(INS_OPN), ym2612_(*this), ym3438_(*this), sr_(sampleRate) {
+    ym2612_.reset();
+    ym3438_.reset();
+    std::fill(std::begin(regs_), std::end(regs_), -1);
+    chipRate_ = ym2612_.sample_rate(OPN_NTSC);
+  }
+
+  void update(const ChipFrame& f) override {
+    if (!f.ins) return;
+    const Instrument& ins = *f.ins;
+    const ChipSettings& c = ins.chip;
+    const FMParams& p = ins.fm;
+    bool want3438 = c.opnModel == 1;
+    if (want3438 != use3438_) {
+      // Another model: the new chip gets the registers written so far.
+      use3438_ = want3438;
+      int saved[0x100];
+      std::copy(std::begin(regs_), std::end(regs_), saved);
+      std::fill(std::begin(regs_), std::end(regs_), -1);
+      for (int r = 0; r < 0x100; r++)
+        if (saved[r] >= 0 && r != 0x28) write(r, saved[r]);
+    }
+    clock_ = chipClockHz(INS_OPN, c.clock);
+    chipRate_ = ym2612_.sample_rate((uint32_t)clock_);
+    write(0x22, c.opnLfo > 0 ? 0x08 | ((c.opnLfo - 1) & 7) : 0x00);
+    write(0x27, 0x00);
+    write(0x2B, 0x00);  // DAC off: channel 6 stays FM
+    static const bool CARRIER[8][4] = {{0, 0, 0, 1}, {0, 0, 0, 1}, {0, 0, 0, 1}, {0, 0, 0, 1},
+                                       {0, 1, 0, 1}, {0, 1, 1, 1}, {0, 1, 1, 1}, {1, 1, 1, 1}};
+    int alg = std::clamp(p.alg, 0, 7);
+    int att = 127 - std::clamp(f.vol, 0, 127);
+    for (int k = 0; k < 4; k++) {
+      const FMOperator& op = p.ops[k];
+      int s = SLOT[k];
+      int d = op.dt == 7 ? 0 : std::clamp(op.dt, 0, 6) - 3;  // the FM editor's detune, 3 = none
+      int dtReg = d >= 0 ? d : 4 - d;
+      int tl = !op.enabled ? 127 : CARRIER[alg][k] ? std::min(127, op.tl + att) : op.tl;
+      write(0x30 + s, (dtReg << 4) | (op.mult & 15));
+      write(0x40 + s, tl & 127);
+      write(0x50 + s, ((op.ksr & 3) << 6) | (op.ar & 31));
+      write(0x60 + s, (((c.opnAmOps >> k) & 1) << 7) | (op.dr & 31));
+      write(0x70 + s, op.d2r & 31);
+      write(0x80 + s, ((op.sl & 15) << 4) | (op.rr & 15));
+      write(0x90 + s, op.ssg >= 8 ? op.ssg & 15 : 0);
+    }
+    write(0xB0, ((p.fb & 7) << 3) | alg);
+    write(0xB4, 0xC0 | ((c.opnAms & 3) << 4) | (c.opnFms & 7));
+
+    // F-number and block: the smallest block that fits 11 bits.
+    double fr = std::max(f.freq, 1.0);
+    int block = 0, fnum = 0;
+    for (block = 0; block < 8; block++) {
+      fnum = (int)std::lround(fr * (1 << (21 - block)) / chipRate_);
+      if (fnum < 2048) break;
+    }
+    block = std::min(block, 7);
+    fnum = std::clamp(fnum, 0, 2047);
+    if (f.trigger != lastTrigger_) {
+      lastTrigger_ = f.trigger;
+      if (keyOn_) {
+        write(0x28, 0x00);  // key off for one sample so the envelopes restart
+        generate();
+        keyOn_ = false;
+        retriggers_++;
+      }
+    }
+    keyOn_ = f.gate;
+    if (keyOn_) quiet_ = 0;
+    int a4 = (block << 3) | (fnum >> 8), a0 = fnum & 0xFF;
+    if (regs_[0xA4] != a4 || regs_[0xA0] != a0) {
+      regs_[0xA0] = -1;  // A4 only takes effect with the A0 write after it
+      write(0xA4, a4);
+      write(0xA0, a0);
+    }
+    write(0x28, keyOn_ ? 0xF0 : 0x00);
+  }
+
+  float render() override {
+    pos_ += chipRate_ / sr_;
+    while (pos_ >= 1.0) {
+      pos_ -= 1.0;
+      generate();
+    }
+    return (prev_ + (cur_ - prev_) * (float)pos_) * (1.0f / 5000.0f);
+  }
+
+  bool finished() const override { return !keyOn_ && quiet_ > 4096; }
+
+  void regs(ChipRegs& r) const override {
+    static const int BASE[7] = {0x30, 0x40, 0x50, 0x60, 0x70, 0x80, 0x90};
+    r.type = INS_OPN;
+    r.clock = clock_;
+    for (int k = 0; k < 4; k++)
+      for (int j = 0; j < 7; j++) r.opnOp[k][j] = std::max(0, regs_[BASE[j] + SLOT[k]]);
+    r.opnB0 = std::max(0, regs_[0xB0]);
+    r.opnB4 = std::max(0, regs_[0xB4]);
+    r.opnLfo = std::max(0, regs_[0x22]);
+    int a0 = std::max(0, regs_[0xA0]), a4 = std::max(0, regs_[0xA4]);
+    r.opnFnum = a0 | ((a4 & 7) << 8);
+    r.opnBlock = (a4 >> 3) & 7;
+    r.opnKey = keyOn_;
+    r.opn3438 = use3438_;
+    r.opnRetriggers = retriggers_;
+  }
+
+ private:
+  static constexpr int SLOT[4] = {0, 8, 4, 12};  // operator 1-4 -> register offset
+  void write(int reg, int val) {
+    if (regs_[reg & 0xFF] == val && reg != 0x28) return;
+    regs_[reg & 0xFF] = val;
+    if (use3438_) {
+      ym3438_.write_address((uint8_t)reg);
+      ym3438_.write_data((uint8_t)val);
+    } else {
+      ym2612_.write_address((uint8_t)reg);
+      ym2612_.write_data((uint8_t)val);
+    }
+  }
+  void generate() {
+    ymfm::ym2612::output_data out;
+    if (use3438_) ym3438_.generate(&out, 1);
+    else ym2612_.generate(&out, 1);
+    prev_ = cur_;
+    cur_ = 0.5f * (float)(out.data[0] + out.data[1]);
+    quiet_ = std::abs(cur_) < 4 ? quiet_ + 1 : 0;
+  }
+
+  ymfm::ym2612 ym2612_;
+  ymfm::ym3438 ym3438_;
+  bool use3438_ = false;
+  int sr_;
+  double clock_ = OPN_NTSC, chipRate_ = 53267, pos_ = 0;
+  float prev_ = 0, cur_ = 0;
+  int regs_[0x100];
+  bool keyOn_ = false;
+  int quiet_ = 1 << 20;
+  uint32_t lastTrigger_ = 0, retriggers_ = 0;
+};
+
+// ---------------------------------------------------------------------------
+// NES 2A03: pulse, triangle, noise or DPCM, with the APU's timers, envelope,
+// sweep and 1-bit delta samples
+// ---------------------------------------------------------------------------
+
+const uint8_t NES_DUTY[4][8] = {{0, 1, 0, 0, 0, 0, 0, 0}, {0, 1, 1, 0, 0, 0, 0, 0}, {0, 1, 1, 1, 1, 0, 0, 0}, {1, 0, 0, 1, 1, 1, 1, 1}};
+const int NES_NOISE_PERIOD[16] = {4, 8, 16, 32, 64, 96, 128, 160, 202, 254, 380, 508, 762, 1016, 2034, 4068};
+const int NES_DPCM_PERIOD[16] = {428, 380, 340, 320, 286, 254, 226, 214, 190, 160, 142, 128, 106, 84, 72, 54};
+
+class NESVoice : public ChipVoice {
+ public:
+  explicit NESVoice(int sampleRate) : ChipVoice(INS_NES), sr_(sampleRate) { dc_.init(sampleRate); }
+
+  void update(const ChipFrame& f) override {
+    if (!f.ins) {
+      vol_ = 0;
+      return;
+    }
+    const Instrument& ins = *f.ins;
+    const ChipSettings& c = ins.chip;
+    cpu_ = chipClockHz(INS_NES, c.clock);
+    kind_ = std::clamp(c.nesChannel, 0, 3);
+    double fr = std::max(f.freq, 1.0);
+    bool trigger = f.trigger != lastTrigger_;
+    lastTrigger_ = f.trigger;
+    useEnv_ = c.nesEnv && f.macroVol < 0;
+    envPeriod_ = std::clamp(c.nesEnvPeriod, 0, 15);
+    envLoop_ = c.nesEnvLoop;
+    vol_ = std::clamp(f.vol, 0, 15);
+    gate_ = f.gate;
+
+    if (kind_ == 0 || kind_ == 1) {
+      int t = (int)std::lround(cpu_ / ((kind_ == 0 ? 16.0 : 32.0) * fr)) - 1;
+      t = std::clamp(t, 0, 2047);
+      sweepOn_ = kind_ == 0 && c.nesSweep;
+      sweepPeriod_ = std::clamp(c.nesSweepPeriod, 0, 7);
+      sweepShift_ = std::clamp(c.nesSweepShift, 0, 7);
+      sweepDown_ = c.nesSweepDown;
+      if (trigger || !sweepOn_) {
+        // A new note (or no sweep): the timer follows the note. Writing the
+        // high bits restarts the duty sequence and the envelope, like $4003.
+        if (trigger || (t >> 8) != (timer_ >> 8)) restart();
+        timer_ = t;
+      }
+      duty_ = (f.duty >= 0 ? f.duty : ins.duty) & 3;
+    } else if (kind_ == 2) {
+      double want = fr * 32;
+      double best = 1e30;
+      for (int i = 0; i < 16; i++) {
+        double d = std::abs(std::log(cpu_ / NES_NOISE_PERIOD[i] / want));
+        if (d < best) best = d, noiseIdx_ = i;
+      }
+      shortNoise_ = f.duty >= 0 ? (f.duty & 1) != 0 : c.nesShortNoise;
+      if (trigger) restart();
+    } else {
+      // DPCM: the sample, encoded at the 2A03 rate closest to the note.
+      const Sample* smp = f.sample;
+      if (trigger) {
+        if (smp && !smp->data.empty()) {
+          double want = smp->rate * std::pow(2.0, (f.pitch - 60.0) / 12.0);
+          double best = 1e30;
+          for (int i = 0; i < 16; i++) {
+            double d = std::abs(std::log(cpu_ / NES_DPCM_PERIOD[i] / want));
+            if (d < best) best = d, dpcmRate_ = i;
+          }
+          encode(*smp, cpu_ / NES_DPCM_PERIOD[dpcmRate_], want);
+          dpcmLoop_ = smp->loopMode == 1;
+        } else {
+          dpcm_.clear();
+        }
+        dpcmBit_ = 0;
+        dmc_ = dpcmStart_;
+        restart();
+      }
+    }
+  }
+
+  float render() override {
+    // Frame counter: envelope at 240 Hz, sweep at 120 Hz.
+    frameAcc_ += 240.0 / sr_;
+    while (frameAcc_ >= 1.0) {
+      frameAcc_ -= 1.0;
+      envClock();
+      if ((frameStep_++ & 1) == 0) sweepClock();
+    }
+    const int OS = 4;
+    float sum = 0;
+    for (int k = 0; k < OS; k++) {
+      double dt = 1.0 / (sr_ * OS);
+      float lvl = 0;
+      switch (kind_) {
+        case 0: {
+          phase_ += cpu_ / (16.0 * (timer_ + 1)) * dt;
+          if (phase_ >= 1.0) phase_ -= std::floor(phase_);
+          bool muted = timer_ < 8 || sweepTarget() > 0x7FF;
+          lvl = !muted && NES_DUTY[duty_][(int)(phase_ * 8) & 7] ? volume() / 15.0f : 0.0f;
+          break;
+        }
+        case 1: {
+          if (gate_ && vol_ > 0 && timer_ >= 2) {
+            phase_ += cpu_ / (32.0 * (timer_ + 1)) * dt;
+            if (phase_ >= 1.0) phase_ -= std::floor(phase_);
+          }
+          int step = (int)(phase_ * 32) & 31;
+          lvl = (step < 16 ? 15 - step : step - 16) / 15.0f * 1.1f;
+          break;
+        }
+        case 2: {
+          noiseAcc_ += cpu_ / NES_NOISE_PERIOD[noiseIdx_] * dt;
+          int guard = 0;
+          while (noiseAcc_ >= 1.0 && guard++ < 64) {
+            noiseAcc_ -= 1.0;
+            uint32_t bit = (lfsr_ ^ (lfsr_ >> (shortNoise_ ? 6 : 1))) & 1;
+            lfsr_ = (lfsr_ >> 1) | (bit << 14);
+          }
+          if (noiseAcc_ >= 1.0) noiseAcc_ = std::fmod(noiseAcc_, 1.0);
+          lvl = (lfsr_ & 1) ? 0.0f : volume() / 15.0f * 0.7f;
+          break;
+        }
+        default: {
+          if (!dpcm_.empty()) {
+            phase_ += cpu_ / NES_DPCM_PERIOD[dpcmRate_] * dt;
+            while (phase_ >= 1.0) {
+              phase_ -= 1.0;
+              size_t bits = dpcm_.size() * 8;
+              if (dpcmBit_ >= bits) {
+                if (!dpcmLoop_) break;
+                dpcmBit_ = 0;
+              }
+              bool up = (dpcm_[dpcmBit_ >> 3] >> (dpcmBit_ & 7)) & 1;
+              if (up && dmc_ <= 125) dmc_ += 2;
+              else if (!up && dmc_ >= 2) dmc_ -= 2;
+              dpcmBit_++;
+            }
+            if (phase_ >= 1.0) phase_ = 0;
+          }
+          lvl = dmc_ / 127.0f * 1.5f;
+          break;
+        }
+      }
+      sum += lvl;
+    }
+    return dc_.run(sum / OS) * 2.0f;
+  }
+
+  bool finished() const override {
+    if (kind_ == 3) return dpcmLoop_ ? !gate_ : dpcmBit_ >= dpcm_.size() * 8;
+    return useEnv_ && !envLoop_ && decay_ == 0;
+  }
+
+  void regs(ChipRegs& r) const override {
+    r.type = INS_NES;
+    r.clock = cpu_;
+    r.nesKind = kind_;
+    r.nesTriggers = triggers_;
+    int volReg = useEnv_ ? ((envLoop_ ? 0x20 : 0) | envPeriod_) : (0x30 | volume());
+    switch (kind_) {
+      case 0:
+        r.nesReg[0] = (duty_ << 6) | volReg;
+        r.nesReg[1] = sweepOn_ ? 0x80 | (sweepPeriod_ << 4) | (sweepDown_ ? 8 : 0) | sweepShift_ : 0x08;
+        r.nesReg[2] = timer_ & 0xFF;
+        r.nesReg[3] = ((timer_ >> 8) & 7) | 0x08;
+        break;
+      case 1:
+        r.nesReg[0] = gate_ && vol_ > 0 ? 0xFF : 0x00;  // linear counter: held, or 0 (stops)
+        r.nesReg[2] = timer_ & 0xFF;
+        r.nesReg[3] = ((timer_ >> 8) & 7) | 0x08;
+        break;
+      case 2:
+        r.nesReg[0] = volReg;
+        r.nesReg[2] = (shortNoise_ ? 0x80 : 0) | noiseIdx_;
+        r.nesReg[3] = 0x08;
+        break;
+      default:
+        r.nesReg[0] = (dpcmLoop_ ? 0x40 : 0) | dpcmRate_;
+        r.nesDpcm = &dpcm_;
+        r.nesDpcmRate = dpcmRate_;
+        r.nesDpcmLoop = dpcmLoop_;
+        r.nesDpcmStart = dpcmStart_;
+        break;
+    }
+  }
+
+ private:
+  int volume() const { return useEnv_ ? decay_ : vol_; }
+  void restart() {
+    triggers_++;
+    phase_ = 0;
+    decay_ = 15;
+    envDiv_ = envPeriod_;
+    sweepDiv_ = sweepPeriod_;
+  }
+  void envClock() {
+    if (!useEnv_) return;
+    if (envDiv_-- > 0) return;
+    envDiv_ = envPeriod_;
+    if (decay_ > 0) decay_--;
+    else if (envLoop_) decay_ = 15;
+  }
+  int sweepTarget() const {
+    if (!sweepOn_) return timer_;
+    int change = timer_ >> sweepShift_;
+    return sweepDown_ ? timer_ - change : timer_ + change;
+  }
+  void sweepClock() {
+    if (kind_ != 0 || !sweepOn_) return;
+    if (sweepDiv_-- > 0) return;
+    sweepDiv_ = sweepPeriod_;
+    int target = sweepTarget();
+    if (sweepShift_ > 0 && timer_ >= 8 && target <= 0x7FF) timer_ = std::max(0, target);
+  }
+  // 1-bit delta modulation of the sample, played at `want` frames per
+  // second from bits at the DPCM rate; at most 4081 bytes (the 2A03's
+  // longest sample).
+  void encode(const Sample& smp, double rate, double want) {
+    size_t frames = smp.data.size();
+    double step = want / rate;  // sample frames per bit
+    size_t bits = std::min<size_t>((size_t)(frames / step), 4081 * 8);
+    bits = std::max<size_t>(bits / 8 * 8 + 8, 8);
+    dpcm_.assign(bits / 8, 0);
+    int counter = dpcmStart_ = 64;
+    for (size_t b = 0; b < bits; b++) {
+      size_t i = std::min(frames - 1, (size_t)(b * step));
+      int target = (int)std::lround((std::clamp(smp.data[i], -1.0f, 1.0f) * 0.5f + 0.5f) * 127);
+      if (target > counter) {
+        dpcm_[b >> 3] |= (uint8_t)(1 << (b & 7));
+        if (counter <= 125) counter += 2;
+      } else if (counter >= 2) {
+        counter -= 2;
+      }
+    }
+  }
+
+  int sr_;
+  double cpu_ = 1789773, phase_ = 0, frameAcc_ = 0, noiseAcc_ = 0;
+  int frameStep_ = 0;
+  int kind_ = 0, duty_ = 2, timer_ = 0, vol_ = 0;
+  bool gate_ = false, useEnv_ = false, envLoop_ = false;
+  int envPeriod_ = 0, envDiv_ = 0, decay_ = 15;
+  bool sweepOn_ = false, sweepDown_ = false;
+  int sweepPeriod_ = 0, sweepShift_ = 0, sweepDiv_ = 0;
+  int noiseIdx_ = 8;
+  bool shortNoise_ = false;
+  uint32_t lfsr_ = 1, lastTrigger_ = 0, triggers_ = 0;
+  std::vector<uint8_t> dpcm_;
+  int dpcmRate_ = 15, dpcmStart_ = 64, dmc_ = 64;
+  size_t dpcmBit_ = 0;
+  bool dpcmLoop_ = false;
+  DcBlock dc_;
+};
+
+// ---------------------------------------------------------------------------
+// Wavetable chips: Konami SCC (8-bit waves) and PC Engine (5-bit waves)
+// ---------------------------------------------------------------------------
+
+constexpr double MSX_CLOCK = 3579545;
+
+class SCCVoice : public ChipVoice {
+ public:
+  explicit SCCVoice(int sampleRate) : ChipVoice(INS_SCC), sr_(sampleRate) {}
+
+  void update(const ChipFrame& f) override {
+    if (!f.ins) {
+      vol_ = 0;
+      return;
+    }
+    const Instrument& ins = *f.ins;
+    clock_ = chipClockHz(INS_SCC, ins.chip.clock);
+    period_ = std::clamp((int)std::lround(clock_ / (32.0 * std::max(f.freq, 1.0))) - 1, 0, 4095);
+    vol_ = std::clamp(f.vol, 0, 15);
+    for (int i = 0; i < 32; i++) {
+      float v = (float)ins.wavetable[i];
+      if (f.morph >= 0) v += (ins.morph.table[i] - v) * f.morph;
+      wave_[i] = std::clamp((int)std::lround(v * 17.0f) - 128, -128, 127);
+    }
+    if (f.trigger != lastTrigger_) {
+      lastTrigger_ = f.trigger;
+      phase_ = 0;
+    }
+  }
+
+  float render() override {
+    phase_ += clock_ / (32.0 * (period_ + 1)) / sr_;
+    if (phase_ >= 1.0) phase_ -= std::floor(phase_);
+    // The SCC stays silent on periods below 9 (ultrasonic anyway).
+    if (period_ < 9) return 0.0f;
+    return wave_[(int)(phase_ * 32) & 31] / 128.0f * vol_ / 15.0f;
+  }
+
+  void regs(ChipRegs& r) const override {
+    r.type = INS_SCC;
+    r.clock = clock_;
+    r.sccPeriod = period_;
+    r.sccVol = vol_;
+    for (int i = 0; i < 32; i++) r.sccWave[i] = wave_[i];
+  }
+
+ private:
+  int sr_;
+  double clock_ = MSX_CLOCK, phase_ = 0;
+  int period_ = 0, vol_ = 0;
+  int wave_[32] = {};
+  uint32_t lastTrigger_ = 0;
+};
+
+class PCEVoice : public ChipVoice {
+ public:
+  explicit PCEVoice(int sampleRate) : ChipVoice(INS_PCE), sr_(sampleRate) { dc_.init(sampleRate); }
+
+  void update(const ChipFrame& f) override {
+    if (!f.ins) {
+      vol_ = 0;
+      return;
+    }
+    const Instrument& ins = *f.ins;
+    clock_ = chipClockHz(INS_PCE, ins.chip.clock);
+    double fr = std::max(f.freq, 1.0);
+    noise_ = ins.chip.pceNoise;
+    if (f.duty >= 0) noise_ = (f.duty & 1) != 0;
+    period_ = std::clamp((int)std::lround(clock_ / (32.0 * fr)), 1, 4095);
+    // Noise clock: 5-bit register, rate = clock / 64 / (32 - n).
+    double want = fr * 32, best = 1e30;
+    for (int n = 0; n < 32; n++) {
+      double d = std::abs(std::log(clock_ / 64.0 / (32 - n) / want));
+      if (d < best) best = d, noiseFreq_ = n;
+    }
+    // 0-15 from the tracker -> 0-31 in 3 dB steps (the chip steps 1.5 dB).
+    int v = std::clamp(f.vol, 0, 15);
+    vol_ = v == 0 ? 0 : 31 - 2 * (15 - v);
+    for (int i = 0; i < 32; i++) {
+      float x = (float)ins.wavetable[i];
+      if (f.morph >= 0) x += (ins.morph.table[i] - x) * f.morph;
+      wave_[i] = std::clamp((int)std::lround(x * 31.0f / 15.0f), 0, 31);
+    }
+    if (f.trigger != lastTrigger_) {
+      lastTrigger_ = f.trigger;
+      phase_ = 0;
+    }
+  }
+
+  float render() override {
+    float amp = vol_ == 0 ? 0.0f : std::pow(10.0f, -(31 - vol_) * 1.5f / 20.0f);
+    float lvl;
+    if (noise_) {
+      noiseAcc_ += clock_ / 64.0 / (32 - noiseFreq_) / sr_;
+      int guard = 0;
+      while (noiseAcc_ >= 1.0 && guard++ < 256) {
+        noiseAcc_ -= 1.0;
+        uint32_t bit = ((lfsr_ >> 0) ^ (lfsr_ >> 1) ^ (lfsr_ >> 11) ^ (lfsr_ >> 12) ^ (lfsr_ >> 17)) & 1;
+        lfsr_ = (lfsr_ >> 1) | (bit << 17);
+      }
+      if (noiseAcc_ >= 1.0) noiseAcc_ = std::fmod(noiseAcc_, 1.0);
+      lvl = (lfsr_ & 1) ? 1.0f : 0.0f;
+    } else {
+      phase_ += clock_ / (32.0 * period_) / sr_;
+      if (phase_ >= 1.0) phase_ -= std::floor(phase_);
+      lvl = wave_[(int)(phase_ * 32) & 31] / 31.0f;
+    }
+    return dc_.run(lvl * amp) * 2.0f;
+  }
+
+  void regs(ChipRegs& r) const override {
+    r.type = INS_PCE;
+    r.clock = clock_;
+    r.pcePeriod = period_;
+    r.pceVol = vol_;
+    r.pceNoise = noise_;
+    r.pceNoiseFreq = noiseFreq_;
+    for (int i = 0; i < 32; i++) r.pceWave[i] = wave_[i];
+  }
+
+ private:
+  int sr_;
+  double clock_ = MSX_CLOCK, phase_ = 0, noiseAcc_ = 0;
+  int period_ = 1, vol_ = 0, noiseFreq_ = 0;
+  bool noise_ = false;
+  int wave_[32] = {};
+  uint32_t lfsr_ = 1, lastTrigger_ = 0;
+  DcBlock dc_;
+};
+
 struct ClockInfo {
   const char* name;
   double hz;
@@ -569,6 +1098,10 @@ const ClockInfo AY_CLOCKS[] = {{"ZX Spectrum 1.7734 MHz", 1773400}, {"Amstrad CP
 const ClockInfo SN_CLOCKS[] = {{"NTSC 3.5795 MHz", 3579545}, {"PAL 3.5469 MHz", 3546893}, {"BBC Micro 4 MHz", 4000000}};
 const ClockInfo GB_CLOCKS[] = {{"Game Boy 4.1943 MHz", 4194304}};
 const ClockInfo OPL_CLOCKS[] = {{"OPL3 14.318 MHz", OPL3_CLOCK}};
+const ClockInfo OPN_CLOCKS[] = {{"Mega Drive NTSC 7.6705 MHz", OPN_NTSC}, {"Mega Drive PAL 7.6005 MHz", 7600489}};
+const ClockInfo NES_CLOCKS[] = {{"NTSC 1.7898 MHz", 1789773}, {"PAL 1.6626 MHz", 1662607}};
+const ClockInfo SCC_CLOCKS[] = {{"MSX 3.5795 MHz", MSX_CLOCK}};
+const ClockInfo PCE_CLOCKS[] = {{"PC Engine 3.5795 MHz", MSX_CLOCK}};
 
 const ClockInfo* clocks(int type, int& count) {
   switch (type) {
@@ -576,13 +1109,17 @@ const ClockInfo* clocks(int type, int& count) {
     case INS_SN: count = 3; return SN_CLOCKS;
     case INS_GB: count = 1; return GB_CLOCKS;
     case INS_OPL: count = 1; return OPL_CLOCKS;
+    case INS_OPN: count = 2; return OPN_CLOCKS;
+    case INS_NES: count = 2; return NES_CLOCKS;
+    case INS_SCC: count = 1; return SCC_CLOCKS;
+    case INS_PCE: count = 1; return PCE_CLOCKS;
     default: count = 0; return nullptr;
   }
 }
 
 }  // namespace
 
-bool isChipType(int type) { return type == INS_AY || type == INS_SN || type == INS_GB || type == INS_OPL; }
+bool isChipType(int type) { return type >= INS_AY && type < INS_TYPE_COUNT; }
 
 std::unique_ptr<ChipVoice> makeChipVoice(int type, int sampleRate) {
   switch (type) {
@@ -590,6 +1127,10 @@ std::unique_ptr<ChipVoice> makeChipVoice(int type, int sampleRate) {
     case INS_SN: return std::make_unique<SNVoice>(sampleRate);
     case INS_GB: return std::make_unique<GBVoice>(sampleRate);
     case INS_OPL: return std::make_unique<OPLVoice>(sampleRate);
+    case INS_OPN: return std::make_unique<OPNVoice>(sampleRate);
+    case INS_NES: return std::make_unique<NESVoice>(sampleRate);
+    case INS_SCC: return std::make_unique<SCCVoice>(sampleRate);
+    case INS_PCE: return std::make_unique<PCEVoice>(sampleRate);
     default: return nullptr;
   }
 }

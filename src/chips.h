@@ -1,11 +1,13 @@
 // Emulated sound chips, one voice per tracker channel: AY-3-8910 / YM2149,
-// SN76489, the Game Boy APU and the OPL3 (through ymfm). Each voice works at
+// SN76489, the Game Boy APU, the OPL3 and YM2612 (through ymfm), the NES
+// 2A03, the Konami SCC and the PC Engine's HuC6280. Each voice works at
 // the register level (periods, LFSRs, volume tables, hardware envelopes),
 // so its sound has the real chip's quirks: coarse high notes, 4-bit volume
 // steps, the AY "buzzer" envelope.
 #pragma once
 #include <cstdint>
 #include <memory>
+#include <vector>
 
 #include "song.h"
 
@@ -21,6 +23,8 @@ struct ChipFrame {
   int duty = -1;           // duty macro / 12xx: AY noise period, SN noise mode, GB duty
   int mixer = -1;          // wave macro / 10xx: AY mixer bits (1 tone, 2 noise, 4 envelope), OPL waveform
   float morph = -1;        // wavetable morph position (GB wave channel), -1 = off
+  double pitch = 60;       // the note in semitones (NES DPCM picks its rate from it)
+  const Sample* sample = nullptr;  // NES DPCM: the instrument's sample
 };
 
 // A voice's registers as the chip sees them (VGM export). Counters change
@@ -50,6 +54,27 @@ struct ChipRegs {
   int oplC0 = 0, oplC3 = 0, oplBD = 0, oplFnum = 0, oplBlock = 0;
   bool oplKey = false, oplFour = false;
   uint32_t oplRetriggers = 0;
+  // YM2612, laid out on channel 0: per operator (logical order) the 0x30,
+  // 0x40, 0x50, 0x60, 0x70, 0x80 and 0x90 registers, then the channel ones.
+  int opnOp[4][7] = {};
+  int opnB0 = 0, opnB4 = 0xC0, opnLfo = 0, opnFnum = 0, opnBlock = 0;
+  bool opnKey = false, opn3438 = false;
+  uint32_t opnRetriggers = 0;
+  // NES 2A03: channel kind, its 4 registers ($4000-$4003 for a pulse), and
+  // for DPCM the encoded sample, its rate index and loop flag.
+  int nesKind = 0;
+  int nesReg[4] = {};
+  uint32_t nesTriggers = 0;  // writes of the 4th register (restarts the channel)
+  const std::vector<uint8_t>* nesDpcm = nullptr;
+  int nesDpcmRate = 15, nesDpcmStart = 0;  // DPCM: delta counter at the start
+  bool nesDpcmLoop = false;
+  // Konami SCC: 12-bit period, volume 0-15, signed 8-bit waveform.
+  int sccPeriod = 0, sccVol = 0;
+  int sccWave[32] = {};
+  // PC Engine: 12-bit period, volume 0-31, 5-bit waveform, noise.
+  int pcePeriod = 0, pceVol = 0, pceNoiseFreq = 0;
+  bool pceNoise = false;
+  int pceWave[32] = {};
 };
 
 class ChipVoice {

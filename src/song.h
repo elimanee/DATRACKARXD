@@ -38,7 +38,9 @@ enum WaveType : int {
 };
 extern const char* const WAVE_NAMES[WAVE_COUNT];
 
-enum InstrumentType : int { INS_STANDARD = 0, INS_FM, INS_SAMPLE, INS_AY, INS_SN, INS_GB, INS_OPL, INS_TYPE_COUNT };
+enum InstrumentType : int {
+  INS_STANDARD = 0, INS_FM, INS_SAMPLE, INS_AY, INS_SN, INS_GB, INS_OPL, INS_OPN, INS_NES, INS_SCC, INS_PCE, INS_TYPE_COUNT
+};
 extern const char* const INS_TYPE_NAMES[INS_TYPE_COUNT];
 
 struct Effect {
@@ -110,6 +112,23 @@ struct ChipSettings {
   int gbEnvLen = 2;    // envelope step time 0-7 (0 = no change)
   int gbSweepTime = 0, gbSweepDir = 0, gbSweepShift = 0;  // pulse frequency sweep
   bool gbShortNoise = false;  // 7-bit noise (metallic)
+  // YM2612 / YM3438 (Mega Drive): the operators are the instrument's FM settings.
+  int opnModel = 0;  // 0 YM2612 (with its "ladder" distortion), 1 YM3438 (clean)
+  int opnLfo = 0;    // chip LFO: 0 off, 1-8 = speeds 3.98 to 72.2 Hz
+  int opnAms = 0;    // LFO depth on the volume 0-3, on the operators of opnAmOps
+  int opnFms = 0;    // LFO depth on the pitch 0-7
+  int opnAmOps = 0;  // bit per operator (op 1 = bit 0)
+  // NES 2A03.
+  int nesChannel = 0;  // 0 pulse, 1 triangle, 2 noise, 3 DPCM (plays the instrument's sample)
+  bool nesEnv = false;  // hardware volume decay instead of a constant volume
+  int nesEnvPeriod = 4; // 0-15, decay step = (period + 1) / 240 s
+  bool nesEnvLoop = false;
+  bool nesSweep = false;  // pulse pitch sweep
+  int nesSweepPeriod = 3, nesSweepShift = 3;  // 0-7
+  bool nesSweepDown = false;
+  bool nesShortNoise = false;  // 93-step noise (metallic, tonal)
+  // PC Engine (HuC6280): channels 5 and 6 can play noise.
+  bool pceNoise = false;
 };
 
 // OPL3 (Yamaha YMF262, AdLib / Sound Blaster) instrument: 2 or 4 operators.
