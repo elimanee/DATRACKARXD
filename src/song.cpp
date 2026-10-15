@@ -1,5 +1,7 @@
 #include "song.h"
 
+#include "chips.h"
+
 #include <algorithm>
 #include <cmath>
 #include <filesystem>
@@ -9,7 +11,9 @@
 
 const char* const WAVE_NAMES[WAVE_COUNT] = {"Pulse", "Triangle", "Saw", "Noise", "Sine", "Wavetable"};
 const char* const MACRO_NAMES[MACRO_COUNT] = {"Volume", "Arpeggio", "Duty", "Waveform", "Pitch", "Cutoff"};
-const char* const INS_TYPE_NAMES[INS_TYPE_COUNT] = {"Chip", "FM", "Sample", "AY / YM2149", "SN76489", "Game Boy", "OPL3 (AdLib)"};
+const char* const INS_TYPE_NAMES[INS_TYPE_COUNT] = {"Chip",         "FM",       "Sample",          "AY / YM2149",
+                                                    "SN76489",      "Game Boy", "OPL3 (AdLib)",    "YM2612 (Mega Drive)",
+                                                    "NES (2A03)", "Konami SCC", "PC Engine"};
 const char* const LOOP_NAMES[4] = {"No loop", "Forward", "Ping-pong", "Backward"};
 const char* const LFO_TARGET_NAMES[LFO_TARGET_COUNT] = {"Pitch", "Volume", "Pulse width", "Cutoff", "Pan"};
 const ChanFxInfo CHAN_FX_INFO[CFX_COUNT] = {
@@ -102,7 +106,7 @@ void Instrument::macroRange(int macro, int& lo, int& hi) const {
   switch (macro) {
     case MACRO_VOL:
       lo = 0;
-      hi = type == INS_FM || type == INS_OPL ? 127 : type == INS_SAMPLE ? 64 : 15;
+      hi = type == INS_FM || type == INS_OPL || type == INS_OPN ? 127 : type == INS_SAMPLE ? 64 : 15;
       break;
     case MACRO_ARP: lo = -60; hi = ARP_FIXED + NOTE_COUNT - 1; break;
     case MACRO_DUTY:
@@ -478,7 +482,7 @@ void Song::write(std::ostream& f) const {
     f << '\n';
     for (int m = 0; m < MACRO_COUNT; m++)
       if (!ins.macros[m].values.empty()) writeMacro(f, m, ins.macros[m]);
-    if (ins.type == INS_FM) {
+    if (ins.type == INS_FM || ins.type == INS_OPN) {
       f << "ins.fm " << ins.fm.alg << ' ' << ins.fm.fb << '\n';
       for (int o = 0; o < 4; o++) {
         const FMOperator& op = ins.fm.ops[o];
@@ -486,12 +490,19 @@ void Song::write(std::ostream& f) const {
           << op.dr << ' ' << op.sl << ' ' << op.d2r << ' ' << op.rr << ' ' << op.ksr << ' ' << op.ssg << '\n';
       }
     }
-    if (ins.type == INS_AY || ins.type == INS_SN || ins.type == INS_GB) {
+    if (isChipType(ins.type) && ins.type != INS_OPL) {
       const ChipSettings& c = ins.chip;
       f << "ins.chip " << c.clock << ' ' << c.ayModel << ' ' << c.ayTone << ' ' << c.ayNoise << ' ' << c.ayEnv << ' ' << c.ayNoiseFreq
         << ' ' << c.ayEnvShape << ' ' << c.ayEnvAuto << ' ' << c.ayEnvPeriod << ' ' << c.snNoise << ' ' << c.snWhite << ' '
         << c.gbChannel << ' ' << c.gbEnvDir << ' ' << c.gbEnvLen << ' ' << c.gbSweepTime << ' ' << c.gbSweepDir << ' '
         << c.gbSweepShift << ' ' << c.gbShortNoise << '\n';
+    }
+    if (ins.type >= INS_OPN) {
+      const ChipSettings& c = ins.chip;
+      f << "ins.chip2 " << c.opnModel << ' ' << c.opnLfo << ' ' << c.opnAms << ' ' << c.opnFms << ' ' << c.opnAmOps << ' '
+        << c.nesChannel << ' ' << c.nesEnv << ' ' << c.nesEnvPeriod << ' ' << c.nesEnvLoop << ' ' << c.nesSweep << ' '
+        << c.nesSweepPeriod << ' ' << c.nesSweepShift << ' ' << c.nesSweepDown << ' ' << c.nesShortNoise << ' ' << c.pceNoise
+        << '\n';
     }
     if (ins.type == INS_OPL) {
       const OPLParams& o = ins.opl;
@@ -849,6 +860,26 @@ bool Song::read(std::istream& f, const std::string& path, std::string& err) {
         c.gbSweepDir = clampVal(c.gbSweepDir, 0, 1);
         c.gbSweepShift = clampVal(c.gbSweepShift, 0, 7);
         c.gbShortNoise = sh != 0;
+      } else if (key == "ins.chip2") {
+        ChipSettings& c = curIns->chip;
+        int env = 0, loop = 0, sw = 0, down = 0, sh = 0, pn = 0;
+        ss >> c.opnModel >> c.opnLfo >> c.opnAms >> c.opnFms >> c.opnAmOps >> c.nesChannel >> env >> c.nesEnvPeriod >> loop >> sw >>
+            c.nesSweepPeriod >> c.nesSweepShift >> down >> sh >> pn;
+        c.opnModel = clampVal(c.opnModel, 0, 1);
+        c.opnLfo = clampVal(c.opnLfo, 0, 8);
+        c.opnAms = clampVal(c.opnAms, 0, 3);
+        c.opnFms = clampVal(c.opnFms, 0, 7);
+        c.opnAmOps = clampVal(c.opnAmOps, 0, 15);
+        c.nesChannel = clampVal(c.nesChannel, 0, 3);
+        c.nesEnv = env != 0;
+        c.nesEnvPeriod = clampVal(c.nesEnvPeriod, 0, 15);
+        c.nesEnvLoop = loop != 0;
+        c.nesSweep = sw != 0;
+        c.nesSweepPeriod = clampVal(c.nesSweepPeriod, 0, 7);
+        c.nesSweepShift = clampVal(c.nesSweepShift, 0, 7);
+        c.nesSweepDown = down != 0;
+        c.nesShortNoise = sh != 0;
+        c.pceNoise = pn != 0;
       } else if (key == "ins.opl") {
         OPLParams& o = curIns->opl;
         int four = 0, am = 0, vib = 0;

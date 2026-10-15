@@ -16,7 +16,8 @@ FamiTracker, MOD, XM, IT, S3M et MIDI.
   - **FM** 4 opérateurs façon Yamaha OPN (Mega Drive) : 8 algorithmes, feedback, enveloppes AR/DR/SL/D2R/RR, presets
   - **Sample** : fichiers `.wav`, `.flac`, `.mp3`, `.ogg` ou enregistrés au micro, boucles (avant, ping-pong, arrière), multi-samples par note, fadeout
   - **Vraies puces émulées** : **AY-3-8910 / YM2149** (ZX Spectrum, CPC, Atari ST, avec l'enveloppe « buzzer »),
-    **SN76489** (Master System), **Game Boy** (pulse avec sweep, wave, noise) et **OPL3** (AdLib, 2 ou 4 opérateurs)
+    **SN76489** (Master System), **Game Boy** (pulse avec sweep, wave, noise), **OPL3** (AdLib, 2 ou 4 opérateurs),
+    **YM2612** (Mega Drive), **NES 2A03** (pulses, triangle, bruit, DPCM), **Konami SCC** (MSX) et **PC Engine**
 - **Enveloppe ADSR**, deux **LFO** (pitch, volume, largeur de pulse, cutoff, panoramique) et **morphing de wavetable** sur les instruments
 - **Effets par canal** : bitcrusher, distorsion, chorus, EQ 3 bandes, compresseur
 - **Éditeur de samples** : sélection, zoom, couper / copier / coller, rogner, normaliser, fondus, inverser,
@@ -47,7 +48,7 @@ FamiTracker, MOD, XM, IT, S3M et MIDI.
 - Liste d'orders par canal (comme Furnace), ajout / duplication / clonage
 - Oscilloscope par canal, mute / solo
 - Sauvegarde dans un format texte `.dtk`, export WAV (mix complet ou une piste par canal), OGG, MIDI, XM, MOD, IT et VGM
-- Une démo keygen intégrée qui se charge au démarrage, et `songs/chips.dtk` pour entendre les puces émulées
+- Une démo keygen intégrée qui se charge au démarrage, `songs/chips.dtk` et `songs/consoles.dtk` pour entendre les puces émulées
 
 ## Télécharger
 
@@ -357,13 +358,22 @@ machine), volume en 16 pas, générateurs de bruit et enveloppes matérielles d'
 | **SN76489** | horloge (NTSC, PAL, BBC), tone, bruit blanc ou périodique | mode du bruit |
 | **Game Boy** | canal pulse (duty, enveloppe, sweep), wave (la wavetable de l'instrument, 4 volumes) ou noise (court ou long) | duty / — |
 | **OPL3** (AdLib) | 2 ou 4 opérateurs, algorithme, feedback, et par opérateur MULT, TL, AR, DR, SL, RR, KSL, forme d'onde (8), sustain, trémolo, vibrato, KSR | — / forme d'onde |
+| **YM2612** (Mega Drive) | horloge (NTSC, PAL), modèle (YM2612 avec sa distorsion « ladder » ou YM3438 propre), LFO de la puce et sa profondeur sur la hauteur (FMS) et le volume (AMS, par opérateur), et l'éditeur FM : 4 opérateurs, 8 algorithmes, feedback, MULT, DT, TL, AR, DR, SL, D2R, RR, KSR, SSG-EG | — |
+| **NES 2A03** | horloge (NTSC, PAL), canal pulse (duty, enveloppe matérielle avec boucle, sweep), triangle (sans volume), bruit (long ou court, 16 hauteurs) ou DPCM (le sample de l'instrument en delta 1 bit, aux 16 vitesses du 2A03) | duty ou mode du bruit / — |
+| **Konami SCC** (MSX) | la wavetable de l'instrument en ondes 8 bits, volume en 16 pas | — |
+| **PC Engine** (HuC6280) | la wavetable de l'instrument en ondes 5 bits, volume par pas de 1,5 dB, bruit | bruit (0 onde, 1 bruit) / — |
 
 Astuce AY : le **buzzer** de l'Atari ST s'obtient avec Tone et Noise décochés, Envelope cochée, une forme
 en dent de scie (8) ou triangle (10) et « Env. pitch » sur « Note x1 » : l'enveloppe devient la forme
 d'onde et suit la note. Sur Game Boy, une macro de volume remplace l'enveloppe matérielle.
 
-L'OPL3 est émulé par [ymfm](https://github.com/aaronsgiles/ymfm). Le filtre SID, l'ADSR, les LFO et
-les effets par canal marchent aussi sur les puces.
+Sur NES, l'enveloppe matérielle fait décroître la note toute seule (une macro de volume la remplace) ; le
+triangle n'a pas de volume. Le DPCM rejoue le sample de l'instrument (choisi dans l'éditeur) converti en
+delta 1 bit à la vitesse du 2A03 la plus proche de la note ; une boucle avant le fait boucler en entier.
+
+L'OPL3 et le YM2612 sont émulés par [ymfm](https://github.com/aaronsgiles/ymfm). Le filtre SID, l'ADSR,
+les LFO et les effets par canal marchent aussi sur les puces. `songs/consoles.dtk` fait jouer ensemble le
+YM2612, le NES, le SCC et la PC Engine.
 
 ## Enveloppe, LFO et morphing
 
@@ -452,7 +462,12 @@ qui jouent un instrument **puce émulée** sont exportés :
 - AY-3-8910 / YM2149 : 6 voix (deux puces) ;
 - SN76489 : 3 voix carrées, ou 2 voix + le bruit ;
 - Game Boy : les deux pulses, la wave et le bruit ;
-- OPL3 : 18 voix 2 opérateurs ou 6 voix 4 opérateurs.
+- OPL3 : 18 voix 2 opérateurs ou 6 voix 4 opérateurs ;
+- YM2612 : 12 voix (deux puces), en stéréo gauche / centre / droite d'après le panoramique du canal ;
+- NES 2A03 : deux puces de 2 pulses, un triangle, un bruit et un DPCM (les samples DPCM vont dans les 16 Ko
+  de mémoire de la première) ;
+- Konami SCC : 10 voix (deux puces) ; sur la puce, les voix 4 et 5 partagent leur onde ;
+- PC Engine : 12 voix (deux puces), le bruit sur les voix 5 et 6, avec le panoramique du canal.
 
 Les effets de canal, le mixer et l'automation n'existent pas sur les puces et ne sont donc pas dans le
 VGM ; le rapport les signale, ainsi que les canaux laissés de côté.

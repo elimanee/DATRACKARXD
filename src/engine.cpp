@@ -418,8 +418,9 @@ void Engine::releaseNote(int c) {
   if (s.envOn) s.envStage = 3;
   if (s.type == INS_FM) {
     fmKeyOff(c);
-  } else if (s.type == INS_OPL) {
-    // Keys off on the next update; the note ends when its release is done.
+  } else if (s.type == INS_OPL || s.type == INS_OPN || (s.type == INS_NES && ins && ins->chip.nesChannel == 3)) {
+    // Keys off on the next update; the note ends when its release (or the
+    // DPCM sample) is done.
   } else if (!ins || (ins->macros[MACRO_VOL].release < 0 && ins->fadeout <= 0 && !s.envOn)) {
     // With a release point, a fadeout or an envelope the sound carries on, otherwise cut.
     s.active = false;
@@ -934,14 +935,20 @@ void Engine::updateChannel(int c) {
     case INS_AY:
     case INS_SN:
     case INS_GB:
-    case INS_OPL: {
+    case INS_OPL:
+    case INS_OPN:
+    case INS_NES:
+    case INS_SCC:
+    case INS_PCE: {
       ChipFrame f;
       f.ins = ins;
       f.freq = s.freq;
+      f.pitch = pitch;
       f.gate = s.active && !s.released;
       f.trigger = s.triggers;
+      if (ins && ins->sample >= 0 && ins->sample < (int)song_.samples.size()) f.sample = &song_.samples[ins->sample];
       int v = std::clamp(vol, 0, 127);
-      if (s.type == INS_OPL) {
+      if (s.type == INS_OPL || s.type == INS_OPN) {
         f.vol = hasVolMacro ? v * std::clamp(macroVol, 0, 127) / 127 : v;
       } else {
         int base = hasVolMacro ? std::clamp(macroVol, 0, 15) : (ins ? std::clamp(ins->volume, 0, 15) : 15);

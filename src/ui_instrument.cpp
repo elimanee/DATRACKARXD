@@ -157,7 +157,7 @@ void App::instrumentsWindow() {
   for (int i = 0; i < (int)song_.instruments.size(); i++) {
     char buf[128];
     const Instrument& in = song_.instruments[i];
-    static const char* const KIND[INS_TYPE_COUNT] = {nullptr, "FM", "Sample", "AY", "SN", "GB", "OPL"};
+    static const char* const KIND[INS_TYPE_COUNT] = {nullptr, "FM", "Sample", "AY", "SN", "GB", "OPL", "OPN", "NES", "SCC", "PCE"};
     const char* kind = in.type > 0 && in.type < INS_TYPE_COUNT ? KIND[in.type] : WAVE_NAMES[std::clamp(in.wave, 0, WAVE_COUNT - 1)];
     std::snprintf(buf, sizeof(buf), "%02X  %-9s %s", i, T(kind), in.name.c_str());
     if (ImGui::Selectable(buf, i == curIns_, ImGuiSelectableFlags_AllowDoubleClick)) {
@@ -296,6 +296,9 @@ bool App::macroEditor(Instrument& ins, int type) {
       else if (ins.type == INS_SN) ImGui::TextDisabled("%s", T("Noise mode per tick: 0 periodic, 1 white."));
       else if (ins.type == INS_GB && ins.chip.gbChannel == 2) ImGui::TextDisabled("%s", T("Noise per tick: 0 long, 1 short (metallic)."));
       else if (ins.type == INS_GB) ImGui::TextDisabled("%s", T("Pulse duty: 0=12.5% 1=25% 2=50% 3=75%."));
+      else if (ins.type == INS_NES && ins.chip.nesChannel == 2) ImGui::TextDisabled("%s", T("Noise per tick: 0 long, 1 short (metallic)."));
+      else if (ins.type == INS_NES) ImGui::TextDisabled("%s", T("Pulse duty: 0=12.5% 1=25% 2=50% 3=75%."));
+      else if (ins.type == INS_PCE) ImGui::TextDisabled("%s", T("Noise per tick: 0 wave, 1 noise."));
       else if (ins.pulseWidth >= 0) ImGui::TextDisabled("%s", T("Fine pulse width 1-255 (128 = square)."));
       else ImGui::TextDisabled("%s", T("Pulse duty: 0=12.5% 1=25% 2=50% 3=75%. Noise: 1 = metallic, 3 = periodic."));
       break;
@@ -624,6 +627,105 @@ bool App::chipEditor(Instrument& ins) {
       }
       ImGui::TextDisabled("%s", T("A Volume macro replaces the hardware envelope."));
     }
+  } else if (ins.type == INS_OPN) {
+    ImGui::SetNextItemWidth(w);
+    changed |= ImGui::Combo(T("Model"), &c.opnModel, TC("YM2612 (Mega Drive 1, gritty)\0YM3438 (later models, clean)\0"));
+    if (ImGui::IsItemHovered())
+      ImGui::SetTooltip("%s", T("The YM2612's DAC adds the \"ladder\" distortion heard on early Mega Drives."));
+    ImGui::SetNextItemWidth(w);
+    changed |= ImGui::Combo(T("LFO"), &c.opnLfo, TC("Off\0" "3.98 Hz\0" "5.56 Hz\0" "6.02 Hz\0" "6.37 Hz\0" "6.88 Hz\0" "9.63 Hz\0" "48.1 Hz\0" "72.2 Hz\0"));
+    if (ImGui::IsItemHovered()) ImGui::SetTooltip("%s", T("The chip has one LFO: the last instrument played sets its speed."));
+    ImGui::BeginDisabled(c.opnLfo == 0);
+    ImGui::SetNextItemWidth(w);
+    changed |= ImGui::SliderInt(T("LFO pitch (FMS)"), &c.opnFms, 0, 7);
+    ImGui::SetNextItemWidth(w);
+    changed |= ImGui::SliderInt(T("LFO volume (AMS)"), &c.opnAms, 0, 3);
+    ImGui::TextUnformatted(T("LFO volume on:"));
+    for (int k = 0; k < 4; k++) {
+      ImGui::SameLine();
+      bool on = (c.opnAmOps >> k) & 1;
+      char label[32];
+      std::snprintf(label, sizeof(label), "OP%d##am%d", k + 1, k);
+      if (ImGui::Checkbox(label, &on)) {
+        c.opnAmOps = (c.opnAmOps & ~(1 << k)) | (on ? 1 << k : 0);
+        changed = true;
+      }
+    }
+    ImGui::EndDisabled();
+    ImGui::TextDisabled("%s", T("The operators below are the chip's: 4 operators, 8 algorithms, SSG-EG."));
+  } else if (ins.type == INS_NES) {
+    ImGui::SetNextItemWidth(w);
+    changed |= ImGui::Combo(T("Channel"), &c.nesChannel, TC("Pulse\0Triangle\0Noise\0DPCM (sample)\0"));
+    if (c.nesChannel == 0) {
+      static const char* dutyNames[4] = {"12.5%%", "25%%", "50%%", "75%%"};
+      ImGui::SetNextItemWidth(w);
+      changed |= ImGui::SliderInt(T("Duty"), &ins.duty, 0, 3, dutyNames[std::clamp(ins.duty, 0, 3)]);
+    } else if (c.nesChannel == 2) {
+      changed |= ImGui::Checkbox(T("Short noise (93 steps, metallic)"), &c.nesShortNoise);
+    }
+    if (c.nesChannel == 0 || c.nesChannel == 2) {
+      changed |= ImGui::Checkbox(T("Hardware envelope"), &c.nesEnv);
+      if (ImGui::IsItemHovered()) ImGui::SetTooltip("%s", T("The 2A03 fades the note out by itself (a Volume macro replaces it)."));
+      if (c.nesEnv) {
+        ImGui::SameLine();
+        changed |= ImGui::Checkbox(T("Loop"), &c.nesEnvLoop);
+        char fmt[48];
+        std::snprintf(fmt, sizeof(fmt), T("%%d (%.0f ms/step)"), (c.nesEnvPeriod + 1) * 1000.0f / 240);
+        ImGui::SetNextItemWidth(w);
+        changed |= ImGui::SliderInt(T("Decay"), &c.nesEnvPeriod, 0, 15, fmt);
+      } else {
+        ImGui::SetNextItemWidth(w);
+        changed |= ImGui::SliderInt(T("Volume"), &ins.volume, 0, 15);
+      }
+    }
+    if (c.nesChannel == 0) {
+      changed |= ImGui::Checkbox(T("Sweep"), &c.nesSweep);
+      if (ImGui::IsItemHovered()) ImGui::SetTooltip("%s", T("Hardware pitch sweep: period, direction and shift (bigger shift = slower)."));
+      if (c.nesSweep) {
+        ImGui::SetNextItemWidth(w * 0.4f);
+        changed |= ImGui::SliderInt("##nswp", &c.nesSweepPeriod, 0, 7);
+        ImGui::SameLine();
+        int dir = c.nesSweepDown ? 1 : 0;
+        ImGui::SetNextItemWidth(w * 0.3f);
+        if (ImGui::Combo("##nswd", &dir, TC("Down\0Up\0"))) {
+          c.nesSweepDown = dir == 1;
+          changed = true;
+        }
+        ImGui::SameLine();
+        ImGui::SetNextItemWidth(w * 0.3f - ImGui::GetStyle().ItemSpacing.x * 2);
+        changed |= ImGui::SliderInt(T("Shift"), &c.nesSweepShift, 0, 7);
+      }
+    }
+    if (c.nesChannel == 1) ImGui::TextDisabled("%s", T("The triangle has no volume: it plays at full level or not at all."));
+    if (c.nesChannel == 3) {
+      int n = (int)song_.samples.size();
+      std::string cur = ins.sample >= 0 && ins.sample < n ? song_.samples[ins.sample].name : T("(none)");
+      ImGui::SetNextItemWidth(w);
+      if (ImGui::BeginCombo(T("Sample"), cur.c_str())) {
+        for (int i = 0; i < n; i++) {
+          char label[96];
+          std::snprintf(label, sizeof(label), "%02X: %s", i, song_.samples[i].name.c_str());
+          if (ImGui::Selectable(label, i == ins.sample)) {
+            ins.sample = i;
+            changed = true;
+          }
+        }
+        ImGui::EndCombo();
+      }
+      ImGui::TextDisabled("%s", T("1-bit delta samples at the 2A03's 16 rates; a forward loop loops the whole sample."));
+    }
+  } else if (ins.type == INS_SCC || ins.type == INS_PCE) {
+    ImGui::SetNextItemWidth(w);
+    changed |= ImGui::SliderInt(T("Volume"), &ins.volume, 0, 15);
+    if (ins.type == INS_PCE) {
+      changed |= ImGui::Checkbox(T("Noise"), &c.pceNoise);
+      if (ImGui::IsItemHovered()) ImGui::SetTooltip("%s", T("Only channels 5 and 6 of the chip have noise (VGM export)."));
+      ImGui::TextDisabled("%s", T("5-bit waves (the 0-15 table is stretched to 0-31), volume in 1.5 dB steps."));
+    } else {
+      ImGui::TextDisabled("%s", T("8-bit waves made from the wavetable. On the chip, channels 4 and 5 share their wave."));
+    }
+    changed |= wavetableEditor(ins);
+    changed |= morphEditor(ins);
   }
   return changed;
 }
@@ -882,6 +984,9 @@ void App::instrumentEditor() {
     }
   } else if (ins.type == INS_FM) {
     changed |= fmEditor(ins);
+  } else if (ins.type == INS_OPN) {
+    changed |= chipEditor(ins);
+    changed |= fmEditor(ins);
   } else if (ins.type == INS_OPL) {
     changed |= oplEditor(ins);
   } else if (isChipType(ins.type)) {
@@ -905,6 +1010,8 @@ void App::instrumentEditor() {
           case INS_AY: name = "Noise"; break;
           case INS_SN: name = "Noise mode"; useful = ins.chip.snNoise; break;
           case INS_GB: name = ins.chip.gbChannel == 2 ? "Noise mode" : "Duty"; useful = ins.chip.gbChannel != 1; break;
+          case INS_NES: name = ins.chip.nesChannel == 2 ? "Noise mode" : "Duty"; useful = ins.chip.nesChannel == 0 || ins.chip.nesChannel == 2; break;
+          case INS_PCE: name = "Noise"; break;
           default: useful = false; break;
         }
       } else if (t == MACRO_WAVE) {

@@ -613,7 +613,7 @@ void App::menuBar() {
     if (ImGui::MenuItem(T("Export MIDI..."))) openFileDialog(FileDialogMode::ExportMidi);
     if (ImGui::MenuItem(T("Export module (XM, MOD, IT)..."))) openFileDialog(FileDialogMode::ExportModule);
     if (ImGui::MenuItem(T("Export VGM..."))) openFileDialog(FileDialogMode::ExportVgm);
-    if (ImGui::IsItemHovered()) ImGui::SetTooltip("%s", T("Register log of the emulated chips (AY, SN76489, Game Boy, OPL3)"));
+    if (ImGui::IsItemHovered()) ImGui::SetTooltip("%s", T("Register log of the emulated chips (AY, SN76489, Game Boy, OPL3, YM2612, NES, SCC, PC Engine)"));
     if (ImGui::MenuItem(T("Export keygen player..."))) {
       std::snprintf(playerTitle_, sizeof(playerTitle_), "%s", song_.name.c_str());
       if (!playerScroll_[0]) {

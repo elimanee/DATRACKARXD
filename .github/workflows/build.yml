@@ -53,6 +53,8 @@ jobs:
           exe=build/datrackarxd
           for f in xm mod it; do "$exe" --export-module songs/chips.dtk "chips.$f"; "$exe" --convert "chips.$f" "back-$f.dtk"; done
           "$exe" --export-vgm songs/chips.dtk chips.vgm
+          "$exe" --export-vgm songs/consoles.dtk consoles.vgm
+          "$exe" --export-module songs/consoles.dtk consoles.it
           "$exe" --export songs/demo.dtk demo.ogg
           "$exe" --export-midi songs/demo.dtk demo.mid
           "$exe" --convert demo.mid back-mid.dtk
@@ -126,6 +128,10 @@ jobs:
           [ "$(head -c 4 demo.it)" = "IMPM" ]
           "$exe" --export-vgm songs/chips.dtk chips.vgm
           [ "$(head -c 4 chips.vgm)" = "Vgm " ]
+          # YM2612, NES, SCC and PC Engine.
+          "$exe" --export songs/consoles.dtk consoles.wav
+          "$exe" --export-vgm songs/consoles.dtk consoles.vgm
+          test -s consoles.wav && [ "$(head -c 4 consoles.vgm)" = "Vgm " ]
           # An exported keygen player must start and play on every OS.
           player=player
           [ "${{ runner.os }}" = "Windows" ] && player=player.exe

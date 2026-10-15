@@ -1,5 +1,5 @@
 cmake_minimum_required(VERSION 3.16)
-project(DATRACKARXD VERSION 1.0.0 LANGUAGES CXX C)
+project(DATRACKARXD VERSION 1.1.0 LANGUAGES CXX C)
 
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
@@ -128,6 +128,8 @@ FetchContent_Declare(ymfm
 FetchContent_MakeAvailable(ymfm)
 add_library(ymfm STATIC
   ${ymfm_SOURCE_DIR}/src/ymfm_opl.cpp
+  ${ymfm_SOURCE_DIR}/src/ymfm_opn.cpp
+  ${ymfm_SOURCE_DIR}/src/ymfm_ssg.cpp
   ${ymfm_SOURCE_DIR}/src/ymfm_adpcm.cpp
   ${ymfm_SOURCE_DIR}/src/ymfm_pcm.cpp)
 target_include_directories(ymfm SYSTEM PUBLIC ${ymfm_SOURCE_DIR}/src)
