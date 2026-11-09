@@ -15,6 +15,7 @@
 #include "shortcuts.h"
 #include "song.h"
 #include "theory.h"
+#include "video.h"
 
 struct KeyEvent {
   SDL_Scancode sc;
@@ -61,7 +62,7 @@ struct PRNote {
 
 enum class PRDrag { None, Move, Resize, Select, Erase, Velocity, Pitch, PitchErase, Bend, BendErase, Lane, LaneErase, Key };
 
-enum class FileDialogMode { None, Open, Save, ExportWav, LoadSample, LoadInstrument, SaveInstrument, ExportMidi, ExportOgg, ExportPlayer, ExportModule, ExportVgm };
+enum class FileDialogMode { None, Open, Save, ExportWav, LoadSample, LoadInstrument, SaveInstrument, ExportMidi, ExportOgg, ExportPlayer, ExportModule, ExportVgm, ExportVideo };
 enum class PendingAction { None, New, Open, Demo, Quit, OpenPath };
 
 class App {
@@ -235,6 +236,27 @@ class App {
   float moduleHold_ = 1.0f;
   std::string exportReport_;  // what the last module export couldn't convert
   bool showExportReport_ = false;
+  // Sample browser.
+  struct BrowserEntry {
+    std::string name;
+    bool dir;
+  };
+  bool showBrowser_ = false, browserAutoplay_ = true, browserScrollTo_ = false;
+  std::string browseDir_, browserScanned_, browserSel_, browserError_;
+  std::vector<BrowserEntry> browserEntries_;
+  std::shared_ptr<Sample> browserSample_;
+  char browserFilter_[64] = {};
+  void sampleBrowserWindow();
+  void browserScan();
+  void browserSelect(const std::string& name, bool play);
+  // Video export: options, then the file, then frames a few at a time.
+  VideoOptions videoOpt_;
+  int videoRes_ = 1;
+  bool videoPopupRequest_ = false;
+  std::unique_ptr<VideoWriter> video_;
+  std::string videoPath_;
+  void videoExportPopup();
+  void videoProgress();
   // Keygen player export.
   bool playerPopupRequest_ = false;
   char playerLogo_[64] = "DATRACKARXD";

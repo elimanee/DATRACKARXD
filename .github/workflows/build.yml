@@ -60,6 +60,8 @@ jobs:
           "$exe" --export songs/demo.dtk demo.ogg
           "$exe" --export-midi songs/demo.dtk demo.mid
           "$exe" --convert demo.mid back-mid.dtk
+          "$exe" --export-video songs/chips.dtk scopes.avi scopes 320x180 15
+          "$exe" --export-video songs/demo.dtk keygen.avi keygen 320x180 15
 
   build:
     strategy:
@@ -138,6 +140,14 @@ jobs:
           "$exe" --export songs/sounds.dtk sounds.wav
           "$exe" --export-module songs/sounds.dtk sounds.xm
           test -s sounds.wav && test -s sounds.xm
+          # Video export: the built-in AVI everywhere, MP4 when ffmpeg is on the runner.
+          "$exe" --export-video songs/chips.dtk scopes.avi scopes 320x180 15
+          "$exe" --export-video songs/demo.dtk keygen.avi keygen 640x360 30
+          [ "$(head -c 4 scopes.avi)" = "RIFF" ] && [ "$(head -c 12 keygen.avi | tail -c 4)" = "AVI " ]
+          if command -v ffmpeg > /dev/null; then
+            "$exe" --export-video songs/demo.dtk keygen.mp4 keygen 320x180 15
+            test -s keygen.mp4 && [ ! -e keygen.mp4.sound.wav ]
+          fi
           # An exported keygen player must start and play on every OS.
           player=player
           [ "${{ runner.os }}" = "Windows" ] && player=player.exe
@@ -163,6 +173,7 @@ jobs:
             file="build/_deps/${pair#*:}"
             if [ -f "$file" ]; then cp "$file" "$dir/licenses/${pair%%:*}.txt"; else echo "::warning::missing $file"; fi
           done
+          sed -n '/This software is available under 2 licenses/,$p' third_party/stb_image_write.h > "$dir/licenses/stb.txt"
           if [ "${{ runner.os }}" = "Windows" ]; then
             cp datrackarxd.exe datrackarxd-keygen.exe "$dir/"
             7z a "$dir.zip" "$dir" > /dev/null

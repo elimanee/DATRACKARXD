@@ -5,6 +5,7 @@
 #include <imgui_impl_sdlrenderer2.h>
 
 #include <cstdio>
+#include <cstdlib>
 #include <cstring>
 #include <string>
 
@@ -16,6 +17,7 @@
 #include "paths.h"
 #include "payload.h"
 #include "vgmexport.h"
+#include "video.h"
 #include "player.h"
 
 static int usage() {
@@ -29,7 +31,9 @@ static int usage() {
       "  datrackarxd --export-stems song prefix      one WAV per channel (prefix_01.wav...)\n"
       "  datrackarxd --export-module song out.xm     XM, MOD or IT (by extension); instruments\n"
       "                                              that aren't samples are rendered\n"
-      "  datrackarxd --export-vgm song out.vgm       chip register log (AY, SN76489, GB, OPL3)\n"
+      "  datrackarxd --export-vgm song out.vgm       chip register log (AY, SN76489, GB, OPL3...)\n"
+      "  datrackarxd --export-video song out.mp4|out.avi [keygen|scopes] [1280x720] [30]\n"
+      "                                              video of the keygen scene or the oscilloscopes\n"
       "  datrackarxd --convert-instrument in out.dti instrument preset from .fui/.wav/.dti\n"
       "  datrackarxd --export-player song out [logo] [scroller text]\n"
       "                                              standalone keygen-style player\n"
@@ -86,6 +90,34 @@ static int commandLine(int argc, char** argv) {
   }
   if (cmd == "--export-midi" && argc >= 4) {
     if (!loadAnySong(argv[2], song, err) || !exportMIDI(song, argv[3], argc >= 5 ? std::atoi(argv[4]) : 1, err)) {
+      std::fprintf(stderr, "%s\n", err.c_str());
+      return 1;
+    }
+    std::printf("wrote %s\n", argv[3]);
+    return 0;
+  }
+  if (cmd == "--export-video" && argc >= 4) {
+    VideoOptions opt;
+    for (int i = 4; i < argc; i++) {
+      std::string a = argv[i];
+      int w = 0, h = 0;
+      if (a == "scopes") opt.scene = 1;
+      else if (a == "keygen") opt.scene = 0;
+      else if (std::sscanf(a.c_str(), "%dx%d", &w, &h) == 2) opt.width = w, opt.height = h;
+      else if (std::atoi(a.c_str()) > 0) opt.fps = std::atoi(a.c_str());
+    }
+    VideoWriter v;
+    if (!loadAnySong(argv[2], song, err) || !v.begin(song, argv[3], opt, err)) {
+      std::fprintf(stderr, "%s\n", err.c_str());
+      return 1;
+    }
+    int last = -1;
+    while (v.step(30)) {
+      int pct = (int)(v.progress() * 100);
+      if (pct / 10 != last / 10) std::printf("%d%%\n", pct);
+      last = pct;
+    }
+    if (!v.finish(err)) {
       std::fprintf(stderr, "%s\n", err.c_str());
       return 1;
     }

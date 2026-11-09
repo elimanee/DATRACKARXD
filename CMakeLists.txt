@@ -1,5 +1,5 @@
 cmake_minimum_required(VERSION 3.16)
-project(DATRACKARXD VERSION 1.3.0 LANGUAGES CXX C)
+project(DATRACKARXD VERSION 1.4.0 LANGUAGES CXX C)
 
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
@@ -193,6 +193,9 @@ add_executable(datrackarxd
   src/ui_arrange.cpp
   src/ui_settings.cpp
   src/ui_generators.cpp
+  src/video.cpp
+  src/ui_video.cpp
+  src/ui_samplebrowser.cpp
   src/ui_manual.cpp
   ${MANUAL_CPP}
   src/paths.cpp
@@ -200,6 +203,7 @@ add_executable(datrackarxd
   src/audiofile.cpp
   src/recorder.cpp)
 target_include_directories(datrackarxd PRIVATE ${drlibs_SOURCE_DIR})
+target_include_directories(datrackarxd SYSTEM PRIVATE ${CMAKE_SOURCE_DIR}/third_party)
 target_link_libraries(datrackarxd PRIVATE dtcore rtmidi vorbisenc_static)
 
 # --- DATRACKARXD Keygen: makes standalone keygen-style players ---

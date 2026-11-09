@@ -1306,6 +1306,19 @@ void Engine::render(float* out, int frames) {
       l = filterL_.process(l, fx.filterType);
       r = filterR_.process(r, fx.filterType);
     }
+    if (preview_) {
+      // The browser's preview goes straight to the output, at the sample's rate.
+      size_t n = preview_->data.size();
+      size_t i = (size_t)previewPos_;
+      if (i < n) {
+        float v = preview_->data[i] * 0.7f;
+        l += v;
+        r += v;
+        previewPos_ += (double)preview_->rate / sampleRate_;
+      } else {
+        preview_.reset();
+      }
+    }
     float masterVol = std::isnan(autoMasterVol_) ? fx.volume : autoMasterVol_ * 2.0f;
     l *= masterVol;
     r *= masterVol;

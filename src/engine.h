@@ -130,6 +130,13 @@ class Engine {
     out.swap(midiOut_);
     return out;
   }
+  // Plays a sample on its own, outside the song (the sample browser's
+  // preview); nullptr stops it.
+  void previewSample(std::shared_ptr<const Sample> s) {
+    preview_ = std::move(s);
+    previewPos_ = 0;
+  }
+  bool previewing() const { return preview_ != nullptr; }
   // Follows an external tempo: ticks run this much faster (MIDI clock in).
   float tempoScale = 1.0f;
   float bpm() const;  // the song's tempo now, before tempoScale
@@ -215,6 +222,8 @@ class Engine {
   Limiter limiter_;
   float keyLevel_[MAX_CHANNELS] = {};  // channel levels for the sidechains
   std::vector<uint8_t> midiOut_;
+  std::shared_ptr<const Sample> preview_;
+  double previewPos_ = 0;
   int midiNote_[MAX_CHANNELS];  // note sounding on the channel's MIDI channel, -1 = none
   void midiNote(int c, int note, int velocity);  // note -1 = note off
   std::array<std::array<ChannelFxUnit, MAX_CHANNEL_FX>, MAX_CHANNELS> chanFx_;
