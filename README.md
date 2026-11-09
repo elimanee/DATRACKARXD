@@ -34,6 +34,10 @@ FamiTracker, MOD, XM, IT, S3M et MIDI.
 - **Import** des formats `.fur` (Furnace), `.dmf` (DefleMask), `.ftm` / `.dnm` / `.0cc` (FamiTracker), `.mod`, `.xm`, `.it`, `.s3m` et `.mid`
 - **Export** WAV, OGG, MIDI, **modules XM / MOD / IT** (les instruments synthétiques sont rendus en samples)
   et **VGM** (les registres des puces émulées, pour les lecteurs VGM et le vrai matériel)
+- **Export vidéo** : la scène keygen ou un mur d'oscilloscopes avec la musique, en **MP4** (avec ffmpeg)
+  ou en **AVI** écrit par DATRACKARXD lui-même, prêt pour YouTube
+- **Navigateur de samples** : parcourir les dossiers, écouter un son avant de le charger, l'ajouter au
+  morceau, en faire un instrument ou le poser sur un pad du kit
 - **Lecteur keygen** : un programme autonome et compressé qui joue le morceau avec logo, fond animé (étoiles,
   plasma, tunnel, rotozoom), objet 3D, scrollers, VU-mètres et flashs sur la musique
 - **DATRACKARXD Keygen** : une appli séparée pour fabriquer ces lecteurs, avec aperçu en direct
@@ -100,6 +104,8 @@ datrackarxd --export-midi song.dtk out.mid # écrire un fichier MIDI
 datrackarxd --export-stems song.fur piste  # une piste WAV par canal : piste_01.wav, piste_02.wav...
 datrackarxd --export-module song.dtk out.xm   # module XM, MOD ou IT (d'après l'extension)
 datrackarxd --export-vgm song.dtk out.vgm     # registres des puces émulées en VGM
+datrackarxd --export-video song.dtk out.mp4   # vidéo : out.mp4 (ffmpeg) ou out.avi
+datrackarxd --export-video song.dtk out.avi scopes 1920x1080 60   # oscilloscopes, Full HD, 60 images/s
 datrackarxd --convert song.it song.dtk     # importer un module (ou un .mid) et l'enregistrer en .dtk
 datrackarxd --convert-instrument lead.fui lead.dti   # preset d'instrument depuis un .fui / .wav
 datrackarxd --export-player song.dtk intro "LOGO" "texte du scroller"   # lecteur keygen autonome
@@ -470,6 +476,20 @@ et **Record** enregistre depuis le micro ou l'entrée ligne choisie.
 
 Tout s'annule avec Ctrl+Z.
 
+## Navigateur de samples
+
+**Affichage > Navigateur de samples** (*Sample browser*) ouvre un navigateur de fichiers pour trouver un son sans le charger :
+
+- **Up** remonte d'un dossier, un clic sur un `[dossier]` y entre, **Song folder** va dans le dossier du
+  morceau ; le champ **Filter...** ne garde que les noms qui contiennent le texte tapé ;
+- un clic sur un `.wav`, `.flac`, `.mp3` ou `.ogg` le joue (**Play on click**), les **flèches haut / bas**
+  passent au son précédent / suivant et le jouent ; **Play** / **Stop** pour réécouter ;
+- la forme d'onde, la durée et la fréquence du son s'affichent en bas ;
+- **Add to samples** l'ajoute aux samples du morceau, **New instrument** crée un instrument sample qui le
+  joue, et **To pad** le pose sur le pad choisi quand l'instrument courant est un kit de batterie.
+
+Le dernier dossier visité est gardé dans les réglages. Un son déjà dans le morceau n'est pas ajouté deux fois.
+
 ## Synthèse façon SID
 
 Dans l'éditeur d'instruments, la section **SID** ajoute :
@@ -496,6 +516,8 @@ Dans le menu Fichier :
 - **Export keygen player** : choisir le logo, le titre et le texte du scroller ; on obtient un programme
   autonome qui joue le morceau en boucle avec le champ d'étoiles, les barres copper, le logo et le
   scroller (Espace : pause, F : plein écran, Échap : quitter). Le programme n'a besoin de rien d'autre.
+
+- **Export video** (vidéo de la scène keygen ou des oscilloscopes) : voir plus bas.
 
 Une fenêtre **Export report** liste ensuite ce qui n'a pas pu passer dans le format choisi.
 
@@ -535,6 +557,22 @@ qui jouent un instrument **puce émulée** sont exportés :
 
 Les effets de canal, le mixer et l'automation n'existent pas sur les puces et ne sont donc pas dans le
 VGM ; le rapport les signale, ainsi que les canaux laissés de côté.
+
+### Vidéo
+
+**Fichier > Exporter une vidéo...** (*Export video*) fabrique une vidéo du morceau pour YouTube et cie :
+
+- **Picture** : la **scène keygen** (logo, scroller, fond animé, objet 3D, VU-mètres et flashs, comme le
+  lecteur keygen) ou les **oscilloscopes**, un par canal avec son nom ;
+- **Size** : 640 × 360, 1280 × 720 (HD) ou 1920 × 1080 (Full HD), à **30 ou 60 images par seconde** ;
+- **Loops** : le nombre de passages du morceau ; deux secondes sont ajoutées à la fin pour les queues de
+  release et de réverbération.
+
+Si **ffmpeg** est installé (dans le `PATH`), la vidéo peut être un **`.mp4`**
+(H.264 + AAC, ou `.mkv`). Sans ffmpeg, DATRACKARXD écrit lui-même un **`.avi`** (images MJPEG et son
+non compressé) : les fichiers sont plus gros mais se lisent partout (VLC, navigateurs, YouTube).
+L'image est dessinée hors écran, aussi vite que possible : en HD à 30 images/s, une minute de musique prend en général moins
+d'une minute. **Cancel** arrête l'export et efface le fichier commencé.
 
 ## DATRACKARXD Keygen (appli séparée)
 
@@ -611,6 +649,8 @@ La macro volume avec un point de release donne un vrai « release » (fondu apr�
 - `src/midi.*` : entrée et sortie MIDI, horloge MIDI (RtMidi)
 - `src/theory.*`, `src/ui_generators.cpp` : gammes, accords et générateurs
 - `src/payload.*`, `src/player.cpp`, `src/keygen_fx.*` : lecteur keygen autonome et sa scène
+- `src/video.*`, `src/ui_video.cpp`, `third_party/stb_image_write.h` : export vidéo (rendu hors écran, AVI MJPEG ou ffmpeg)
+- `src/ui_samplebrowser.cpp` : navigateur de samples
 - `src/keygen_main.cpp`, `src/filebrowser.*` : l'appli DATRACKARXD Keygen
 - `src/theme.*` : thèmes de couleurs
 - `src/app.*` : application, menus, raccourcis, dialogue de fichiers
@@ -629,5 +669,6 @@ La macro volume avec un point de release donne un vrai « release » (fondu apr�
 [Dear ImGui](https://github.com/ocornut/imgui) (MIT), [SDL2](https://libsdl.org) (zlib),
 [RtMidi](https://github.com/thestk/rtmidi), [libogg et libvorbis](https://xiph.org) (BSD),
 [ymfm](https://github.com/aaronsgiles/ymfm) (BSD-3-Clause, émulation OPL3) et
-[dr_flac / dr_mp3](https://github.com/mackron/dr_libs) (domaine public / MIT-0). Leurs licences sont
+[dr_flac / dr_mp3](https://github.com/mackron/dr_libs) (domaine public / MIT-0) et
+[stb_image_write](https://github.com/nothings/stb) (domaine public / MIT, images JPEG de l'export vidéo). Leurs licences sont
 dans le dossier `licenses` des archives publiées.

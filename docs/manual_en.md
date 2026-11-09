@@ -34,6 +34,10 @@ C++17 - ImGui + SDL2
 - **Import** of `.fur` (Furnace), `.dmf` (DefleMask), `.ftm` / `.dnm` / `.0cc` (FamiTracker), `.mod`, `.xm`, `.it`, `.s3m` and `.mid` files
 - **Export** to WAV, OGG, MIDI, **XM / MOD / IT modules** (synthesized instruments are rendered to samples)
   and **VGM** (the registers of the emulated chips, for VGM players and real hardware)
+- **Video export**: the keygen scene or a wall of oscilloscopes with the music, as **MP4** (with ffmpeg)
+  or as an **AVI** written by DATRACKARXD itself, ready for YouTube
+- **Sample browser**: walk the folders, hear a sound before loading it, add it to the song, make an
+  instrument of it or drop it on a drum kit pad
 - **Keygen player**: a standalone, compressed program that plays the song with a logo, animated background (stars,
   plasma, tunnel, rotozoom), 3D object, scrollers, VU meters and flashes in time with the music
 - **DATRACKARXD Keygen**: a separate app for building these players, with a live preview
@@ -100,6 +104,8 @@ datrackarxd --export-midi song.dtk out.mid # write a MIDI file
 datrackarxd --export-stems song.fur piste  # one WAV track per channel: piste_01.wav, piste_02.wav...
 datrackarxd --export-module song.dtk out.xm   # XM, MOD or IT module (based on the extension)
 datrackarxd --export-vgm song.dtk out.vgm     # emulated chip registers as VGM
+datrackarxd --export-video song.dtk out.mp4   # video: out.mp4 (ffmpeg) or out.avi
+datrackarxd --export-video song.dtk out.avi scopes 1920x1080 60   # oscilloscopes, Full HD, 60 frames/s
 datrackarxd --convert song.it song.dtk     # import a module (or a .mid) and save it as .dtk
 datrackarxd --convert-instrument lead.fui lead.dti   # instrument preset from a .fui / .wav
 datrackarxd --export-player song.dtk intro "LOGO" "texte du scroller"   # standalone keygen player
@@ -466,6 +472,20 @@ and **Record** records from the selected microphone or line input.
 
 Everything can be undone with Ctrl+Z.
 
+## Sample browser
+
+**View > Sample browser** opens a file browser to find a sound without loading it:
+
+- **Up** goes up one folder, a click on a `[folder]` enters it, **Song folder** goes to the song's
+  folder; the **Filter...** field keeps only the names that contain the typed text;
+- a click on a `.wav`, `.flac`, `.mp3` or `.ogg` plays it (**Play on click**), the **up / down arrows**
+  go to the previous / next sound and play it; **Play** / **Stop** to hear it again;
+- the waveform, length and rate of the sound are shown at the bottom;
+- **Add to samples** adds it to the song's samples, **New instrument** creates a sample instrument that
+  plays it, and **To pad** puts it on the chosen pad when the current instrument is a drum kit.
+
+The last folder visited is kept in the settings. A sound already in the song is not added twice.
+
 ## SID-style synthesis
 
 In the instrument editor, the **SID** section adds:
@@ -492,6 +512,8 @@ In the File menu:
 - **Export keygen player**: choose the logo, the title and the scroller text; you get a standalone
   program that plays the song in a loop with the starfield, copper bars, logo and
   scroller (Space: pause, F: fullscreen, Esc: quit). The program needs nothing else.
+
+- **Export video** (a video of the keygen scene or the oscilloscopes): see below.
 
 An **Export report** window then lists whatever could not be carried over to the chosen format.
 
@@ -531,6 +553,22 @@ that play an **emulated chip** instrument are exported:
 
 Channel effects, the mixer and automation do not exist on the chips and are therefore not in the
 VGM; the report lists them, along with the channels that were left out.
+
+### Video
+
+**File > Export video...** makes a video of the song for YouTube & co:
+
+- **Picture**: the **keygen scene** (logo, scroller, animated background, 3D object, VU meters and
+  flashes, like the keygen player) or the **oscilloscopes**, one per channel with its name;
+- **Size**: 640 × 360, 1280 × 720 (HD) or 1920 × 1080 (Full HD), at **30 or 60 frames per second**;
+- **Loops**: how many times the song plays; two seconds are added at the end for the release and reverb
+  tails.
+
+If **ffmpeg** is installed (in the `PATH`), the video can be an **`.mp4`** (H.264 + AAC, or `.mkv`).
+Without ffmpeg, DATRACKARXD writes an **`.avi`** itself (MJPEG pictures and uncompressed sound): the
+files are bigger but play everywhere (VLC, browsers, YouTube). The pictures are drawn off screen as fast
+as possible: in HD at 30 frames/s, a minute of music usually takes less than a minute. **Cancel** stops the export and deletes
+the started file.
 
 ## DATRACKARXD Keygen (separate app)
 
@@ -607,6 +645,8 @@ A volume macro with a release point gives a real "release" (fade-out after the n
 - `src/midi.*`: MIDI input and output, MIDI clock (RtMidi)
 - `src/theory.*`, `src/ui_generators.cpp`: scales, chords and generators
 - `src/payload.*`, `src/player.cpp`, `src/keygen_fx.*`: standalone keygen player and its scene
+- `src/video.*`, `src/ui_video.cpp`, `third_party/stb_image_write.h`: video export (off-screen rendering, MJPEG AVI or ffmpeg)
+- `src/ui_samplebrowser.cpp`: sample browser
 - `src/keygen_main.cpp`, `src/filebrowser.*`: the DATRACKARXD Keygen app
 - `src/theme.*`: color themes
 - `src/app.*`: application, menus, shortcuts, file dialog
@@ -625,5 +665,6 @@ A volume macro with a release point gives a real "release" (fade-out after the n
 Dear ImGui (MIT, https://github.com/ocornut/imgui), SDL2 (zlib, https://libsdl.org),
 RtMidi (https://github.com/thestk/rtmidi), libogg and libvorbis (BSD, https://xiph.org),
 ymfm (BSD-3-Clause, OPL3 emulation, https://github.com/aaronsgiles/ymfm) and
-dr_flac / dr_mp3 (public domain / MIT-0, https://github.com/mackron/dr_libs). Their licenses are
+dr_flac / dr_mp3 (public domain / MIT-0, https://github.com/mackron/dr_libs) and
+stb_image_write (public domain / MIT, JPEG pictures of the video export, https://github.com/nothings/stb). Their licenses are
 in the `licenses` folder of the published archives.

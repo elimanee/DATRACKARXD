@@ -72,6 +72,7 @@ void App::loadSettings() {
       if (k == "countin") countInBars_ = std::clamp(std::stoi(v), 0, 4);
       if (k == "quantize") midiQuantize_ = std::clamp(std::stoi(v), 0, 3);
       if (k == "midiout") midiOutPort_ = v;
+      if (k == "browsedir") browseDir_ = v;
       if (k == "midiclockout") midiClockOut_ = std::stoi(v) != 0;
       if (k == "midiclockin") midiClockIn_ = std::stoi(v) != 0;
       if (k == "audiodevice") audioDevice_ = v;
@@ -115,6 +116,7 @@ void App::saveSettings() {
   f << "countin=" << countInBars_ << "\n";
   f << "quantize=" << midiQuantize_ << "\n";
   f << "midiout=" << midiOutPort_ << "\n";
+  f << "browsedir=" << browseDir_ << "\n";
   f << "midiclockout=" << (midiClockOut_ ? 1 : 0) << "\n";
   f << "midiclockin=" << (midiClockIn_ ? 1 : 0) << "\n";
   f << "audiodevice=" << audioDevice_ << "\n";
@@ -314,6 +316,7 @@ void App::openFileDialog(FileDialogMode mode) {
   if (mode == FileDialogMode::ExportMidi) base += ".mid";
   if (mode == FileDialogMode::ExportOgg) base += ".ogg";
   if (mode == FileDialogMode::ExportVgm) base += ".vgm";
+  if (mode == FileDialogMode::ExportVideo) base += findFfmpeg().empty() ? ".avi" : ".mp4";
   if (mode == FileDialogMode::ExportModule) base += moduleFormat_ == 1 ? ".mod" : moduleFormat_ == 2 ? ".it" : ".xm";
 #ifdef _WIN32
   if (mode == FileDialogMode::ExportPlayer) base += ".exe";
@@ -358,6 +361,7 @@ void App::fileDialog() {
                       : dialogMode_ == FileDialogMode::ExportOgg ? "Export OGG"
                       : dialogMode_ == FileDialogMode::ExportModule ? "Export module (XM, MOD, IT)"
                       : dialogMode_ == FileDialogMode::ExportVgm ? "Export VGM"
+                      : dialogMode_ == FileDialogMode::ExportVideo ? "Export video"
                       : dialogMode_ == FileDialogMode::ExportPlayer ? "Export keygen player"
                                                                  : "Export WAV";
   std::string title = std::string(T(titleEn)) + "###filedlg";
@@ -376,6 +380,8 @@ void App::fileDialog() {
   else if (dialogMode_ == FileDialogMode::ExportMidi) exts = {".mid"};
   else if (dialogMode_ == FileDialogMode::ExportOgg) exts = {".ogg"};
   else if (dialogMode_ == FileDialogMode::ExportVgm) exts = {".vgm"};
+  else if (dialogMode_ == FileDialogMode::ExportVideo)
+    exts = findFfmpeg().empty() ? std::vector<std::string>{".avi"} : std::vector<std::string>{".mp4", ".avi", ".mkv"};
   else if (dialogMode_ == FileDialogMode::ExportModule)
     exts = moduleFormat_ == 1 ? std::vector<std::string>{".mod", ".xm", ".it"}
            : moduleFormat_ == 2 ? std::vector<std::string>{".it", ".xm", ".mod"}
@@ -550,6 +556,15 @@ void App::fileDialog() {
       else
         setStatus(std::string(T("Player export failed: ")) + err);
       cancel = true;
+    } else if (dialogMode_ == FileDialogMode::ExportVideo) {
+      video_ = std::make_unique<VideoWriter>();
+      if (video_->begin(song_, path, videoOpt_, err)) {
+        videoPath_ = path;
+      } else {
+        video_.reset();
+        setStatus(std::string(T("Video export failed: ")) + err);
+      }
+      cancel = true;
     } else if (dialogMode_ == FileDialogMode::ExportVgm) {
       std::string report;
       if (exportVGM(song_, path, err, report)) {
@@ -630,6 +645,8 @@ void App::menuBar() {
     if (ImGui::MenuItem(T("Export MIDI..."))) openFileDialog(FileDialogMode::ExportMidi);
     if (ImGui::MenuItem(T("Export module (XM, MOD, IT)..."))) openFileDialog(FileDialogMode::ExportModule);
     if (ImGui::MenuItem(T("Export VGM..."))) openFileDialog(FileDialogMode::ExportVgm);
+    if (ImGui::MenuItem(T("Export video..."))) videoPopupRequest_ = true;
+    if (ImGui::IsItemHovered()) ImGui::SetTooltip("%s", T("The keygen scene or the oscilloscopes, with the music, for YouTube & co."));
     if (ImGui::IsItemHovered()) ImGui::SetTooltip("%s", T("Register log of the emulated chips (AY, SN76489, Game Boy, OPL3, YM2612, NES, SCC, PC Engine)"));
     if (ImGui::MenuItem(T("Export keygen player..."))) {
       std::snprintf(playerTitle_, sizeof(playerTitle_), "%s", song_.name.c_str());
@@ -677,6 +694,7 @@ void App::menuBar() {
     ImGui::MenuItem(T("Mixer"), nullptr, &showMixer_);
     ImGui::MenuItem(T("Channel FX"), nullptr, &showChanFx_);
     ImGui::MenuItem(T("Generators"), nullptr, &showGenerators_);
+    ImGui::MenuItem(T("Sample browser"), nullptr, &showBrowser_);
     ImGui::MenuItem(T("Arrangement"), nullptr, &showArrangement_);
     ImGui::MenuItem(T("Oscilloscope"), nullptr, &showScope_);
     ImGui::MenuItem(T("Keygen scroller"), nullptr, &showScroller_);
@@ -1170,6 +1188,7 @@ void App::frame() {
   if (showKeys_) keysHelp();
   if (showAbout_) aboutWindow();
   if (showGenerators_) generatorsWindow();
+  if (showBrowser_) sampleBrowserWindow();
   if (showSettings_) settingsWindow();
   else capturing_ = -1;
   if (showManual_) manualWindow();
@@ -1188,6 +1207,8 @@ void App::frame() {
   fileDialog();
   confirmPopup();
   recoveryPopup();
+  videoExportPopup();
+  videoProgress();
   handleKeys();
   // A settings edit becomes one undo step once the mouse/text gesture ends.
   if (shadowStale_ || (metaTouched_ && !ImGui::IsAnyItemActive())) commitMetaEdit();
