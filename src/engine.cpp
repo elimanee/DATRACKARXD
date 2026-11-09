@@ -75,6 +75,7 @@ void linearPan(int p, float& l, float& r) {
 Engine::Engine(const Song& song, int sampleRate) : song_(song), sampleRate_(sampleRate) {
   tables();
   for (float& v : volSmooth_) v = 1;
+  std::fill(std::begin(midiNote_), std::end(midiNote_), -1);
   clearAutomation();
   reverb_.init(sampleRate);
   limiter_.init(sampleRate);
@@ -187,6 +188,24 @@ void Engine::play(int order, int row, int countIn) {
   countInRow_ = 0;
   clearAutomation();
   playing_ = true;
+}
+
+float Engine::bpm() const {
+  return tickRate_ * 60.0f / (std::max(speed(), 1) * std::max(song_.highlight1, 1));
+}
+
+// Sends what a channel plays to its MIDI channel (our note 57 = A-4 = MIDI 69).
+void Engine::midiNote(int c, int note, int velocity) {
+  if (c < 0 || c >= song_.channelCount() || song_.channels[c].midiOut <= 0) return;
+  uint8_t mc = (uint8_t)((song_.channels[c].midiOut - 1) & 15);
+  if (midiNote_[c] >= 0 && sendMidi && midiOut_.size() < 65536)
+    midiOut_.insert(midiOut_.end(), {(uint8_t)(0x80 | mc), (uint8_t)midiNote_[c], 0});
+  midiNote_[c] = -1;
+  if (note < 0) return;
+  int n = note + 12;
+  if (n < 0 || n > 127) return;
+  if (sendMidi && midiOut_.size() < 65536) midiOut_.insert(midiOut_.end(), {(uint8_t)(0x90 | mc), (uint8_t)n, (uint8_t)std::clamp(velocity, 1, 127)});
+  midiNote_[c] = n;
 }
 
 void Engine::stop() {
@@ -357,6 +376,7 @@ float Engine::playFM(ChannelState& s, const Instrument& ins) {
 
 void Engine::triggerNote(int c, int note, int offset) {
   ChannelState& s = ch_[c];
+  midiNote(c, note, s.vol);
   const Instrument* ins = instrument(c);
   s.note = note;
   s.pitch = note;
@@ -415,6 +435,7 @@ void Engine::triggerNote(int c, int note, int offset) {
 
 void Engine::releaseNote(int c) {
   ChannelState& s = ch_[c];
+  if (midiNote_[c] >= 0) midiNote(c, -1, 0);
   if (!s.active) return;
   s.released = true;
   const Instrument* ins = instrument(c);
@@ -1180,7 +1201,7 @@ void Engine::render(float* out, int frames) {
   for (int i = 0; i < frames; i++) {
     if (samplesToTick_ <= 0) {
       doTick();
-      samplesToTick_ += sampleRate_ / std::max(tickRate_, 1.0f);
+      samplesToTick_ += sampleRate_ / std::max(tickRate_ * std::clamp(tempoScale, 0.25f, 4.0f), 1.0f);
       if (fx.filter && !std::isnan(autoMasterCut_)) {
         float hz = 20.0f * std::pow(1000.0f, autoMasterCut_);
         float q = 0.707f + fx.resonance * 9.3f;
@@ -1247,7 +1268,7 @@ void Engine::render(float* out, int frames) {
       // Level follower for the sidechains keyed by this channel.
       keyLevel_[c] = std::max(std::abs(v), keyLevel_[c] * keyRelease);
       const ChannelInfo& info = song_.channels[c];
-      if (info.muted) continue;
+      if (info.muted || info.midiOnly) continue;
       float pl = s.panL, pr = s.panR;
       if (!std::isnan(autoPan_[c])) linearPan((int)std::lround(autoPan_[c] * 255), pl, pr);
       float vl = v * pl, vr = v * pr;

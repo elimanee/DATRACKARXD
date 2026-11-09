@@ -1,6 +1,7 @@
 #include "song.h"
 
 #include "chips.h"
+#include "theory.h"
 
 #include <algorithm>
 #include <cmath>
@@ -151,6 +152,8 @@ void Song::reset(int channelCount) {
   patternLength = 64;
   highlight1 = 4;
   highlight2 = 16;
+  keyRoot = 0;
+  keyScale = 0;
   channels.clear();
   setChannelCount(channelCount);
   orders.assign(1, {});
@@ -483,6 +486,7 @@ void Song::write(std::ostream& f) const {
     f << "patlen " << (live0 ? patternLength : subsongs[0].patternLength) << '\n';
   }
   f << "highlight " << highlight1 << ' ' << highlight2 << '\n';
+  if (keyRoot || keyScale) f << "key " << keyRoot << ' ' << keyScale << '\n';
   if (insResetsVolume) f << "insresetvol 1\n";
   f << "channels " << channelCount() << '\n';
   for (int c = 0; c < channelCount(); c++) {
@@ -492,6 +496,7 @@ void Song::write(std::ostream& f) const {
     if (ch.fixedDuty >= 0 || ch.minNote > 0 || ch.mix != 1.0f)
       f << "chanchip " << c << ' ' << ch.fixedDuty << ' ' << ch.minNote << ' ' << ch.mix << '\n';
     if (ch.reverbSend > 0 || ch.delaySend > 0) f << "chansend " << c << ' ' << ch.reverbSend << ' ' << ch.delaySend << '\n';
+    if (ch.midiOut > 0) f << "chanmidi " << c << ' ' << ch.midiOut << ' ' << ch.midiOnly << '\n';
     for (const ChannelEffect& e : ch.effects)
       f << "chanfx " << c << ' ' << e.type << ' ' << e.on << ' ' << e.p[0] << ' ' << e.p[1] << ' ' << e.p[2] << ' ' << e.p[3] << '\n';
   }
@@ -706,6 +711,10 @@ bool Song::read(std::istream& f, const std::string& path, std::string& err) {
       int v = 0;
       ss >> v;
       s.insResetsVolume = v != 0;
+    } else if (key == "key") {
+      ss >> s.keyRoot >> s.keyScale;
+      s.keyRoot = clampVal(s.keyRoot, 0, 11);
+      s.keyScale = clampVal(s.keyScale, 0, SCALE_COUNT - 1);
     } else if (key == "highlight") {
       ss >> s.highlight1 >> s.highlight2;
     } else if (key == "channels") {
@@ -744,6 +753,13 @@ bool Song::read(std::istream& f, const std::string& path, std::string& err) {
       if (c >= 0 && c < s.channelCount()) {
         s.channels[c].reverbSend = std::clamp(rv, 0.0f, 1.0f);
         s.channels[c].delaySend = std::clamp(dl, 0.0f, 1.0f);
+      }
+    } else if (key == "chanmidi") {
+      int c = -1, out = 0, only = 0;
+      ss >> c >> out >> only;
+      if (c >= 0 && c < s.channelCount()) {
+        s.channels[c].midiOut = clampVal(out, 0, 16);
+        s.channels[c].midiOnly = only != 0;
       }
     } else if (key == "fx.reverb") {
       int on = 0;

@@ -1,5 +1,5 @@
 cmake_minimum_required(VERSION 3.16)
-project(DATRACKARXD VERSION 1.2.0 LANGUAGES CXX C)
+project(DATRACKARXD VERSION 1.3.0 LANGUAGES CXX C)
 
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
@@ -155,6 +155,7 @@ add_library(dtcore STATIC
   src/midifile.cpp
   src/theme.cpp
   src/i18n.cpp
+  src/theory.cpp
   src/keygen_fx.cpp
   src/payload.cpp
   src/player.cpp
@@ -191,6 +192,7 @@ add_executable(datrackarxd
   src/ui_windows.cpp
   src/ui_arrange.cpp
   src/ui_settings.cpp
+  src/ui_generators.cpp
   src/ui_manual.cpp
   ${MANUAL_CPP}
   src/paths.cpp

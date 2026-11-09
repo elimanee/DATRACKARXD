@@ -9,6 +9,7 @@
 #include <cstdio>
 
 #include "app.h"
+#include "theory.h"
 #include "i18n.h"
 #include "theme.h"
 
@@ -203,6 +204,17 @@ void App::pianoRollWindow() {
   if (ImGui::IsItemHovered())
     ImGui::SetTooltip("%s", T("Chords: notes that overlap are spread over this channel and the next ones"));
   ImGui::SameLine();
+  ImGui::SetNextItemWidth(S(110));
+  if (ImGui::Combo(T("Chord"), &prChord_, [](void*, int i) { return T(CHORD_NAMES[i]); }, nullptr, CHORD_COUNT) && prChord_ != CHORD_OFF)
+    prVoices_ = std::max(prVoices_, prChord_ == CHORD_SEVENTH ? 4 : 3);
+  if (ImGui::IsItemHovered())
+    ImGui::SetTooltip("%s", T("A click adds the whole chord, built on the song's scale (set the key in the Song window).\n"
+                              "The notes go to this channel and the next ones (Voices)."));
+  if (song_.keyScale > 0) {
+    ImGui::SameLine();
+    ImGui::Checkbox(T("Snap to scale"), &prSnap_);
+  }
+  ImGui::SameLine();
   ImGui::Checkbox(T("Ghosts"), &prGhosts_);
   ImGui::SameLine();
   ImGui::Checkbox(T("MPE"), &prMpe_);
@@ -240,6 +252,18 @@ void App::pianoRollWindow() {
     return all;
   };
   std::vector<PRNote> notes = readGroup();
+  {
+    // The chord sounding at the cursor row, over every channel.
+    std::vector<int> sounding;
+    for (int c = 0; c < nch; c++)
+      for (const PRNote& n : readNotes(song_.pattern(c, song_.orders[curOrder_][c]), len))
+        if (curRow_ >= n.start && curRow_ < n.start + n.len) sounding.push_back(n.note);
+    std::sort(sounding.begin(), sounding.end());
+    if (sounding.size() >= 2) {
+      ImGui::SameLine();
+      ImGui::TextColored(ImVec4(0.6f, 0.9f, 1, 1), "%s", chordLabel(sounding).c_str());
+    }
+  }
 
   // Layout.
   ImVec2 p0 = ImGui::GetCursorScreenPos();
@@ -290,7 +314,13 @@ void App::pianoRollWindow() {
   int topNote = (int)std::ceil(prTop_), botNote = (int)std::floor(prTop_ - visKeys) - 1;
   for (int n = std::max(botNote, 0); n <= std::min(topNote, NOTE_COUNT - 1); n++) {
     float y = noteY((float)n);
-    if (isBlack(n)) dl->AddRectFilled(ImVec2(g0.x, y), ImVec2(g1.x, y + zy), TH.rowHi1);
+    if (song_.keyScale > 0) {
+      // The song's scale: notes outside it darker, the tonic marked.
+      if (!inScale(n, song_.keyRoot, song_.keyScale)) dl->AddRectFilled(ImVec2(g0.x, y), ImVec2(g1.x, y + zy), IM_COL32(0, 0, 0, 90));
+      else if ((n - song_.keyRoot) % 12 == 0) dl->AddRectFilled(ImVec2(g0.x, y), ImVec2(g1.x, y + zy), IM_COL32(120, 160, 255, 28));
+    } else if (isBlack(n)) {
+      dl->AddRectFilled(ImVec2(g0.x, y), ImVec2(g1.x, y + zy), TH.rowHi1);
+    }
     if (n % 12 == 0) dl->AddLine(ImVec2(g0.x, y + zy), ImVec2(g1.x, y + zy), TH.separator);
   }
   for (int r = std::max(0, (int)prScrollX_); r <= len && rowX((float)r) <= g1.x; r++) {
@@ -328,6 +358,8 @@ void App::pianoRollWindow() {
       dl->AddRectFilled(ImVec2(x0 + 1, y + 1), ImVec2(x1 - 1, y + zy - 1), insColor(n.ins, prMpe_ && hasBend(n) ? (sel ? 170 : 120) : sel ? 255 : 210), 3);
       dl->AddRect(ImVec2(x0 + 1, y + 1), ImVec2(x1 - 1, y + zy - 1), sel ? IM_COL32(255, 255, 255, 255) : IM_COL32(0, 0, 0, 120), 3, 0,
                   sel ? 2.0f : 1.0f);
+      if (song_.keyScale > 0 && !inScale(n.note, song_.keyRoot, song_.keyScale))
+        dl->AddRect(ImVec2(x0, y), ImVec2(x1, y + zy), IM_COL32(255, 70, 70, 230), 3, 0, 2.0f);
       if (x1 - x0 > 30 && zy >= 10) {
         std::string label = noteName(n.note);
         dl->AddText(ImVec2(x0 + 4, y + (zy - ImGui::GetFontSize()) / 2), IM_COL32(20, 20, 30, 255), label.c_str());
@@ -598,15 +630,25 @@ void App::pianoRollWindow() {
       } else {
         // New note, then drag it around.
         int row = std::clamp(xRow(m.x), 0, len - 1), note = std::clamp(yNote(m.y), 0, NOTE_COUNT - 1);
+        if (prSnap_ && song_.keyScale > 0) note = std::clamp(snapToScale(note, song_.keyRoot, song_.keyScale), 0, NOTE_COUNT - 1);
         std::vector<PRNote> base = notes;
         PRNote added{row, prLength_, note, curIns_, -1};
         added.ch = -1;  // any free voice
         base.push_back(added);
+        std::vector<int> chord = chordOn(note, (ChordType)prChord_, song_.keyRoot, song_.keyScale);
+        std::set<int> keys = {noteKey(added)};
+        for (size_t k = 1; k < chord.size() && (int)k < voices; k++) {
+          if (chord[k] >= NOTE_COUNT) continue;
+          PRNote extra{row, prLength_, chord[k], curIns_, -1};
+          extra.ch = -1;
+          base.push_back(extra);
+          keys.insert(noteKey(extra));
+        }
         prUndone_ = false;
         writeBack(base);
         bool undone = prUndone_;
         notes = readGroup();
-        prSel_ = {noteKey(added)};
+        prSel_ = keys;
         int grab = -1;
         for (size_t i = 0; i < notes.size(); i++)
           if (noteKey(notes[i]) == noteKey(added)) grab = (int)i;

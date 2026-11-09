@@ -29,6 +29,7 @@
 #include "shortcuts.h"
 #include "vgmexport.h"
 #include "song.h"
+#include "theory.h"
 
 namespace fs = std::filesystem;
 
@@ -217,6 +218,71 @@ void soundsTest() {
     CHECK(back.fromText(s.toText(), err));
     CHECK(back.wavetables.size() == 1 && back.wavetables[0].harmonics.size() == (size_t)MAX_HARMONICS);
   }
+}
+
+// v1.3: scales, chords, generators, MIDI out and the tempo follower.
+void compoTest() {
+  // C major (root 0, scale 1).
+  CHECK(inScale(60, 0, 1) && !inScale(61, 0, 1));
+  CHECK(snapToScale(61, 0, 1) == 62);  // ties go up
+  CHECK(scaleStep(60, 2, 0, 1) == 64 && scaleStep(60, -1, 0, 1) == 59 && scaleStep(60, 7, 0, 1) == 72);
+  CHECK(chordLabel(chordOn(62, CHORD_TRIAD, 0, 1)) == "Dm");
+  CHECK(chordLabel(chordOn(67, CHORD_SEVENTH, 0, 1)) == "G7");
+  CHECK(chordLabel(chordOn(71, CHORD_TRIAD, 0, 1)) == "Bdim");
+  CHECK(chordLabel(chordOn(57, CHORD_TRIAD, 9, 2)) == "Am");  // A minor
+  std::vector<ProgChord> prog;
+  CHECK(parseProgression("I V vi IV", prog) && prog.size() == 4 && prog[2].degree == 5);
+  CHECK(parseProgression("ii7 V7 I", prog) && prog[0].seventh && prog[2].degree == 0);
+  CHECK(!parseProgression("I X", prog));
+  std::vector<bool> e = euclid(3, 8, 0);
+  CHECK(e.size() == 8 && std::count(e.begin(), e.end(), true) == 3 && e[0]);
+  // Melodies stay in the scale and the range.
+  for (uint32_t seed = 1; seed < 40; seed++) {
+    MelodyParams m;
+    m.root = 2;  // D minor
+    m.scale = 2;
+    m.low = 50;
+    m.high = 74;
+    m.seed = seed;
+    m.contour = (int)(seed % 4);
+    bool ok = true;
+    for (const GenNote& n : generateMelody(m, 64)) ok &= inScale(n.note, 2, 2) && n.note >= 50 && n.note <= 74 && n.len > 0;
+    CHECK(ok);
+  }
+  auto voices = generateChords({{0, false}, {4, false}, {5, false}, {3, false}}, 0, 1, 48, false, 3, 16, 64);
+  CHECK(voices.size() == 3 && voices[0].size() == 4 && voices[0][1].note % 12 == 7);  // the V chord's bass is a G
+  std::vector<GenNote> arp = arpeggiate({{0, 60, 8, -1}}, CHORD_TRIAD, 0, 1, 0, 2, 1, 1, 64);
+  CHECK(arp.size() == 4 && arp[0].note == 60 && arp[1].note == 64 && arp[2].note == 67 && arp[3].note == 60);
+
+  // MIDI out: a channel sending to MIDI channel 3 plays note on, then off.
+  Song s;
+  s.reset(1);
+  s.channels[0].midiOut = 3;
+  Cell* c = s.cell(0, 0, 0, true);
+  c->note = 57;  // A-4 = MIDI 69
+  c->ins = 0;
+  s.cell(0, 0, 4, true)->note = NOTE_OFF;
+  Engine e1(s, 44100);
+  e1.sendMidi = true;
+  e1.play(0, 0);
+  std::vector<float> buf(44100 * 2);
+  e1.render(buf.data(), 44100);
+  std::vector<uint8_t> midi = e1.takeMidi();
+  CHECK(midi.size() >= 6 && midi[0] == 0x92 && midi[1] == 69 && midi[3] == 0x82 && midi[4] == 69);
+  // Tempo follower: twice the tempo, twice the rows in the same time.
+  auto rowsIn = [&](float scale) {
+    Song t;
+    t.reset(1);
+    t.patternLength = 256;
+    Engine e(t, 44100);
+    e.tempoScale = scale;
+    e.play(0, 0);
+    std::vector<float> b(44100 * 2);
+    e.render(b.data(), 44100);
+    return e.row();
+  };
+  int r1 = rowsIn(1.0f), r2 = rowsIn(2.0f);
+  CHECK(r1 > 0 && std::abs(r2 - 2 * r1) <= 1);
 }
 
 // The emulated chips: every type makes sound at the note's pitch, and the
@@ -479,6 +545,7 @@ int main(int argc, char** argv) {
   } tests[] = {
       {"song format", songFormatRoundTrip}, {"engine output", engineOutput},     {"zlib", zlibRoundTrip},
       {"chips and VGM", chipsAndVgm},          {"v1.2 sounds", soundsTest},
+      {"v1.3 composition", compoTest},
       {"module round trip", moduleRoundTrip}, {"importers vs. broken files", importerFuzz},
       {"translations", translations},       {"shortcuts", shortcuts},
   };

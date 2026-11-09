@@ -285,6 +285,8 @@ struct ChannelInfo {
   float mix = 1.0f;        // channel output level
   float reverbSend = 0.0f;   // 0..1, how much goes to the master reverb
   float delaySend = 0.0f;    // 0..1, how much goes to the master delay
+  int midiOut = 0;           // MIDI channel 1-16 its notes are sent to (0 = none)
+  bool midiOnly = false;     // only MIDI: the channel's own sound is muted
   std::vector<ChannelEffect> effects;  // insert effects, up to MAX_CHANNEL_FX
   std::vector<Pattern> patterns;  // MAX_PATTERNS entries
 };
@@ -361,6 +363,8 @@ struct Song {
   int patternLength = 64;
   int highlight1 = 4;
   int highlight2 = 16;
+  int keyRoot = 0;   // the song's key: 0 = C ... 11 = B
+  int keyScale = 0;  // index in SCALES (theory.h), 0 = chromatic (no scale)
   bool insResetsVolume = false;  // MOD/XM/IT behavior: an instrument number resets the volume
   std::vector<ChannelInfo> channels;
   std::vector<std::array<uint8_t, MAX_CHANNELS>> orders;

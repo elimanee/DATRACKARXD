@@ -28,7 +28,8 @@ FamiTracker, MOD, XM, IT, S3M et MIDI.
 - **Synthèse façon SID** (C64) : filtre résonant passe-bas / passe-bande / passe-haut sur n'importe quel instrument, ring mod, hard sync, largeur de pulse fine avec PWM
 - **Macros** façon Furnace sur tous les instruments : volume, arpège (relatif ou note fixe), duty, waveform, pitch, cutoff (avec loop `|` et release `/`)
 - **Mixer** : réverbération, delay ping-pong calé sur le tempo, filtre master, envois par canal
-- **Clavier MIDI** : jouer, faire des accords et enregistrer depuis un clavier MIDI (vélocité incluse)
+- **Clavier MIDI** : jouer, faire des accords et enregistrer depuis un clavier MIDI (vélocité incluse) ;
+  **sortie MIDI** vers des synthés externes, **horloge MIDI** envoyée ou suivie
 - **Presets d'instruments** : `.dti` (sauver / charger), import `.fui` (Furnace) et `.wav`
 - **Import** des formats `.fur` (Furnace), `.dmf` (DefleMask), `.ftm` / `.dnm` / `.0cc` (FamiTracker), `.mod`, `.xm`, `.it`, `.s3m` et `.mid`
 - **Export** WAV, OGG, MIDI, **modules XM / MOD / IT** (les instruments synthétiques sont rendus en samples)
@@ -42,6 +43,8 @@ FamiTracker, MOD, XM, IT, S3M et MIDI.
 - **Vue arrangement** : le morceau en frise (canaux × orders) avec aperçu des notes, plusieurs **sous-morceaux** par fichier
 - **Automation** en courbes : volume, panoramique, cutoff, envois, réglages d'effets et master sur tout le morceau
 - **Outils de pattern** : interpoler, humaniser, mettre à l'échelle, inverser, étirer / compresser, chercher / remplacer, swing
+- **Gammes et accords** : tonalité du morceau, gamme affichée dans le piano roll, notes hors gamme signalées,
+  accords en un clic ; **générateurs** de mélodies, de rythmes euclidiens, de progressions d'accords et d'arpèges
 - **Métronome**, **boucle** sur une plage d'orders, **décompte** avant l'enregistrement, **quantification** de l'enregistrement MIDI
 - Annuler / refaire partout : notes, instruments, orders, réglages du morceau, samples
 - **Réglages** : sortie audio et latence, raccourcis clavier personnalisables, taille de l'interface (75 à 250 %), thème
@@ -278,6 +281,40 @@ menu MIDI. Chaque note arrive sur son propre canal MIDI et reçoit son propre ca
 
 En mode Record pendant la lecture, tout s'écrit ligne par ligne sur le canal de la note, avec `E880` au
 note off si la note était bendée.
+
+### Sortie MIDI et horloge
+
+Dans le menu **MIDI**, partie **Output**, choisir la sortie (un synthé, une boîte à rythmes, un autre
+logiciel). Dans le **Mixer**, la colonne **MIDI out** donne à chaque canal un canal MIDI (1 à 16) : ses notes
+y sont envoyées, avec la vélocité tirée du volume (la note A-4 du tracker est le la 440 Hz, la note MIDI
+69). La case à côté (**MIDI only**) coupe le son du canal lui-même, pour n'entendre que le synthé externe.
+Les notes jouées au clavier passent aussi.
+
+- **Send MIDI clock** envoie l'horloge (24 impulsions par temps, départ et arrêt) au tempo du morceau.
+- **Follow MIDI clock** fait l'inverse : le départ, l'arrêt et le tempo viennent de l'horloge reçue sur
+  l'entrée MIDI ; le tempo affiché dans le menu est celui mesuré.
+
+## Gammes, accords et générateurs
+
+Dans la fenêtre **Song**, la **tonalité** (note et gamme : majeur, mineur, modes, pentatoniques, blues...)
+sert à tout ce qui suit ; « Chromatique » la désactive.
+
+- Le **piano roll** assombrit les notes hors de la gamme et marque la tonique ; une note hors gamme est
+  entourée de rouge (et en rouge dans le pattern). L'accord qui sonne à la ligne du curseur est affiché en
+  haut (Am, G7...).
+- **Chord** (piano roll) : un clic ajoute tout l'accord construit sur la note dans la gamme (triade,
+  septième, sus2, sus4, quinte) sur ce canal et les suivants (« Voices » s'ajuste). **Snap to scale** cale
+  les nouvelles notes sur la gamme.
+
+**Edit > Generators...** écrit dans le canal du curseur, sur tout le pattern ou sur les lignes de la
+sélection, avec l'instrument courant (une seule étape d'annulation) :
+
+| Onglet | Ce qu'il écrit |
+|---|---|
+| Melody | une mélodie dans la gamme : registre, grille, densité, plus grand saut, contour (libre, montant, descendant, en arche), longueur des notes, graine (la même graine redonne la même mélodie) |
+| Rhythm | un rythme euclidien : n coups répartis au mieux sur des pas, rotation, note, accents |
+| Chords | une progression en chiffres romains (`I V vi IV`, `ii7 V7 I`...) avec modèles : accords plaqués sur plusieurs canaux (avec un enchaînement des voix serré) ou en arpège sur un canal |
+| Arpeggiator | transforme les notes déjà là en arpèges de leurs accords (montant, descendant, aller-retour, aléatoire, sur 1 à 3 octaves) |
 
 ## Arrangement et sous-morceaux
 
@@ -571,7 +608,8 @@ La macro volume avec un point de release donne un vrai « release » (fondu apr�
 - `src/export.cpp`, `src/midifile.cpp` : export OGG, import / export MIDI
 - `src/modexport.*`, `src/vgmexport.*` : export XM / MOD / IT et VGM
 - `src/import*.cpp`, `src/fur_internal.h`, `src/inflate.cpp` : import FUR, DMF, FTM, MOD, S3M, XM, IT (et compression / décompression zlib)
-- `src/midi.*` : entrée clavier MIDI (RtMidi)
+- `src/midi.*` : entrée et sortie MIDI, horloge MIDI (RtMidi)
+- `src/theory.*`, `src/ui_generators.cpp` : gammes, accords et générateurs
 - `src/payload.*`, `src/player.cpp`, `src/keygen_fx.*` : lecteur keygen autonome et sa scène
 - `src/keygen_main.cpp`, `src/filebrowser.*` : l'appli DATRACKARXD Keygen
 - `src/theme.*` : thèmes de couleurs
