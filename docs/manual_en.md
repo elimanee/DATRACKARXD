@@ -12,14 +12,17 @@ C++17 - ImGui + SDL2
 
 - 1 to 32 channels, up to 8 effect columns per channel
 - Instrument types:
-  - **Chip**: pulse (4 duty), 32-step triangle (NES), saw, LFSR noise (normal / metallic / periodic), sine, 32x16 wavetable
+  - **Chip**: pulse (4 duty), 32-step triangle (NES), saw, LFSR noise (normal / metallic / periodic), sine, 32x16 wavetable,
+    256-point **long wave**, drawn or **additive** (32 harmonics)
   - **FM** 4 operators in the style of the Yamaha OPN (Mega Drive): 8 algorithms, feedback, AR/DR/SL/D2R/RR envelopes, presets
-  - **Sample**: `.wav`, `.flac`, `.mp3`, `.ogg` files or microphone recordings, loops (forward, ping-pong, backward), multi-samples per note, fadeout
+  - **Sample**: `.wav`, `.flac`, `.mp3`, `.ogg` files or microphone recordings, loops (forward, ping-pong, backward), multi-samples per note, fadeout,
+    **drum kit** (one sample per note at its own pitch, 16 pads)
   - **Real emulated chips**: **AY-3-8910 / YM2149** (ZX Spectrum, CPC, Atari ST, with the "buzzer" envelope),
     **SN76489** (Master System), **Game Boy** (pulse with sweep, wave, noise), **OPL3** (AdLib, 2 or 4 operators),
     **YM2612** (Mega Drive), **NES 2A03** (pulses, triangle, noise, DPCM), **Konami SCC** (MSX) and **PC Engine**
 - **ADSR envelope**, two **LFOs** (pitch, volume, pulse width, cutoff, panning) and **wavetable morphing** on instruments
-- **Per-channel effects**: bitcrusher, distortion, chorus, 3-band EQ, compressor
+- **Per-channel effects**: bitcrusher, distortion, chorus, 3-band EQ, compressor, phaser, flanger, envelope
+  filter (auto-wah), sidechain; a **limiter** on the master
 - **Sample editor**: selection, zoom, cut / copy / paste, crop, normalize, fades, reverse,
   amplify, resample, pencil drawing, loop on selection, microphone recording
 - **SID-style synthesis** (C64): resonant low-pass / band-pass / high-pass filter on any instrument, ring mod, hard sync, fine pulse width with PWM
@@ -48,7 +51,7 @@ C++17 - ImGui + SDL2
 - Per-channel order list (like Furnace), add / duplicate / clone
 - Per-channel oscilloscope, mute / solo
 - Saving in a `.dtk` text format, export to WAV (full mix or one track per channel), OGG, MIDI, XM, MOD, IT and VGM
-- A built-in keygen demo that loads at startup, `songs/chips.dtk` and `songs/consoles.dtk` to hear the emulated chips
+- A built-in keygen demo that loads at startup, `songs/chips.dtk` and `songs/consoles.dtk` to hear the emulated chips, `songs/sounds.dtk` for the effects and the kit
 
 ## Download
 
@@ -342,6 +345,14 @@ double-clicking a setting resets it to its default.
 | Chorus | rate, depth, mix, feedback |
 | EQ | bass (200 Hz), mids (adjustable frequency), treble (4 kHz), from -24 to +12 dB |
 | Compressor | threshold, ratio, attack, release (with automatic makeup gain) |
+| Phaser | rate, depth, feedback, mix (6 stages) |
+| Flanger | rate, depth (ms), feedback (positive or negative), mix |
+| Envelope filter | sensitivity, base frequency, resonance, type (low-pass, band-pass, high-pass): the channel's level opens the filter (auto-wah) |
+| Sidechain | key channel, amount, attack, release: the channel ducks while the key channel plays (the "pumping" of basses and pads under the kick) |
+
+The master **Limiter** (right column of the Mixer) replaces the output's soft clip: an input gain (0 to
++12 dB), a ceiling (-12 to 0 dB) the sound never goes above, and a release. It looks 1.5 ms ahead, so it
+does not clip the attacks. `songs/sounds.dtk` uses all these effects.
 
 ## Emulated chips
 
@@ -384,6 +395,21 @@ The **Envelope & LFO** section of the instrument editor (all types) adds:
 
 On a wavetable instrument (and the Game Boy wave channel), **Morph** moves the waveform from the
 wavetable to a second wavetable, once, looping or back and forth.
+
+## Drum kit and long waves
+
+On a **Sample** instrument, the **Drum kit** checkbox makes it a kit: every note plays its own sample at the
+sample's original pitch (slides and vibrato still work). The editor shows 16 pads from the chosen note
+(**First pad**): a click plays the pad, a right-click picks a sample of the song or loads a new one. On the
+keyboard, the notes play the pads. In exported XM and IT modules, every pad keeps its pitch.
+
+On a **Chip** instrument with the **Wavetable** waveform, the **Long wave / additive** button replaces the
+32-step table with a 256-point wave (a song wavetable):
+
+- **Draw**: draw the wave with the mouse, **Smooth** softens it;
+- **Harmonics**: 32 bars set the harmonics (additive synthesis), downwards to invert them; switching from
+  Draw to Harmonics computes the drawn wave's harmonics;
+- recipes: Sine, Saw, Square, Triangle, Organ, Bell.
 
 ## Sample editor
 

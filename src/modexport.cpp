@@ -382,22 +382,31 @@ Module buildModule(const Song& song, const ModuleExportOptions& opt) {
       continue;
     }
     if (ins.type == INS_SAMPLE) {
-      std::vector<int> list;  // song sample indexes, in instrument order
-      auto slot = [&](int s) {
+      // Song sample indexes in instrument order; a drum kit pad gets its own
+      // copy, retuned so that its note plays the sample at its own pitch.
+      std::vector<std::pair<int, int>> list;  // (sample, kit note or -1)
+      auto slot = [&](int s, int kitNote) {
         if (s < 0 || s >= (int)song.samples.size() || song.samples[s].data.empty()) return -1;
-        auto f = std::find(list.begin(), list.end(), s);
+        auto f = std::find(list.begin(), list.end(), std::make_pair(s, kitNote));
         if (f != list.end()) return (int)(f - list.begin());
-        if (list.size() >= 16) return 0;
-        list.push_back(s);
+        if (list.size() >= 16) {
+          m.dropped["drum kit pads beyond 16 samples (play the first one)"]++;
+          return 0;
+        }
+        list.push_back({s, kitNote});
         return (int)list.size() - 1;
       };
-      int def = slot(ins.sample);
+      int def = slot(ins.sample, -1);
       for (int k = 0; k < 96; k++) {
         int note = k + 12, s = -1;
-        if (!ins.sampleMap.empty() && note < NOTE_COUNT && ins.sampleMap[note] >= 0) s = slot(ins.sampleMap[note]);
+        if (!ins.sampleMap.empty() && note < NOTE_COUNT && ins.sampleMap[note] >= 0) s = slot(ins.sampleMap[note], ins.kit ? note : -1);
         mi.keymap[k] = std::max(0, s >= 0 ? s : def);
       }
-      for (int s : list) mi.samples.push_back(fromSample(song.samples[s]));
+      for (auto& [s, kitNote] : list) {
+        MSample ms = fromSample(song.samples[s]);
+        if (kitNote >= 0) ms.rate = (int)std::lround(ms.rate * std::pow(2.0, (60 - kitNote) / 12.0));
+        mi.samples.push_back(ms);
+      }
       if (!mi.samples.empty()) sampleVol[i] = mi.samples[std::max(def, 0)].volume;
     } else {
       mi.samples.push_back(bake(song, (int)i, opt.bakeRate, opt.holdSeconds));

@@ -178,9 +178,13 @@ void ChannelFxUnit::clear() {
   mid_.clear();
   high_.clear();
   env_ = 0;
+  std::fill(std::begin(ap_), std::end(ap_), 0.0f);
+  apLast_ = 0;
+  svf_.clear();
+  duck_ = 1;
 }
 
-float ChannelFxUnit::process(float x, const ChannelEffect& e, float sr) {
+float ChannelFxUnit::process(float x, const ChannelEffect& e, float sr, float key) {
   if (e.type != type_) {
     clear();
     type_ = e.type;
@@ -250,7 +254,90 @@ float ChannelFxUnit::process(float x, const ChannelEffect& e, float sr) {
       float gainDb = (over > 0 ? -over * slope : 0) - e.p[0] * slope * 0.5f;  // with half the reduction made up
       return x * std::pow(10.0f, gainDb / 20);
     }
+    case CFX_PHASER: {
+      // Six first-order all-passes swept by a sine LFO, from 200 Hz up to
+      // 5 octaves higher at full depth.
+      phase_ += e.p[0] / sr;
+      if (phase_ >= 1) phase_ -= 1;
+      float lfo = 0.5f + 0.5f * (float)std::sin(phase_ * 2 * 3.14159265358979);
+      float fc = std::min(200.0f * std::pow(2.0f, lfo * e.p[1] * 5.0f), sr * 0.45f);
+      float t = std::tan(3.14159265f * fc / sr);
+      float a = (t - 1) / (t + 1);
+      float y = x + apLast_ * e.p[2];
+      for (float& z : ap_) {
+        float o = a * y + z;
+        z = y - a * o;
+        y = o;
+      }
+      apLast_ = y;
+      return x * (1 - e.p[3]) + y * e.p[3];
+    }
+    case CFX_FLANGER: {
+      int len = (int)(sr * 0.02f);
+      if ((int)buf_.size() != len) {
+        buf_.assign(len, 0.0f);
+        pos_ = 0;
+      }
+      phase_ += e.p[0] / sr;
+      if (phase_ >= 1) phase_ -= 1;
+      float ms = 0.3f + e.p[1] * (0.5f + 0.5f * (float)std::sin(phase_ * 2 * 3.14159265358979));
+      float d = std::clamp(ms * sr / 1000.0f, 1.0f, len - 2.0f);
+      float rp = pos_ - d;
+      if (rp < 0) rp += len;
+      int i0 = (int)rp, i1 = (i0 + 1) % len;
+      float fr = rp - i0;
+      float wet = buf_[i0] + (buf_[i1] - buf_[i0]) * fr;
+      buf_[pos_] = std::clamp(x + wet * e.p[2], -4.0f, 4.0f);
+      pos_ = (pos_ + 1) % len;
+      return x * (1 - e.p[3] * 0.5f) + wet * e.p[3] * 0.5f;
+    }
+    case CFX_ENVFILTER: {
+      // Auto-wah: the level opens the filter up to 6 octaves above the base.
+      float a = std::abs(x);
+      float att = std::exp(-1000.0f / (5.0f * sr)), rel = std::exp(-1000.0f / (80.0f * sr));
+      env_ = a > env_ ? a + (env_ - a) * att : a + (env_ - a) * rel;
+      float fc = std::min(e.p[1] * std::pow(2.0f, std::min(env_ * e.p[0] * 12.0f, 6.0f)), sr * 0.45f);
+      svf_.set(fc, e.p[2], sr);
+      return svf_.process(x, std::clamp((int)std::lround(e.p[3]), 0, 2));
+    }
+    case CFX_SIDECHAIN: {
+      // The key channel's level pushes this channel down (ducking).
+      float target = 1.0f - e.p[1] * std::min(1.0f, key * 4.0f);
+      float att = std::exp(-1000.0f / (std::max(e.p[2], 0.1f) * sr));
+      float rel = std::exp(-1000.0f / (std::max(e.p[3], 1.0f) * sr));
+      duck_ = target < duck_ ? target + (duck_ - target) * att : target + (duck_ - target) * rel;
+      return x * duck_;
+    }
     default:
       return x;
   }
+}
+
+void Limiter::init(int sampleRate) {
+  sr_ = sampleRate;
+  int look = std::max(1, sampleRate * 3 / 2000);  // 1.5 ms
+  bl_.assign(look, 0.0f);
+  br_.assign(look, 0.0f);
+  peak_.assign(look, 0.0f);
+  pos_ = 0;
+  gain_ = 1;
+}
+
+void Limiter::clear() { init(sr_); }
+
+void Limiter::process(float& l, float& r, float ceiling, float releaseMs) {
+  if (bl_.empty()) init(sr_);
+  int n = (int)bl_.size();
+  float inL = l, inR = r;
+  peak_[pos_] = std::max(std::abs(inL), std::abs(inR));
+  float pk = 0;
+  for (float p : peak_) pk = std::max(pk, p);  // the loudest sample coming up
+  float want = pk > ceiling ? ceiling / pk : 1.0f;
+  float rel = std::exp(-1000.0f / (std::max(releaseMs, 1.0f) * sr_));
+  gain_ = want < gain_ ? want : want + (gain_ - want) * rel;
+  l = bl_[pos_] * gain_;
+  r = br_[pos_] * gain_;
+  bl_[pos_] = inL;
+  br_[pos_] = inR;
+  pos_ = (pos_ + 1) % n;
 }

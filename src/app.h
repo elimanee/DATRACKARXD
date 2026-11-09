@@ -178,6 +178,8 @@ class App {
   float recPeak_ = 0;
   void sampleEditor(Sample& smp);
   int loadSampleIntoIns_ = -1;  // instrument that receives the next loaded WAV
+  int loadSampleIntoPad_ = -1;  // drum kit note that receives it (-1 = the instrument's sample)
+  int kitPad_ = -1;             // pad shown in the kit editor
   bool showSong_ = true, showScope_ = true, showEffects_ = false, showKeys_ = false, showAbout_ = false;
   bool layoutDone_ = false;
   bool patternFocused_ = false;
@@ -338,8 +340,10 @@ class App {
   bool macroEditor(Instrument& ins, int type);
   bool fmEditor(Instrument& ins);
   bool sampleInsEditor(Instrument& ins);
+  bool kitPads(Instrument& ins);
   void samplesWindow();
   bool wavetableEditor(Instrument& ins);
+  bool longWaveEditor(Wavetable& w);
   bool sidEditor(Instrument& ins);
   bool modulationEditor(Instrument& ins);
   bool chipEditor(Instrument& ins);

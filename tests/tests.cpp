@@ -20,6 +20,7 @@
 #include <vector>
 
 #include "demo.h"
+#include "effects.h"
 #include "engine.h"
 #include "i18n.h"
 #include "import.h"
@@ -65,7 +66,7 @@ bool loadSong(const std::string& name, Song& s) {
 // --- tests ---
 
 void songFormatRoundTrip() {
-  for (const char* name : {"demo.dtk", "chips.dtk", "consoles.dtk"}) {
+  for (const char* name : {"demo.dtk", "chips.dtk", "consoles.dtk", "sounds.dtk"}) {
     Song a;
     CHECK(loadSong(name, a));
     std::string t1 = a.toText();
@@ -95,7 +96,7 @@ void songFormatRoundTrip() {
 }
 
 void engineOutput() {
-  for (const char* name : {"chips.dtk", "consoles.dtk"}) {
+  for (const char* name : {"chips.dtk", "consoles.dtk", "sounds.dtk"}) {
   Song s;
   CHECK(loadSong(name, s));
   auto render = [&] {
@@ -115,6 +116,106 @@ void engineOutput() {
   }
   CHECK(finite);
   CHECK(peak > 0.01f && peak < 4.0f);
+  }
+}
+
+// Zero-crossing pitch of a mono signal (from the second quarter on).
+double pitchOf(const std::vector<float>& mono) {
+  size_t from = mono.size() / 4;
+  double mean = 0;
+  for (size_t i = from; i < mono.size(); i++) mean += mono[i];
+  mean /= (double)(mono.size() - from);
+  int cross = 0;
+  for (size_t i = from + 1; i < mono.size(); i++) cross += (mono[i - 1] < mean) != (mono[i] < mean);
+  return cross / 2.0 / ((mono.size() - from) / 44100.0);
+}
+
+// v1.2 sounds: the new insert effects, the limiter, drum kits, additive waves.
+void soundsTest() {
+  const float sr = 44100;
+  for (int type = CFX_PHASER; type < CFX_COUNT; type++) {
+    ChannelFxUnit unit;
+    ChannelEffect e = ChannelEffect::make(type);
+    double diff = 0, energy = 0;
+    bool finite = true;
+    for (int i = 0; i < 44100; i++) {
+      float x = 0.5f * (float)std::sin(i * 2 * 3.14159265 * 220 / sr) * (i % 11025 < 4000 ? 1.0f : 0.2f);
+      float y = unit.process(x, e, sr, type == CFX_SIDECHAIN ? 1.0f : 0.0f);
+      finite &= std::isfinite(y);
+      diff += (y - x) * (y - x);
+      energy += x * x;
+    }
+    CHECK(finite);
+    bool changes = diff > energy * 0.01;
+    if (!changes) std::printf("  effect %d does nothing\n", type);
+    CHECK(changes);
+  }
+  // Sidechain: full key -> the channel goes down by Amount.
+  {
+    ChannelFxUnit unit;
+    ChannelEffect e = ChannelEffect::make(CFX_SIDECHAIN);
+    e.p[1] = 0.75f;
+    float y = 0;
+    for (int i = 0; i < 4410; i++) y = unit.process(1.0f, e, sr, 1.0f);
+    CHECK(std::abs(y - 0.25f) < 0.02f);
+    for (int i = 0; i < 44100; i++) y = unit.process(1.0f, e, sr, 0.0f);
+    CHECK(std::abs(y - 1.0f) < 0.02f);
+  }
+  // Limiter: nothing above the ceiling, loud or not.
+  {
+    Limiter lim;
+    lim.init(44100);
+    std::mt19937 rng(5);
+    std::uniform_real_distribution<float> u(-4, 4);
+    float peak = 0;
+    for (int i = 0; i < 44100; i++) {
+      float l = u(rng) * (i % 4000 < 100 ? 1.0f : 0.1f), r = -l;
+      lim.process(l, r, 0.5f, 50);
+      peak = std::max({peak, std::abs(l), std::abs(r)});
+    }
+    CHECK(peak <= 0.5001f);
+  }
+  // Drum kit: a pad plays its sample at the sample's own pitch, whatever the note.
+  {
+    Song s;
+    s.reset(1);
+    Sample smp;
+    smp.rate = 44100;
+    for (int i = 0; i < 44100; i++) smp.data.push_back(0.5f * (float)std::sin(i * 2 * 3.14159265 * 441 / 44100));
+    s.samples.push_back(smp);
+    s.instruments.assign(1, Instrument());
+    Instrument& ins = s.instruments[0];
+    ins.type = INS_SAMPLE;
+    ins.kit = true;
+    ins.sampleMap.assign(NOTE_COUNT, -1);
+    ins.sampleMap[40] = 0;
+    Cell* c = s.cell(0, 0, 0, true);
+    c->note = 40;
+    c->ins = 0;
+    Engine e(s, 44100);
+    e.play(0, 0);
+    std::vector<float> buf(44100), mono(22050);
+    e.render(buf.data(), 22050);
+    for (int i = 0; i < 22050; i++) mono[i] = buf[i * 2];
+    double hz = pitchOf(mono);
+    if (std::abs(hz - 441) > 10) std::printf("  kit pad plays %.1f Hz instead of 441\n", hz);
+    CHECK(std::abs(hz - 441) < 10);
+  }
+  // Additive: a saw recipe gives a normalized wave that survives a save.
+  {
+    Wavetable w;
+    for (int k = 1; k <= MAX_HARMONICS; k++) w.harmonics.push_back(1.0f / k);
+    w.fromHarmonics();
+    float peak = 0;
+    for (float v : w.data) peak = std::max(peak, std::abs(v));
+    CHECK(w.data.size() == 256 && std::abs(peak - 1.0f) < 1e-4f);
+    Song s;
+    s.reset(1);
+    s.wavetables.push_back(w);
+    std::string err;
+    Song back;
+    CHECK(back.fromText(s.toText(), err));
+    CHECK(back.wavetables.size() == 1 && back.wavetables[0].harmonics.size() == (size_t)MAX_HARMONICS);
   }
 }
 
@@ -377,7 +478,7 @@ int main(int argc, char** argv) {
     std::function<void()> run;
   } tests[] = {
       {"song format", songFormatRoundTrip}, {"engine output", engineOutput},     {"zlib", zlibRoundTrip},
-      {"chips and VGM", chipsAndVgm},
+      {"chips and VGM", chipsAndVgm},          {"v1.2 sounds", soundsTest},
       {"module round trip", moduleRoundTrip}, {"importers vs. broken files", importerFuzz},
       {"translations", translations},       {"shortcuts", shortcuts},
   };

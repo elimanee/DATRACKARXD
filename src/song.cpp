@@ -42,6 +42,26 @@ const ChanFxInfo CHAN_FX_INFO[CFX_COUNT] = {
       {"Ratio", 1, 20, 4, "%.1f:1", true, nullptr},
       {"Attack", 0.1f, 100, 5, "%.1f ms", true, nullptr},
       {"Release", 10, 1000, 100, "%.0f ms", true, nullptr}}},
+    {"Phaser", 4,
+     {{"Rate", 0.05f, 5, 0.4f, "%.2f Hz", true, nullptr},
+      {"Depth", 0, 1, 0.7f, "%.2f", false, nullptr},
+      {"Feedback", 0, 0.9f, 0.5f, "%.2f", false, nullptr},
+      {"Mix", 0, 1, 0.5f, "%.2f", false, nullptr}}},
+    {"Flanger", 4,
+     {{"Rate", 0.05f, 5, 0.25f, "%.2f Hz", true, nullptr},
+      {"Depth", 0, 5, 2, "%.2f ms", false, nullptr},
+      {"Feedback", -0.95f, 0.95f, 0.6f, "%+.2f", false, nullptr},
+      {"Mix", 0, 1, 0.5f, "%.2f", false, nullptr}}},
+    {"Envelope filter", 4,
+     {{"Sensitivity", 0, 1, 0.6f, "%.2f", false, nullptr},
+      {"Base", 50, 5000, 300, "%.0f Hz", true, nullptr},
+      {"Resonance", 0.5f, 8, 3, "%.1f", true, nullptr},
+      {"Type", 0, 2, 1, nullptr, false, "Low-pass\0Band-pass\0High-pass\0"}}},
+    {"Sidechain", 4,
+     {{"Key channel", 1, 32, 1, "%.0f", false, nullptr},
+      {"Amount", 0, 1, 0.7f, "%.2f", false, nullptr},
+      {"Attack", 0.1f, 50, 2, "%.1f ms", true, nullptr},
+      {"Release", 10, 1000, 150, "%.0f ms", true, nullptr}}},
 };
 
 ChannelEffect ChannelEffect::make(int type) {
@@ -323,6 +343,19 @@ double cellBend(const Cell& cell) {
   return std::nan("");
 }
 
+void Wavetable::fromHarmonics(int length) {
+  data.assign(std::max(length, 2), 0.0f);
+  float peak = 0;
+  for (size_t i = 0; i < data.size(); i++) {
+    double t = (double)i / data.size(), v = 0;
+    for (size_t k = 0; k < harmonics.size(); k++) v += harmonics[k] * std::sin(2 * 3.14159265358979 * (k + 1) * t);
+    data[i] = (float)v;
+    peak = std::max(peak, std::abs(data[i]));
+  }
+  if (peak > 0)
+    for (float& v : data) v /= peak;
+}
+
 std::string noteName(int note) {
   static const char* names[12] = {"C-", "C#", "D-", "D#", "E-", "F-", "F#", "G-", "G#", "A-", "A#", "B-"};
   if (note == NOTE_OFF) return "OFF";
@@ -466,6 +499,8 @@ void Song::write(std::ostream& f) const {
   f << "fx.delay " << fx.delay << ' ' << fx.delayRows << ' ' << fx.delayFeedback << ' ' << fx.delayLevel << ' ' << fx.pingPong << '\n';
   f << "fx.filter " << fx.filter << ' ' << fx.filterType << ' ' << fx.cutoff << ' ' << fx.resonance << '\n';
   f << "fx.volume " << fx.volume << '\n';
+  if (fx.limiter || fx.limitGain != 0.0f || fx.limitCeiling != -0.3f || fx.limitRelease != 100.0f)
+    f << "fx.limiter " << fx.limiter << ' ' << fx.limitGain << ' ' << fx.limitCeiling << ' ' << fx.limitRelease << '\n';
 
   for (size_t i = 0; i < instruments.size(); i++) {
     const Instrument& ins = instruments[i];
@@ -521,6 +556,7 @@ void Song::write(std::ostream& f) const {
       f << '\n';
     }
     if (ins.fadeout > 0) f << "ins.fadeout " << ins.fadeout << '\n';
+    if (ins.kit) f << "ins.kit " << ins.kit << ' ' << ins.kitBase << '\n';
     const InsEnvelope& env = ins.env;
     if (env.on) f << "ins.adsr " << env.on << ' ' << env.attack << ' ' << env.decay << ' ' << env.sustain << ' ' << env.release << '\n';
     for (int l = 0; l < INS_LFOS; l++) {
@@ -553,6 +589,10 @@ void Song::write(std::ostream& f) const {
   for (size_t i = 0; i < wavetables.size(); i++) {
     f << "wave " << i << ' ' << wavetables[i].data.size();
     for (float v : wavetables[i].data) f << ' ' << v;
+    if (!wavetables[i].harmonics.empty()) {
+      f << "\nwaveharm " << i;
+      for (float h : wavetables[i].harmonics) f << ' ' << h;
+    }
     f << '\n';
   }
 
@@ -727,6 +767,13 @@ bool Song::read(std::istream& f, const std::string& path, std::string& err) {
       s.fx.filterType = clampVal(s.fx.filterType, 0, 2);
       s.fx.cutoff = std::clamp(s.fx.cutoff, 20.0f, 20000.0f);
       s.fx.resonance = std::clamp(s.fx.resonance, 0.0f, 1.0f);
+    } else if (key == "fx.limiter") {
+      int on = 0;
+      ss >> on >> s.fx.limitGain >> s.fx.limitCeiling >> s.fx.limitRelease;
+      s.fx.limiter = on != 0;
+      s.fx.limitGain = std::clamp(s.fx.limitGain, 0.0f, 24.0f);
+      s.fx.limitCeiling = std::clamp(s.fx.limitCeiling, -24.0f, 0.0f);
+      s.fx.limitRelease = std::clamp(s.fx.limitRelease, 1.0f, 2000.0f);
     } else if (key == "fx.volume") {
       ss >> s.fx.volume;
       s.fx.volume = std::clamp(s.fx.volume, 0.0f, 4.0f);
@@ -827,6 +874,11 @@ bool Song::read(std::istream& f, const std::string& path, std::string& err) {
       } else if (key == "ins.songwave") {
         ss >> curIns->songWave;
         curIns->songWave = clampVal(curIns->songWave, -1, MAX_WAVETABLES - 1);
+      } else if (key == "ins.kit") {
+        int on = 0;
+        ss >> on >> curIns->kitBase;
+        curIns->kit = on != 0;
+        curIns->kitBase = clampVal(curIns->kitBase, 0, NOTE_COUNT - 16);
       } else if (key == "ins.samplemap") {
         curIns->sampleMap.assign(NOTE_COUNT, -1);
         for (auto& v : curIns->sampleMap) {
@@ -980,6 +1032,14 @@ bool Song::read(std::istream& f, const std::string& path, std::string& err) {
         v = std::clamp(x, -1.0f, 1.0f);
       }
       s.wavetables.push_back(std::move(w));
+    } else if (key == "waveharm") {
+      int idx = -1;
+      ss >> idx;
+      if (idx < 0 || idx >= (int)s.wavetables.size()) continue;
+      std::vector<float>& h = s.wavetables[idx].harmonics;
+      h.clear();
+      float x;
+      while ((int)h.size() < MAX_HARMONICS && ss >> x) h.push_back(std::clamp(x, -1.0f, 1.0f));
     } else if (key == "order") {
       if ((int)s.orders.size() >= MAX_ORDERS) continue;
       std::array<uint8_t, MAX_CHANNELS> o{};

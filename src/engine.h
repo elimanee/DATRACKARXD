@@ -201,6 +201,8 @@ class Engine {
   Reverb reverb_;
   StereoDelay delay_;
   SVFilter filterL_, filterR_;
+  Limiter limiter_;
+  float keyLevel_[MAX_CHANNELS] = {};  // channel levels for the sidechains
   std::array<std::array<ChannelFxUnit, MAX_CHANNEL_FX>, MAX_CHANNELS> chanFx_;
   std::array<std::unique_ptr<ChipVoice>, MAX_CHANNELS> chips_;  // emulated chip per channel, made on its first note
   bool reverbWasOn_ = false, delayWasOn_ = false, filterWasOn_ = false;

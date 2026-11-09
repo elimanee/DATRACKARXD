@@ -77,6 +77,7 @@ Engine::Engine(const Song& song, int sampleRate) : song_(song), sampleRate_(samp
   for (float& v : volSmooth_) v = 1;
   clearAutomation();
   reverb_.init(sampleRate);
+  limiter_.init(sampleRate);
   delay_.init(sampleRate, 4.0f);
   reset();
 }
@@ -85,6 +86,8 @@ void Engine::clearEffects() {
   reverb_.clear();
   delay_.clear();
   filterL_.clear();
+  limiter_.clear();
+  std::fill(std::begin(keyLevel_), std::end(keyLevel_), 0.0f);
   filterR_.clear();
   for (auto& units : chanFx_)
     for (ChannelFxUnit& u : units) u.clear();
@@ -972,8 +975,10 @@ void Engine::updateChannel(int c) {
       if (s.smp >= 0 && s.smp < (int)song_.samples.size()) gain *= song_.samples[s.smp].volume / 64.0f;
       if (hasVolMacro) gain *= std::clamp(macroVol, 0, 64) / 64.0f;
       s.targetGain = s.active ? gain * s.fade : 0.0f;
+      // A drum kit plays each pad at its sample's own pitch (slides still move it).
+      double p = ins && ins->kit && s.note >= 0 ? 60.0 + (pitch - s.note) : pitch;
       if (s.smp >= 0 && s.smp < (int)song_.samples.size())
-        s.smpStep = song_.samples[s.smp].rate * std::pow(2.0, (pitch - 60.0) / 12.0) / sampleRate_;
+        s.smpStep = song_.samples[s.smp].rate * std::pow(2.0, (p - 60.0) / 12.0) / sampleRate_;
       break;
     }
     default: {
@@ -1152,6 +1157,7 @@ float Engine::playSample(ChannelState& s) {
 
 void Engine::render(float* out, int frames) {
   const float smooth = 1.0f - std::exp(-1.0f / (0.002f * sampleRate_));  // ~2 ms
+  const float keyRelease = std::exp(-1.0f / (0.03f * sampleRate_));  // ~30 ms
   const float dcR = 1.0f - 20.0f / sampleRate_;
   int nch = song_.channelCount();
   const MasterFx& fx = song_.fx;
@@ -1217,8 +1223,10 @@ void Engine::render(float* out, int frames) {
       for (size_t k = 0; k < effects.size() && k < (size_t)MAX_CHANNEL_FX; k++) {
         if (!effects[k].on) continue;
         const float* a = autoFx_[c][k];
+        float key = 0;
+        if (effects[k].type == CFX_SIDECHAIN) key = keyLevel_[std::clamp((int)std::lround(effects[k].p[0]) - 1, 0, MAX_CHANNELS - 1)];
         if (std::isnan(a[0]) && std::isnan(a[1]) && std::isnan(a[2]) && std::isnan(a[3])) {
-          v = chanFx_[c][k].process(v, effects[k], (float)sampleRate_);
+          v = chanFx_[c][k].process(v, effects[k], (float)sampleRate_, key);
         } else {
           // Automated parameters, mapped onto each parameter's range.
           ChannelEffect e = effects[k];
@@ -1229,13 +1237,15 @@ void Engine::render(float* out, int frames) {
             e.p[i] = prm.log && prm.min > 0 ? prm.min * std::pow(prm.max / prm.min, a[i]) : prm.min + (prm.max - prm.min) * a[i];
             if (prm.choices) e.p[i] = std::round(e.p[i]);
           }
-          v = chanFx_[c][k].process(v, e, (float)sampleRate_);
+          v = chanFx_[c][k].process(v, e, (float)sampleRate_, key);
         }
       }
       float autoVol = std::isnan(autoVol_[c]) ? 1.0f : autoVol_[c];
       volSmooth_[c] += (autoVol - volSmooth_[c]) * smooth;
       v *= song_.channels[c].mix * volSmooth_[c];
       s.scope[scopePos_] = v;
+      // Level follower for the sidechains keyed by this channel.
+      keyLevel_[c] = std::max(std::abs(v), keyLevel_[c] * keyRelease);
       const ChannelInfo& info = song_.channels[c];
       if (info.muted) continue;
       float pl = s.panL, pr = s.panR;
@@ -1292,8 +1302,15 @@ void Engine::render(float* out, int frames) {
     dcPrevR_ = r;
     dcL_ = hl;
     dcR_ = hr;
-    l = std::tanh(hl * 0.35f);
-    r = std::tanh(hr * 0.35f);
+    if (fx.limiter) {
+      float g = 0.35f * std::pow(10.0f, std::clamp(fx.limitGain, 0.0f, 24.0f) / 20);
+      l = hl * g;
+      r = hr * g;
+      limiter_.process(l, r, std::pow(10.0f, std::clamp(fx.limitCeiling, -24.0f, 0.0f) / 20), fx.limitRelease);
+    } else {
+      l = std::tanh(hl * 0.35f);
+      r = std::tanh(hr * 0.35f);
+    }
     master_[scopePos_] = (l + r) * 0.5f;
     scopePos_ = (scopePos_ + 1) % SCOPE_LEN;
     out[i * 2] = l;
