@@ -6,6 +6,7 @@
 #include <cstdio>
 
 #include "app.h"
+#include "theory.h"
 #include "i18n.h"
 #include "theme.h"
 
@@ -1007,7 +1008,9 @@ void App::patternWindow() {
       }
 
       std::string nn = cl.note == NOTE_EMPTY ? "..." : noteName(cl.note);
-      dl->AddText(ImVec2(x, y + 1), cl.note == NOTE_EMPTY ? TH.empty : cl.note == NOTE_OFF ? TH.noteOff : TH.note, nn.c_str());
+      bool outOfKey = cl.note >= 0 && song_.keyScale > 0 && !inScale(cl.note, song_.keyRoot, song_.keyScale);
+      dl->AddText(ImVec2(x, y + 1), cl.note == NOTE_EMPTY ? TH.empty : cl.note == NOTE_OFF ? TH.noteOff : outOfKey ? IM_COL32(255, 110, 90, 255) : TH.note,
+                  nn.c_str());
       hex2(buf, cl.ins);
       dl->AddText(ImVec2(x + 4 * cw, y + 1), cl.ins < 0 ? TH.empty : TH.ins, buf);
       hex2(buf, cl.vol);

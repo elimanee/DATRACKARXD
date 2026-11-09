@@ -28,7 +28,8 @@ C++17 - ImGui + SDL2
 - **SID-style synthesis** (C64): resonant low-pass / band-pass / high-pass filter on any instrument, ring mod, hard sync, fine pulse width with PWM
 - Furnace-style **macros** on all instruments: volume, arpeggio (relative or fixed note), duty, waveform, pitch, cutoff (with loop `|` and release `/`)
 - **Mixer**: reverb, tempo-synced ping-pong delay, master filter, per-channel sends
-- **MIDI keyboard**: play, play chords and record from a MIDI keyboard (velocity included)
+- **MIDI keyboard**: play, play chords and record from a MIDI keyboard (velocity included);
+  **MIDI out** to external synths, **MIDI clock** sent or followed
 - **Instrument presets**: `.dti` (save / load), import of `.fui` (Furnace) and `.wav`
 - **Import** of `.fur` (Furnace), `.dmf` (DefleMask), `.ftm` / `.dnm` / `.0cc` (FamiTracker), `.mod`, `.xm`, `.it`, `.s3m` and `.mid` files
 - **Export** to WAV, OGG, MIDI, **XM / MOD / IT modules** (synthesized instruments are rendered to samples)
@@ -42,6 +43,8 @@ C++17 - ImGui + SDL2
 - **Arrangement view**: the song as a timeline (channels x orders) with a note preview, several **subsongs** per file
 - Curve-based **automation**: volume, panning, cutoff, sends, effect settings and master over the whole song
 - **Pattern tools**: interpolate, humanize, scale, reverse, expand / shrink, find / replace, swing
+- **Scales and chords**: the song's key, the scale shown in the piano roll, notes outside it marked,
+  chords in one click; **generators** for melodies, euclidean rhythms, chord progressions and arpeggios
 - **Metronome**, **loop** over a range of orders, **count-in** before recording, **quantization** of MIDI recording
 - Undo / redo everywhere: notes, instruments, orders, song settings, samples
 - **Settings**: audio output and latency, custom keyboard shortcuts, interface size (75 to 250 %), theme
@@ -275,6 +278,40 @@ MIDI menu. Each note arrives on its own MIDI channel and gets its own tracker ch
 
 In Record mode during playback, everything is written row by row on the note's channel, with `E880` at
 the note off if the note was bent.
+
+### MIDI out and clock
+
+In the **MIDI** menu, **Output** part, pick the output (a synth, a drum machine, another program). In the
+**Mixer**, the **MIDI out** column gives each channel a MIDI channel (1 to 16): its notes are sent there,
+with the velocity taken from the volume (the tracker's A-4 is A 440 Hz, MIDI note 69). The box next to it
+(**MIDI only**) mutes the channel's own sound, so only the external synth is heard. Notes played on the
+keyboard go out too.
+
+- **Send MIDI clock** sends the clock (24 pulses per beat, start and stop) at the song's tempo.
+- **Follow MIDI clock** does the opposite: start, stop and tempo come from the clock received on the MIDI
+  input; the tempo shown in the menu is the measured one.
+
+## Scales, chords and generators
+
+In the **Song** window, the **key** (note and scale: major, minor, modes, pentatonics, blues...) is used
+by everything below; "Chromatic" turns it off.
+
+- The **piano roll** darkens the notes outside the scale and marks the tonic; a note outside the scale
+  gets a red outline (and is red in the pattern). The chord sounding at the cursor row is shown at the
+  top (Am, G7...).
+- **Chord** (piano roll): a click adds the whole chord built on the note in the scale (triad, seventh,
+  sus2, sus4, power) on this channel and the next ones ("Voices" adjusts). **Snap to scale** puts new
+  notes on the scale.
+
+**Edit > Generators...** writes into the cursor's channel, over the whole pattern or the selection's rows,
+with the current instrument (one undo step):
+
+| Tab | What it writes |
+|---|---|
+| Melody | a melody in the scale: range, grid, density, largest leap, contour (free, rising, falling, arch), note length, seed (the same seed gives the same melody) |
+| Rhythm | a euclidean rhythm: n hits spread as evenly as possible over the steps, rotation, note, accents |
+| Chords | a progression in roman numerals (`I V vi IV`, `ii7 V7 I`...) with presets: block chords over several channels (with close voice leading) or an arpeggio on one channel |
+| Arpeggiator | turns the notes already there into arpeggios of their chords (up, down, up-down, random, over 1 to 3 octaves) |
 
 ## Arrangement and subsongs
 
@@ -567,7 +604,8 @@ A volume macro with a release point gives a real "release" (fade-out after the n
 - `src/export.cpp`, `src/midifile.cpp`: OGG export, MIDI import / export
 - `src/modexport.*`, `src/vgmexport.*`: XM / MOD / IT and VGM export
 - `src/import*.cpp`, `src/fur_internal.h`, `src/inflate.cpp`: FUR, DMF, FTM, MOD, S3M, XM, IT import (and zlib compression / decompression)
-- `src/midi.*`: MIDI keyboard input (RtMidi)
+- `src/midi.*`: MIDI input and output, MIDI clock (RtMidi)
+- `src/theory.*`, `src/ui_generators.cpp`: scales, chords and generators
 - `src/payload.*`, `src/player.cpp`, `src/keygen_fx.*`: standalone keygen player and its scene
 - `src/keygen_main.cpp`, `src/filebrowser.*`: the DATRACKARXD Keygen app
 - `src/theme.*`: color themes

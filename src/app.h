@@ -14,6 +14,7 @@
 #include "recorder.h"
 #include "shortcuts.h"
 #include "song.h"
+#include "theory.h"
 
 struct KeyEvent {
   SDL_Scancode sc;
@@ -108,6 +109,14 @@ class App {
   std::vector<KeyEvent> keys_;
   std::map<SDL_Scancode, int> jamming_;  // held key -> channel
 
+  // MIDI out (notes and clock) and the clock in.
+  MidiOutput midiOutput_;
+  std::unique_ptr<MidiClockSender> midiClock_;
+  std::string midiOutPort_;
+  std::vector<std::string> midiOutPorts_;
+  bool midiClockOut_ = false, midiClockIn_ = false;
+  std::vector<double> clockTimes_;  // arrival of the last clock pulses
+  float clockBpm_ = 0;
   // MIDI keyboard.
   MidiInput midi_;
   std::string midiPort_;               // port to reopen at startup
@@ -193,6 +202,8 @@ class App {
   bool prGhosts_ = true;
   int prLength_ = 4;                   // length of new notes, in rows
   int prVoices_ = 1;                   // channels used for chords (1 = this channel only)
+  int prChord_ = 0;                    // ChordType added on click (0 = single notes)
+  bool prSnap_ = false;                // new notes snap to the song's scale
   int prLane_ = 0;                     // lane under the notes: 0 volume, 1 pitch bend, 2 pressure, 3 slide
   int prBendView_ = 2;                 // pitch lane height, in semitones each way
   bool prMpe_ = false;                 // MPE editing: dragging a note bends it
@@ -229,6 +240,21 @@ class App {
   char playerLogo_[64] = "DATRACKARXD";
   char playerTitle_[128] = {};
   char playerScroll_[2048] = {};
+
+  // Generators window.
+  struct GeneratorSettings {
+    bool replace = true;
+    MelodyParams melody;
+    int steps = 16, hits = 5, rotate = 0, stepRows = 1, rhythmNote = 48, accent = 0;
+    char progression[128] = "I V vi IV";
+    int rowsPerChord = 16, voices = 3, chordOctave = 48, chordStyle = 0;
+    bool sevenths = false;
+    int arpChord = CHORD_TRIAD, arpPattern = 0, arpStep = 1, arpOctaves = 1;
+  } gen_;
+  bool showGenerators_ = false;
+  void generatorsWindow();
+  void generatorRange(int& ch, int& row0, int& row1) const;
+  void writeGenerated(int ch, int row0, int row1, const std::vector<GenNote>& notes, bool replace);
 
   // Settings (Settings window, saved in datrackarxd.cfg).
   std::string audioDevice_;  // "" = system default
@@ -276,6 +302,7 @@ class App {
   void afterSongReplaced();
   void midiMenu();
   void midiEvents();
+  void midiOutFrame();
   // id tells held notes apart (the key, or key + 256 * channel with MPE);
   // returns the song channel playing the note, or -1.
   int midiNoteOn(int key, int velocity, int id = -1);

@@ -30,7 +30,7 @@ static void audioCallback(void* user, Uint8* stream, int len) {
   engine->render(reinterpret_cast<float*>(stream), len / (int)(2 * sizeof(float)));
 }
 
-App::App() {
+App::App() : midiClock_(std::make_unique<MidiClockSender>(midiOutput_)) {
   loadDemoSong(song_);
   metaShadow_ = metaSnapshot();
   engine_ = std::make_unique<Engine>(song_, 44100);
@@ -71,6 +71,9 @@ void App::loadSettings() {
       if (k == "metrovol") metronomeVol_ = std::clamp(std::stof(v), 0.0f, 1.0f);
       if (k == "countin") countInBars_ = std::clamp(std::stoi(v), 0, 4);
       if (k == "quantize") midiQuantize_ = std::clamp(std::stoi(v), 0, 3);
+      if (k == "midiout") midiOutPort_ = v;
+      if (k == "midiclockout") midiClockOut_ = std::stoi(v) != 0;
+      if (k == "midiclockin") midiClockIn_ = std::stoi(v) != 0;
       if (k == "audiodevice") audioDevice_ = v;
       if (k == "audiobuffer") audioBuffer_ = std::clamp(std::stoi(v), 64, 8192);
       if (k == "uiscale") uiScale_ = std::clamp(std::stof(v), 0.5f, 3.0f);
@@ -92,6 +95,8 @@ void App::loadSettings() {
   fontDirty_ = true;
   // The keyboard may be unplugged: keep the name so it reconnects next time.
   if (!midiPort_.empty() && midi_.open(midiPort_)) setStatus(std::string(T("MIDI input: ")) + midiPort_);
+  if (!midiOutPort_.empty()) midiOutput_.open(midiOutPort_);
+  midi_.receiveClock(midiClockIn_);
 }
 
 void App::saveSettings() {
@@ -109,6 +114,9 @@ void App::saveSettings() {
   f << "metrovol=" << metronomeVol_ << "\n";
   f << "countin=" << countInBars_ << "\n";
   f << "quantize=" << midiQuantize_ << "\n";
+  f << "midiout=" << midiOutPort_ << "\n";
+  f << "midiclockout=" << (midiClockOut_ ? 1 : 0) << "\n";
+  f << "midiclockin=" << (midiClockIn_ ? 1 : 0) << "\n";
   f << "audiodevice=" << audioDevice_ << "\n";
   f << "audiobuffer=" << audioBuffer_ << "\n";
   f << "uiscale=" << uiScale_ << "\n";
@@ -652,6 +660,8 @@ void App::menuBar() {
     if (ImGui::MenuItem(T("Transpose +12"), keyLabel(Action::TransposeOctUp).c_str())) transpose(12);
     if (ImGui::MenuItem(T("Transpose -12"), keyLabel(Action::TransposeOctDown).c_str())) transpose(-12);
     ImGui::Separator();
+    if (ImGui::MenuItem(T("Generators..."))) showGenerators_ = true;
+    ImGui::Separator();
     ImGui::TextDisabled("%s", T("Selection (or the channel)"));
     selectionToolsMenu();
     ImGui::EndMenu();
@@ -666,6 +676,7 @@ void App::menuBar() {
     ImGui::MenuItem(T("Samples"), nullptr, &showSamples_);
     ImGui::MenuItem(T("Mixer"), nullptr, &showMixer_);
     ImGui::MenuItem(T("Channel FX"), nullptr, &showChanFx_);
+    ImGui::MenuItem(T("Generators"), nullptr, &showGenerators_);
     ImGui::MenuItem(T("Arrangement"), nullptr, &showArrangement_);
     ImGui::MenuItem(T("Oscilloscope"), nullptr, &showScope_);
     ImGui::MenuItem(T("Keygen scroller"), nullptr, &showScroller_);
@@ -770,11 +781,74 @@ void App::midiMenu() {
   ImGui::SetNextItemWidth(S(120));
   ImGui::SliderInt(T("MPE pitch range"), &midiMpeRange_, 1, 96, T("%d semitones"));
   ImGui::EndDisabled();
+  if (ImGui::MenuItem(T("Follow MIDI clock"), nullptr, &midiClockIn_)) {
+    midi_.receiveClock(midiClockIn_);
+    clockTimes_.clear();
+    if (!midiClockIn_) engine_->tempoScale = 1.0f;
+  }
+  if (ImGui::IsItemHovered())
+    ImGui::SetTooltip("%s", T("Start, stop and tempo come from the MIDI input's clock (a drum machine, a DAW...)."));
+  if (midiClockIn_ && clockBpm_ > 0) ImGui::TextDisabled(T("External tempo: %.1f BPM"), clockBpm_);
+
+  ImGui::Separator();
+  ImGui::TextDisabled("%s", T("Output"));
+  if (ImGui::IsWindowAppearing()) midiOutPorts_ = midiOutput_.ports();
+  if (ImGui::MenuItem(T("None##out"), nullptr, !midiOutput_.isOpen())) {
+    midiOutput_.close();
+    midiOutPort_.clear();
+  }
+  for (const std::string& p : midiOutPorts_) {
+    std::string label = p + "##out";
+    if (ImGui::MenuItem(label.c_str(), nullptr, midiOutput_.portName() == p) && midiOutput_.portName() != p) {
+      if (midiOutput_.open(p)) {
+        midiOutPort_ = p;
+        setStatus(std::string(T("MIDI output: ")) + p);
+      } else {
+        setStatus(midiOutput_.error());
+      }
+    }
+  }
+  if (midiOutPorts_.empty())
+    ImGui::TextDisabled("%s", midiOutput_.error().empty() ? T("No MIDI output found") : midiOutput_.error().c_str());
+  ImGui::MenuItem(T("Send MIDI clock"), nullptr, &midiClockOut_);
+  if (ImGui::IsItemHovered()) ImGui::SetTooltip("%s", T("24 pulses per beat, with start and stop, to the output."));
+  ImGui::TextDisabled("%s", T("Mixer > MIDI out: which channels send their notes."));
   ImGui::EndMenu();
+}
+
+// MIDI out: the notes the engine played this frame, and the clock's tempo.
+void App::midiOutFrame() {
+  engine_->sendMidi = midiOutput_.isOpen();
+  std::vector<uint8_t> bytes = engine_->takeMidi();
+  for (size_t i = 0; i + 2 < bytes.size(); i += 3) midiOutput_.send(&bytes[i], 3);
+  midiClock_->update(midiClockOut_ && midiOutput_.isOpen(), engine_->playing(), engine_->bpm() * engine_->tempoScale);
 }
 
 void App::midiEvents() {
   for (const MidiMessage& m : midi_.drain()) {
+    if (m.status >= 0xF8) {
+      // MIDI clock: 24 pulses per beat give the tempo; start, continue, stop.
+      if (!midiClockIn_) continue;
+      if (m.status == 0xF8) {
+        clockTimes_.push_back(m.time);
+        if (clockTimes_.size() > 25) clockTimes_.erase(clockTimes_.begin());
+        if (clockTimes_.size() == 25) {
+          double beat = clockTimes_.back() - clockTimes_.front();  // 24 intervals
+          if (beat > 0.05 && beat < 4) {
+            clockBpm_ = (float)(60.0 / beat);
+            float own = engine_->bpm();
+            if (own > 0) engine_->tempoScale = std::clamp(clockBpm_ / own, 0.25f, 4.0f);
+          }
+        }
+      } else if (m.status == 0xFA) {
+        engine_->play(0, 0);
+      } else if (m.status == 0xFB) {
+        engine_->play(curOrder_, curRow_);
+      } else if (m.status == 0xFC) {
+        engine_->stop();
+      }
+      continue;
+    }
     int type = m.status & 0xf0, mch = m.status & 15;
     int id = midiMpe_ ? m.data1 + 256 * mch : m.data1;
     if (type == 0x90 && m.data2 > 0) {
@@ -1067,6 +1141,7 @@ void App::handleKeys() {
 
 void App::frame() {
   midiEvents();
+  midiOutFrame();
   if (engine_->playing() && follow_) setCursorFromPlayback();
 
   menuBar();
@@ -1094,6 +1169,7 @@ void App::frame() {
   if (showEffects_) effectsHelp();
   if (showKeys_) keysHelp();
   if (showAbout_) aboutWindow();
+  if (showGenerators_) generatorsWindow();
   if (showSettings_) settingsWindow();
   else capturing_ = -1;
   if (showManual_) manualWindow();

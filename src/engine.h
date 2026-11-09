@@ -122,6 +122,17 @@ class Engine {
   // countIn: rows of metronome clicks before the song starts (recording).
   void play(int order, int row, int countIn = 0);
   void stop();
+  // MIDI out: note messages of the channels that have a MIDI channel, kept
+  // while sendMidi is on, taken by the app to send.
+  bool sendMidi = false;
+  std::vector<uint8_t> takeMidi() {
+    std::vector<uint8_t> out;
+    out.swap(midiOut_);
+    return out;
+  }
+  // Follows an external tempo: ticks run this much faster (MIDI clock in).
+  float tempoScale = 1.0f;
+  float bpm() const;  // the song's tempo now, before tempoScale
   bool playing() const { return playing_; }
   void reset();  // silence everything
 
@@ -203,6 +214,9 @@ class Engine {
   SVFilter filterL_, filterR_;
   Limiter limiter_;
   float keyLevel_[MAX_CHANNELS] = {};  // channel levels for the sidechains
+  std::vector<uint8_t> midiOut_;
+  int midiNote_[MAX_CHANNELS];  // note sounding on the channel's MIDI channel, -1 = none
+  void midiNote(int c, int note, int velocity);  // note -1 = note off
   std::array<std::array<ChannelFxUnit, MAX_CHANNEL_FX>, MAX_CHANNELS> chanFx_;
   std::array<std::unique_ptr<ChipVoice>, MAX_CHANNELS> chips_;  // emulated chip per channel, made on its first note
   bool reverbWasOn_ = false, delayWasOn_ = false, filterWasOn_ = false;

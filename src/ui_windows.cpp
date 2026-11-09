@@ -14,6 +14,7 @@
 #include "i18n.h"
 #include "player.h"
 #include "theme.h"
+#include "theory.h"
 
 // A combo item list ("A\0B\0") held in a variable, translated as a whole.
 static const char* trChoices(const char* items) {
@@ -206,6 +207,28 @@ void App::songWindow() {
   avgSpeed = song_.speeds.empty() ? 6 : avgSpeed / song_.speeds.size();
   float bpm = song_.tickRate * 60.0f / (std::max(avgSpeed, 1.0f) * std::max(song_.highlight1, 1));
   ImGui::TextDisabled(T("= %.1f BPM (one beat = Highlight 1 rows)"), bpm);
+  ImGui::SetNextItemWidth(S(60));
+  if (ImGui::BeginCombo("##keyroot", KEY_NAMES[std::clamp(song_.keyRoot, 0, 11)])) {
+    for (int k = 0; k < 12; k++)
+      if (ImGui::Selectable(KEY_NAMES[k], k == song_.keyRoot)) {
+        song_.keyRoot = k;
+        changed = true;
+      }
+    ImGui::EndCombo();
+  }
+  ImGui::SameLine();
+  ImGui::SetNextItemWidth(S(150));
+  if (ImGui::BeginCombo(T("Key"), T(SCALES[std::clamp(song_.keyScale, 0, SCALE_COUNT - 1)].name))) {
+    for (int k = 0; k < SCALE_COUNT; k++)
+      if (ImGui::Selectable(T(SCALES[k].name), k == song_.keyScale)) {
+        song_.keyScale = k;
+        changed = true;
+      }
+    ImGui::EndCombo();
+  }
+  if (ImGui::IsItemHovered())
+    ImGui::SetTooltip("%s", T("The song's scale: the piano roll shows it, marks the notes outside it,\n"
+                              "builds its chords on it, and the generators use it."));
 
   ImGui::Separator();
   int nch = song_.channelCount();
@@ -321,13 +344,14 @@ void App::mixerWindow() {
   }
 
   ImGui::Separator();
-  if (ImGui::BeginTable("sends", 7, ImGuiTableFlags_SizingStretchSame | ImGuiTableFlags_RowBg)) {
+  if (ImGui::BeginTable("sends", 8, ImGuiTableFlags_SizingStretchSame | ImGuiTableFlags_RowBg)) {
     ImGui::TableSetupColumn(T("Channel"));
     ImGui::TableSetupColumn(T("Mix"));
     ImGui::TableSetupColumn(T("Pan"));
     ImGui::TableSetupColumn(T("Reverb send"));
     ImGui::TableSetupColumn(T("Delay send"));
     ImGui::TableSetupColumn(T("Insert FX"), ImGuiTableColumnFlags_WidthFixed);
+    ImGui::TableSetupColumn(T("MIDI out"), ImGuiTableColumnFlags_WidthFixed);
     ImGui::TableSetupColumn(T("Mute"), ImGuiTableColumnFlags_WidthFixed);
     ImGui::TableHeadersRow();
     for (int c = 0; c < song_.channelCount(); c++) {
@@ -365,6 +389,26 @@ void App::mixerWindow() {
           list += std::string(T(CHAN_FX_INFO[e.type].name)) + (e.on ? "\n" : T(" (off)\n"));
         ImGui::SetTooltip("%s", list.c_str());
       }
+      ImGui::TableNextColumn();
+      // The channel's notes to an external synth (MIDI menu > Output).
+      char midiLabel[16];
+      std::snprintf(midiLabel, sizeof(midiLabel), info.midiOut ? "%d" : "-", info.midiOut);
+      ImGui::SetNextItemWidth(S(48));
+      if (ImGui::BeginCombo("##midi", midiLabel, ImGuiComboFlags_NoArrowButton)) {
+        if (ImGui::Selectable(T("Off"), info.midiOut == 0)) info.midiOut = 0, changed = true;
+        for (int k = 1; k <= 16; k++) {
+          char b[8];
+          std::snprintf(b, sizeof(b), "%d", k);
+          if (ImGui::Selectable(b, info.midiOut == k)) info.midiOut = k, changed = true;
+        }
+        ImGui::EndCombo();
+      }
+      if (ImGui::IsItemHovered()) ImGui::SetTooltip("%s", T("MIDI channel the notes are sent to (MIDI menu > Output)."));
+      ImGui::SameLine();
+      ImGui::BeginDisabled(info.midiOut == 0);
+      changed |= ImGui::Checkbox("##midionly", &info.midiOnly);
+      ImGui::EndDisabled();
+      if (ImGui::IsItemHovered()) ImGui::SetTooltip("%s", T("MIDI only: the channel's own sound is muted."));
       ImGui::TableNextColumn();
       ImGui::Checkbox("##m", &info.muted);  // like the pattern header: not an edit
       ImGui::PopID();
