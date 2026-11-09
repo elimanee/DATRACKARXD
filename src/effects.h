@@ -76,7 +76,8 @@ struct Biquad {
 class ChannelFxUnit {
  public:
   void clear();
-  float process(float x, const ChannelEffect& e, float sampleRate);
+  // key: the level of the sidechain's key channel (0..1).
+  float process(float x, const ChannelEffect& e, float sampleRate, float key = 0);
 
  private:
   int type_ = -1;
@@ -92,6 +93,26 @@ class ChannelFxUnit {
   // EQ, with the settings its coefficients were made for.
   Biquad low_, mid_, high_;
   float eqFor_[4] = {-1e9f, -1e9f, -1e9f, -1e9f};
-  // Compressor level follower.
+  // Compressor and envelope filter level follower.
   float env_ = 0;
+  // Phaser all-pass stages and feedback.
+  float ap_[6] = {}, apLast_ = 0;
+  // Envelope filter.
+  SVFilter svf_;
+  // Sidechain gain.
+  float duck_ = 1;
+};
+
+// Peak limiter with a short look-ahead, on the stereo master.
+class Limiter {
+ public:
+  void init(int sampleRate);
+  void clear();
+  void process(float& l, float& r, float ceiling, float releaseMs);
+
+ private:
+  int sr_ = 44100;
+  std::vector<float> bl_, br_, peak_;
+  int pos_ = 0;
+  float gain_ = 1;
 };

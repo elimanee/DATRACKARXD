@@ -493,8 +493,17 @@ void App::fileDialog() {
         pushFullUndo();
         song_.samples.push_back(std::move(smp));
         curSample_ = (int)song_.samples.size() - 1;
-        if (loadSampleIntoIns_ >= 0 && loadSampleIntoIns_ < (int)song_.instruments.size())
-          song_.instruments[loadSampleIntoIns_].sample = curSample_;
+        if (loadSampleIntoIns_ >= 0 && loadSampleIntoIns_ < (int)song_.instruments.size()) {
+          Instrument& ins = song_.instruments[loadSampleIntoIns_];
+          if (loadSampleIntoPad_ >= 0 && loadSampleIntoPad_ < NOTE_COUNT) {
+            if (ins.sampleMap.empty()) ins.sampleMap.assign(NOTE_COUNT, -1);
+            ins.sampleMap[loadSampleIntoPad_] = (int16_t)curSample_;
+            if (ins.sample < 0) ins.sample = curSample_;
+          } else {
+            ins.sample = curSample_;
+          }
+        }
+        loadSampleIntoPad_ = -1;
         dirty_ = true;
         setStatus(std::string(T("Loaded sample ")) + path);
         cancel = true;

@@ -172,6 +172,120 @@ void App::instrumentsWindow() {
   ImGui::End();
 }
 
+// A song wavetable: drawn with the mouse, or built from harmonic levels.
+bool App::longWaveEditor(Wavetable& w) {
+  bool changed = false;
+  if (w.data.empty()) w.data.assign(256, 0.0f);
+  int mode = w.harmonics.empty() ? 0 : 1;
+  if (ImGui::RadioButton(T("Draw"), mode == 0) && mode != 0) {
+    w.harmonics.clear();
+    changed = true;
+  }
+  ImGui::SameLine();
+  if (ImGui::RadioButton(T("Harmonics"), mode == 1) && mode != 1) {
+    // The drawn wave's own harmonics (sine parts), as a starting point.
+    w.harmonics.assign(MAX_HARMONICS, 0.0f);
+    float top = 0;
+    for (int k = 0; k < MAX_HARMONICS; k++) {
+      double sum = 0;
+      for (size_t i = 0; i < w.data.size(); i++) sum += w.data[i] * std::sin(2 * 3.14159265358979 * (k + 1) * i / w.data.size());
+      w.harmonics[k] = (float)(2 * sum / w.data.size());
+      top = std::max(top, std::abs(w.harmonics[k]));
+    }
+    for (float& h : w.harmonics) h = top > 0 ? h / top : 0;
+    if (top == 0) w.harmonics[0] = 1;
+    w.fromHarmonics();
+    changed = true;
+  }
+  mode = w.harmonics.empty() ? 0 : 1;
+  ImGui::SameLine();
+  ImGui::TextDisabled("%d %s", (int)w.data.size(), T("points"));
+
+  ImDrawList* dl = ImGui::GetWindowDrawList();
+  float width = std::max(ImGui::GetContentRegionAvail().x, S(120));
+  float height = S(110);
+  ImVec2 p0 = ImGui::GetCursorScreenPos(), p1(p0.x + width, p0.y + height);
+  ImGui::InvisibleButton("##longwave", ImVec2(width, height));
+  bool active = ImGui::IsItemActive();
+  ImVec2 m = ImGui::GetIO().MousePos;
+  dl->AddRectFilled(p0, p1, IM_COL32(15, 15, 25, 255));
+  float mid = p0.y + height / 2;
+  dl->AddLine(ImVec2(p0.x, mid), ImVec2(p1.x, mid), IM_COL32(60, 60, 80, 255));
+  static int lastIdx = -1;
+  static float lastVal = 0;
+  if (mode == 0) {
+    int n = (int)w.data.size();
+    if (active) {
+      int idx = std::clamp((int)((m.x - p0.x) / width * n), 0, n - 1);
+      float val = std::clamp(1.0f - (m.y - p0.y) / height * 2.0f, -1.0f, 1.0f);
+      if (lastIdx < 0 || ImGui::IsItemActivated()) lastIdx = idx, lastVal = val;
+      // Fill the points between the last mouse position and this one.
+      int a = std::min(lastIdx, idx), b = std::max(lastIdx, idx);
+      for (int i = a; i <= b; i++) {
+        float t = b == a ? 1.0f : (float)(i - lastIdx) / (idx - lastIdx);
+        w.data[i] = lastVal + (val - lastVal) * std::clamp(t, 0.0f, 1.0f);
+      }
+      lastIdx = idx;
+      lastVal = val;
+      changed = true;
+    } else {
+      lastIdx = -1;
+    }
+  } else {
+    int n = (int)w.harmonics.size();
+    float bw = width / n;
+    if (active) {
+      int k = std::clamp((int)((m.x - p0.x) / bw), 0, n - 1);
+      w.harmonics[k] = std::clamp(1.0f - (m.y - p0.y) / height * 2.0f, -1.0f, 1.0f);
+      w.fromHarmonics();
+      changed = true;
+    }
+    for (int k = 0; k < n; k++) {
+      float y = mid - w.harmonics[k] * height / 2;
+      dl->AddRectFilled(ImVec2(p0.x + k * bw + 1, std::min(y, mid)), ImVec2(p0.x + (k + 1) * bw - 1, std::max(y, mid)),
+                        IM_COL32(90, 140, 220, 160));
+    }
+  }
+  // The wave itself, on top.
+  int n = (int)w.data.size();
+  for (int i = 1; i < n; i++)
+    dl->AddLine(ImVec2(p0.x + (i - 1) * width / n, mid - w.data[i - 1] * height / 2),
+                ImVec2(p0.x + i * width / n, mid - w.data[i] * height / 2), IM_COL32(120, 255, 180, 255), 1.5f);
+
+  // Presets: harmonic recipes.
+  struct Recipe {
+    const char* name;
+    float (*h)(int k);  // level of harmonic k (1-based)
+  };
+  static const Recipe RECIPES[] = {
+      {"Sine", [](int k) { return k == 1 ? 1.0f : 0.0f; }},
+      {"Saw", [](int k) { return 1.0f / k; }},
+      {"Square", [](int k) { return k % 2 ? 1.0f / k : 0.0f; }},
+      {"Triangle", [](int k) { return k % 2 ? ((k / 2) % 2 ? -1.0f : 1.0f) / (k * k) : 0.0f; }},
+      {"Organ", [](int k) { return k == 1 ? 1.0f : k == 2 ? 0.6f : k == 4 ? 0.4f : k == 8 ? 0.25f : 0.0f; }},
+      {"Bell", [](int k) { return k == 1 ? 1.0f : k == 3 ? 0.5f : k == 5 ? 0.6f : k == 9 ? 0.3f : k == 13 ? 0.2f : 0.0f; }},
+  };
+  for (const Recipe& r : RECIPES) {
+    if (&r != RECIPES) ImGui::SameLine();
+    if (ImGui::SmallButton(T(r.name))) {
+      w.harmonics.resize(MAX_HARMONICS);
+      for (int k = 0; k < MAX_HARMONICS; k++) w.harmonics[k] = r.h(k + 1);
+      w.fromHarmonics();
+      changed = true;
+    }
+  }
+  if (mode == 0) {
+    ImGui::SameLine();
+    if (ImGui::SmallButton(T("Smooth"))) {
+      std::vector<float> d = w.data;
+      for (int i = 0; i < n; i++) w.data[i] = (d[(i + n - 1) % n] + 2 * d[i] + d[(i + 1) % n]) / 4;
+      changed = true;
+    }
+  }
+  ImGui::TextDisabled("%s", mode == 0 ? T("Drag to draw the wave.") : T("Drag the bars: harmonic 1 (left) to 32. Below the line = inverted."));
+  return changed;
+}
+
 bool App::wavetableEditor(Instrument& ins) {
   bool changed = false;
   ImGui::TextUnformatted(T("Wavetable (32 steps, 0-15)"));
@@ -420,6 +534,80 @@ bool App::fmEditor(Instrument& ins) {
   return changed;
 }
 
+// Drum kit: a 4x4 grid of pads, one note each. Click plays the pad,
+// right-click picks or loads its sample.
+bool App::kitPads(Instrument& ins) {
+  bool changed = false;
+  int octave = ins.kitBase / 12;
+  ImGui::SetNextItemWidth(S(120));
+  char baseLabel[32];
+  std::snprintf(baseLabel, sizeof(baseLabel), "%s", noteName(ins.kitBase).c_str());
+  if (ImGui::BeginCombo(T("First pad"), baseLabel)) {
+    for (int o = 0; o <= 7; o++) {
+      std::string n = noteName(o * 12);
+      if (ImGui::Selectable(n.c_str(), o == octave)) {
+        ins.kitBase = o * 12;
+        changed = true;
+      }
+    }
+    ImGui::EndCombo();
+  }
+  float avail = ImGui::GetContentRegionAvail().x;
+  float spacing = ImGui::GetStyle().ItemSpacing.x;
+  float pw = std::clamp((avail - spacing * 3) / 4, S(56), S(110)), ph = S(46);
+  const Theme& th = theme();
+  for (int row = 3; row >= 0; row--) {  // the lowest pads at the bottom, like a pad controller
+    for (int col = 0; col < 4; col++) {
+      int pad = row * 4 + col, note = ins.kitBase + pad;
+      if (note >= NOTE_COUNT) continue;
+      int smp = !ins.sampleMap.empty() && ins.sampleMap[note] >= 0 ? ins.sampleMap[note] : -1;
+      std::string name = smp >= 0 && smp < (int)song_.samples.size() ? song_.samples[smp].name : "-";
+      if (name.size() > 12) name = name.substr(0, 11) + ".";
+      std::string label = noteName(note) + "\n" + name + "##pad" + std::to_string(pad);
+      if (col) ImGui::SameLine();
+      ImVec4 c = ImGui::GetStyleColorVec4(ImGuiCol_Button);
+      if (smp < 0) c = ImVec4(c.x * 0.45f, c.y * 0.45f, c.z * 0.45f, c.w);
+      ImGui::PushStyleColor(ImGuiCol_Button, c);
+      bool sel = kitPad_ == note;
+      if (sel) ImGui::PushStyleColor(ImGuiCol_Border, ImGui::ColorConvertU32ToFloat4(th.cursorBox));
+      if (sel) ImGui::PushStyleVar(ImGuiStyleVar_FrameBorderSize, 2.0f);
+      if (ImGui::Button(label.c_str(), ImVec2(pw, ph))) {
+        kitPad_ = note;
+        engine_->noteOn(curCh_, note, curIns_);
+      }
+      if (sel) {
+        ImGui::PopStyleVar();
+        ImGui::PopStyleColor();
+      }
+      ImGui::PopStyleColor();
+      if (ImGui::IsItemClicked(ImGuiMouseButton_Right)) kitPad_ = note;
+      if (ImGui::BeginPopupContextItem()) {
+        ImGui::TextDisabled("%s %s", T("Pad"), noteName(note).c_str());
+        auto assign = [&](int s) {
+          if (ins.sampleMap.empty()) ins.sampleMap.assign(NOTE_COUNT, -1);
+          ins.sampleMap[note] = (int16_t)s;
+          changed = true;
+        };
+        if (ImGui::MenuItem(T("Load sample..."))) {
+          loadSampleIntoIns_ = curIns_;
+          loadSampleIntoPad_ = note;
+          openFileDialog(FileDialogMode::LoadSample);
+        }
+        if (ImGui::MenuItem(T("(none)"), nullptr, smp < 0)) assign(-1);
+        ImGui::Separator();
+        for (int i = 0; i < (int)song_.samples.size(); i++) {
+          char buf[96];
+          std::snprintf(buf, sizeof(buf), "%02X: %s", i, song_.samples[i].name.c_str());
+          if (ImGui::MenuItem(buf, nullptr, i == smp)) assign(i);
+        }
+        ImGui::EndPopup();
+      }
+    }
+  }
+  ImGui::TextDisabled("%s", T("Click: play the pad. Right-click: pick or load its sample. Notes play the pads too."));
+  return changed;
+}
+
 bool App::sampleInsEditor(Instrument& ins) {
   bool changed = false;
   char label[160];
@@ -446,6 +634,7 @@ bool App::sampleInsEditor(Instrument& ins) {
   }
   if (ImGui::Button(T("Load sample..."))) {
     loadSampleIntoIns_ = curIns_;
+    loadSampleIntoPad_ = -1;
     openFileDialog(FileDialogMode::LoadSample);
   }
   ImGui::SameLine();
@@ -461,7 +650,10 @@ bool App::sampleInsEditor(Instrument& ins) {
     changed = true;
   }
   if (ImGui::IsItemHovered()) ImGui::SetTooltip("%s", T("Volume lost per tick after note off (0 = cut at note off unless the volume macro has a release)"));
-  if (!ins.sampleMap.empty()) {
+  changed |= ImGui::Checkbox(T("Drum kit"), &ins.kit);
+  if (ImGui::IsItemHovered()) ImGui::SetTooltip("%s", T("One sample per note, each played at its own pitch, with 16 pads."));
+  if (ins.kit) changed |= kitPads(ins);
+  if (!ins.sampleMap.empty() && !ins.kit) {
     int used = 0;
     for (int v : ins.sampleMap) used += v >= 0;
     ImGui::TextDisabled(T("Multi-sample map: %d notes mapped"), used);
@@ -977,8 +1169,21 @@ void App::instrumentEditor() {
           ins.songWave = -1;
           changed = true;
         }
+        if (ins.songWave >= 0 && ins.songWave < (int)song_.wavetables.size())
+          changed |= longWaveEditor(song_.wavetables[ins.songWave]);
       } else {
         changed |= wavetableEditor(ins);
+        if (ImGui::SmallButton(T("Long wave / additive")) && (int)song_.wavetables.size() < MAX_WAVETABLES) {
+          // A 256-point song wavetable, starting from this 32-step one.
+          Wavetable w;
+          w.data.resize(256);
+          for (int i = 0; i < 256; i++) w.data[i] = ins.wavetable[i / 8] / 7.5f - 1.0f;
+          song_.wavetables.push_back(std::move(w));
+          ins.songWave = (int)song_.wavetables.size() - 1;
+          changed = true;
+        }
+        if (ImGui::IsItemHovered())
+          ImGui::SetTooltip("%s", T("A finer wave of 256 points to draw, or built from 32 harmonics (additive synthesis)."));
         changed |= morphEditor(ins);
       }
     }
@@ -1324,6 +1529,7 @@ void App::samplesWindow() {
   bool changed = false;
   if (ImGui::Button(T("Load sample..."))) {
     loadSampleIntoIns_ = -1;
+    loadSampleIntoPad_ = -1;
     openFileDialog(FileDialogMode::LoadSample);
   }
   ImGui::SameLine();

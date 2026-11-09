@@ -12,14 +12,17 @@ FamiTracker, MOD, XM, IT, S3M et MIDI.
 
 - 1 à 32 canaux, jusqu'à 8 colonnes d'effets par canal
 - Types d'instruments :
-  - **Puce** : pulse (4 duty), triangle 32 pas (NES), saw, noise LFSR (normal / métallique / périodique), sine, wavetable 32×16
+  - **Puce** : pulse (4 duty), triangle 32 pas (NES), saw, noise LFSR (normal / métallique / périodique), sine, wavetable 32×16,
+    **onde longue** de 256 points dessinée ou **additive** (32 harmoniques)
   - **FM** 4 opérateurs façon Yamaha OPN (Mega Drive) : 8 algorithmes, feedback, enveloppes AR/DR/SL/D2R/RR, presets
-  - **Sample** : fichiers `.wav`, `.flac`, `.mp3`, `.ogg` ou enregistrés au micro, boucles (avant, ping-pong, arrière), multi-samples par note, fadeout
+  - **Sample** : fichiers `.wav`, `.flac`, `.mp3`, `.ogg` ou enregistrés au micro, boucles (avant, ping-pong, arrière), multi-samples par note, fadeout,
+    **kit de batterie** (un sample par note à sa propre hauteur, 16 pads)
   - **Vraies puces émulées** : **AY-3-8910 / YM2149** (ZX Spectrum, CPC, Atari ST, avec l'enveloppe « buzzer »),
     **SN76489** (Master System), **Game Boy** (pulse avec sweep, wave, noise), **OPL3** (AdLib, 2 ou 4 opérateurs),
     **YM2612** (Mega Drive), **NES 2A03** (pulses, triangle, bruit, DPCM), **Konami SCC** (MSX) et **PC Engine**
 - **Enveloppe ADSR**, deux **LFO** (pitch, volume, largeur de pulse, cutoff, panoramique) et **morphing de wavetable** sur les instruments
-- **Effets par canal** : bitcrusher, distorsion, chorus, EQ 3 bandes, compresseur
+- **Effets par canal** : bitcrusher, distorsion, chorus, EQ 3 bandes, compresseur, phaser, flanger, filtre à
+  enveloppe (auto-wah), sidechain ; **limiteur** sur le master
 - **Éditeur de samples** : sélection, zoom, couper / copier / coller, rogner, normaliser, fondus, inverser,
   amplifier, rééchantillonner, dessin au crayon, boucle sur la sélection, enregistrement au micro
 - **Synthèse façon SID** (C64) : filtre résonant passe-bas / passe-bande / passe-haut sur n'importe quel instrument, ring mod, hard sync, largeur de pulse fine avec PWM
@@ -48,7 +51,7 @@ FamiTracker, MOD, XM, IT, S3M et MIDI.
 - Liste d'orders par canal (comme Furnace), ajout / duplication / clonage
 - Oscilloscope par canal, mute / solo
 - Sauvegarde dans un format texte `.dtk`, export WAV (mix complet ou une piste par canal), OGG, MIDI, XM, MOD, IT et VGM
-- Une démo keygen intégrée qui se charge au démarrage, `songs/chips.dtk` et `songs/consoles.dtk` pour entendre les puces émulées
+- Une démo keygen intégrée qui se charge au démarrage, `songs/chips.dtk` et `songs/consoles.dtk` pour entendre les puces émulées, `songs/sounds.dtk` pour les effets et le kit
 
 ## Télécharger
 
@@ -345,6 +348,14 @@ double-clic sur un réglage le remet par défaut.
 | Chorus | vitesse, profondeur, mix, feedback |
 | EQ | graves (200 Hz), médiums (fréquence réglable), aigus (4 kHz), de -24 à +12 dB |
 | Compressor | seuil, ratio, attaque, relâchement (avec gain de compensation automatique) |
+| Phaser | vitesse, profondeur, feedback, mix (6 étages) |
+| Flanger | vitesse, profondeur (ms), feedback (positif ou négatif), mix |
+| Envelope filter | sensibilité, fréquence de base, résonance, type (passe-bas, passe-bande, passe-haut) : le niveau du canal ouvre le filtre (auto-wah) |
+| Sidechain | canal déclencheur, quantité, attaque, relâchement : le canal baisse quand le canal déclencheur joue (le « pompage » des basses et des nappes sous la grosse caisse) |
+
+Le **Limiter** du master (colonne de droite du Mixer) remplace la saturation douce de la sortie : un gain
+d'entrée (0 à +12 dB), un plafond (-12 à 0 dB) que le son ne dépasse jamais, et un relâchement. Il regarde
+1,5 ms en avance, donc il n'écrête pas les attaques. `songs/sounds.dtk` utilise tous ces effets.
 
 ## Puces émulées
 
@@ -387,6 +398,22 @@ La section **Envelope & LFO** de l'éditeur d'instruments (tous les types) ajout
 
 Sur un instrument wavetable (et le canal wave du Game Boy), **Morph** fait passer la forme d'onde de la
 wavetable à une seconde wavetable, une fois, en boucle ou en aller-retour.
+
+## Kit de batterie et ondes longues
+
+Sur un instrument **Sample**, la case **Drum kit** en fait un kit : chaque note joue son propre sample à
+la hauteur d'origine du sample (les glissements et le vibrato restent possibles). L'éditeur montre 16 pads
+à partir de la note choisie (**First pad**) : un clic joue le pad, un clic droit choisit un sample du
+morceau ou en charge un nouveau. Au clavier, les notes jouent les pads. Dans les modules XM et IT
+exportés, chaque pad garde sa hauteur.
+
+Sur un instrument **Puce** en forme d'onde **Wavetable**, le bouton **Long wave / additive** remplace la
+table de 32 pas par une onde de 256 points (une wavetable du morceau) :
+
+- **Draw** : on dessine l'onde à la souris, **Smooth** l'adoucit ;
+- **Harmonics** : 32 barres règlent les harmoniques (synthèse additive), vers le bas pour les inverser ;
+  passer de Draw à Harmonics calcule les harmoniques de l'onde dessinée ;
+- recettes : Sine, Saw, Square, Triangle, Organ, Bell.
 
 ## Éditeur de samples
 

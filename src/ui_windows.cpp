@@ -265,7 +265,7 @@ void App::mixerWindow() {
   bool changed = false;
   MasterFx& fx = song_.fx;
   const float w = S(150);
-  if (ImGui::BeginTable("master", 3, ImGuiTableFlags_SizingStretchSame | ImGuiTableFlags_BordersInnerV)) {
+  if (ImGui::BeginTable("master", 4, ImGuiTableFlags_SizingStretchSame | ImGuiTableFlags_BordersInnerV)) {
     ImGui::TableNextRow();
     ImGui::TableNextColumn();
     changed |= ImGui::Checkbox(T("Reverb"), &fx.reverb);
@@ -300,6 +300,20 @@ void App::mixerWindow() {
     changed |= ImGui::SliderFloat(T("Cutoff"), &fx.cutoff, 20, 20000, "%.0f Hz", ImGuiSliderFlags_Logarithmic);
     ImGui::SetNextItemWidth(w);
     changed |= ImGui::SliderFloat(T("Resonance"), &fx.resonance, 0, 1, "%.2f");
+    ImGui::EndDisabled();
+
+    ImGui::TableNextColumn();
+    changed |= ImGui::Checkbox(T("Limiter"), &fx.limiter);
+    if (ImGui::IsItemHovered())
+      ImGui::SetTooltip("%s", T("Keeps the peaks under the ceiling without distortion (instead of the soft clip), "
+                                "so the song can be louder."));
+    ImGui::BeginDisabled(!fx.limiter);
+    ImGui::SetNextItemWidth(w);
+    changed |= ImGui::SliderFloat(T("Gain##lim"), &fx.limitGain, 0, 12, "%+.1f dB");
+    ImGui::SetNextItemWidth(w);
+    changed |= ImGui::SliderFloat(T("Ceiling"), &fx.limitCeiling, -12, 0, "%.1f dB");
+    ImGui::SetNextItemWidth(w);
+    changed |= ImGui::SliderFloat(T("Release##lim"), &fx.limitRelease, 10, 1000, "%.0f ms", ImGuiSliderFlags_Logarithmic);
     ImGui::EndDisabled();
     ImGui::SetNextItemWidth(w);
     changed |= ImGui::SliderFloat(T("Master"), &fx.volume, 0, 2, "%.2f");

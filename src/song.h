@@ -160,7 +160,12 @@ extern const char* const LOOP_NAMES[4];
 
 struct Wavetable {
   std::vector<float> data;  // -1..1, any length
+  // Additive synthesis: harmonic levels -1..1 (empty = a drawn wave). The
+  // data is rebuilt from them with fromHarmonics().
+  std::vector<float> harmonics;
+  void fromHarmonics(int length = 256);
 };
+constexpr int MAX_HARMONICS = 32;
 
 // SID-style resonant filter on the instrument's output (any instrument type).
 struct InsFilter {
@@ -221,6 +226,10 @@ struct Instrument {
   int sample = -1;                // default sample (sample instruments)
   std::vector<int16_t> sampleMap;  // empty, or NOTE_COUNT sample indexes (-1 = default)
   float fadeout = 0;               // volume lost per tick after note off (0 = none)
+  // Drum kit: every note of the sample map plays its sample at the sample's
+  // own pitch; the editor shows 16 pads from kitBase.
+  bool kit = false;
+  int kitBase = 36;
   InsFilter filter;
   bool ringMod = false;  // multiply by the previous channel's square (SID ring mod)
   bool sync = false;     // restart the waveform with the previous channel (hard sync)
@@ -238,7 +247,10 @@ struct Instrument {
 };
 
 // Per-channel insert effects, run in order on the channel before the mixer.
-enum ChanFxType : int { CFX_BITCRUSH = 0, CFX_DISTORTION, CFX_CHORUS, CFX_EQ, CFX_COMPRESSOR, CFX_COUNT };
+enum ChanFxType : int {
+  CFX_BITCRUSH = 0, CFX_DISTORTION, CFX_CHORUS, CFX_EQ, CFX_COMPRESSOR,
+  CFX_PHASER, CFX_FLANGER, CFX_ENVFILTER, CFX_SIDECHAIN, CFX_COUNT
+};
 constexpr int MAX_CHANNEL_FX = 8;
 struct ChanFxParam {
   const char* name;
@@ -290,6 +302,11 @@ struct MasterFx {
   int filterType = 0;  // 0 low-pass, 1 band-pass, 2 high-pass
   float cutoff = 6000.0f, resonance = 0.2f;
   float volume = 1.0f;
+  // Peak limiter at the end of the chain (replaces the soft clip).
+  bool limiter = false;
+  float limitGain = 0.0f;      // dB of gain before it, 0-12
+  float limitCeiling = -0.3f;  // dB, -12-0
+  float limitRelease = 100.0f; // ms
 };
 
 // Automation: a curve over the song's timeline for a channel or master setting.
