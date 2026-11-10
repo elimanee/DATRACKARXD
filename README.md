@@ -36,12 +36,16 @@ FamiTracker, MOD, XM, IT, S3M et MIDI.
   et **VGM** (les registres des puces émulées, pour les lecteurs VGM et le vrai matériel)
 - **Export vidéo** : la scène keygen ou un mur d'oscilloscopes avec la musique, en **MP4** (avec ffmpeg)
   ou en **AVI** écrit par DATRACKARXD lui-même, prêt pour YouTube
-- **Navigateur de samples** : parcourir les dossiers, écouter un son avant de le charger, l'ajouter au
-  morceau, en faire un instrument ou le poser sur un pad du kit
+- **Interface moderne** : thème **Studio** (ou Graphite), police Roboto avec Cousine pour les grilles,
+  icônes, **barre de transport** (lecture, enregistrement, boucle, position, temps, BPM, niveau master) et
+  barre d'état
+- **Navigateur** à gauche, façon FL Studio : dossiers, morceaux, presets et sons ; écouter un son d'un clic,
+  **glisser-déposer** un fichier sur les instruments, les samples, un pad du kit ou le pattern
 - **Lecteur keygen** : un programme autonome et compressé qui joue le morceau avec logo, fond animé (étoiles,
   plasma, tunnel, rotozoom), objet 3D, scrollers, VU-mètres et flashs sur la musique
 - **DATRACKARXD Keygen** : une appli séparée pour fabriquer ces lecteurs, avec aperçu en direct
-- Thèmes : Furnace, **Keygen** (néon, avec un scroller sinus, des barres copper et un champ d'étoiles), FastTracker, Amber CRT
+- Thèmes : **Studio**, **Graphite**, Furnace, **Keygen** (néon, avec un scroller sinus, des barres copper et un champ d'étoiles),
+  FastTracker, Amber CRT ; police moderne ou pixel d'origine
 - Éditeur de patterns au clavier (disposition physique, fonctionne en AZERTY comme en QWERTY), sélection, copier/coller, transposition
 - Piano roll façon FL Studio, avec un mode accords (« Voices ») qui répartit les notes sur plusieurs canaux
 - **Vue arrangement** : le morceau en frise (canaux × orders) avec aperçu des notes, plusieurs **sous-morceaux** par fichier
@@ -113,6 +117,71 @@ datrackarxd --export-demo demo.wav         # rendu de la démo
 datrackarxd --save-demo demo.dtk           # écrire la démo dans un fichier
 ```
 
+## Interface
+
+La fenêtre a, de haut en bas : les menus, la **barre de transport**, les panneaux, et la **barre d'état**.
+
+**Barre de transport** :
+
+| Bouton | Effet |
+|---|---|
+| Début | Jouer le morceau depuis le début |
+| Lecture / pause | Jouer depuis l'order du curseur, ou arrêter |
+| Stop | Arrêter |
+| Lecture depuis la ligne | Jouer depuis la ligne du curseur |
+| Enregistrement (rond rouge) | Mode Record : les notes tapées ou jouées vont dans le pattern ; la petite flèche ouvre les options (décompte, quantification MIDI, volume du métronome) |
+| Boucle | Boucler le pattern |
+| Suivre | Le curseur suit la lecture |
+| Métronome | Clics sur les temps |
+
+Au milieu, l'afficheur donne l'**order** et la **ligne** (en lecture, ou au curseur), le **temps** depuis le
+début de la lecture et le **tempo** (BPM, tiré de Tick rate, Speed et Highlight 1 dans la fenêtre Song),
+puis le nom du morceau et son auteur. À droite : l'oscilloscope et le **niveau master**, avec le pic
+en dB (rouge s'il sature).
+
+La **barre d'état**, en bas, montre le dernier message (fichier chargé, export...), et à droite le
+fichier (avec « modifié » s'il y a des changements à enregistrer), l'entrée MIDI et la sortie audio.
+
+**Disposition** : le navigateur à gauche au-dessus des orders et de la fenêtre Song, les éditeurs
+(pattern, piano roll, samples, arrangement) au milieu au-dessus du mixer et des oscilloscopes, les
+instruments à droite. Les panneaux se déplacent et s'empilent à la souris (glisser un onglet) ;
+**Affichage > Réinitialiser la disposition** (*Reset layout*) remet celle-ci.
+
+**Thèmes** (**Affichage > Thème** ou les réglages) : **Studio** (par défaut) et **Graphite** ont le look moderne
+(coins arrondis, boutons plats, plus d'espace) ; Furnace, Keygen, FastTracker et Amber CRT gardent
+celui d'origine. La police se choisit à part dans **Réglages > Interface**.
+
+## Navigateur
+
+Le panneau **Navigateur** (*Browser*, à gauche ; **Affichage > Navigateur** pour le rouvrir) montre
+les morceaux, les presets d'instruments et les sons de plusieurs dossiers :
+
+- **Song folder** : le dossier du morceau ouvert ;
+- **Demo songs** : les morceaux fournis avec DATRACKARXD ;
+- les **favoris** : clic droit sur un dossier > **Add to places** (clic droit sur le favori pour l'enlever) ;
+- **Home** : le dossier personnel ;
+- **Recent songs** : les derniers morceaux ouverts.
+
+Les icônes distinguent les morceaux (`.dtk`, `.fur`, `.mod`, `.xm`, `.it`...), les presets (`.dti`,
+`.fui`) et les sons (`.wav`, `.flac`, `.mp3`, `.ogg`). Le champ **Filter...** ne garde que les fichiers
+dont le nom contient le texte tapé ; le bouton de rafraîchissement relit les dossiers.
+
+- **Un clic sur un son** le joue (le bouton haut-parleur coupe la lecture au clic) ; les **flèches haut /
+  bas** passent au son précédent / suivant. En bas s'affichent sa forme d'onde, sa durée et sa fréquence,
+  avec **Play / Stop**, **Samples** (l'ajouter aux samples), **Instrument** (en faire un instrument
+  sample) et **To pad** quand l'instrument courant est un kit de batterie.
+- **Double-clic** : un morceau s'ouvre (après confirmation s'il y a des changements), un preset ou un son
+  devient un nouvel instrument.
+- **Glisser-déposer** un fichier depuis le navigateur :
+  - sur **Instruments** : un preset est ajouté, un son devient un instrument sample ;
+  - sur **Samples** : le son est ajouté aux samples ;
+  - sur un **pad** du kit de batterie : le son va sur ce pad ;
+  - sur le **pattern**, le piano roll ou l'arrangement : un morceau s'ouvre, un son ou un preset devient
+    un instrument.
+- **Clic droit** sur un fichier : les mêmes actions, et **Copy the path**.
+
+Un son déjà dans le morceau n'est pas ajouté deux fois. Les favoris sont gardés dans les réglages.
+
 ## Clavier
 
 | Touches | Action |
@@ -156,7 +225,7 @@ changent dans **Réglages > Clavier**. Sur macOS, `Cmd` marche comme `Ctrl`.
   petit tampon répond plus vite au clavier ; s'il y a des craquements, l'augmenter. Une sortie débranchée
   est remplacée par celle du système.
 - **Interface** : la langue (English / Français), la taille de l'interface (75 à 250 %, pour les grands
-  écrans) et le thème.
+  écrans), le thème et la police (**Moderne**, Roboto, ou **Pixel**, la police d'origine).
 - **Clavier** : cliquer sur un raccourci puis appuyer sur la nouvelle touche (avec `Ctrl`, `Shift` ou `Alt`
   si on veut) ; `Échap` annule, `Retour arrière` retire le raccourci. Deux actions sur la même touche sont
   signalées en orange. Les menus affichent toujours les touches choisies.
@@ -366,8 +435,9 @@ longue et une courte).
 
 ## Métronome, décompte et quantification
 
-**Metronome** dans la barre du haut fait cliquer les temps pendant la lecture (accent sur chaque mesure,
-d'après Highlight 1 et 2) ; il ne s'entend jamais dans les exports. **Rec. options** règle :
+Le bouton **métronome** de la barre de transport fait cliquer les temps pendant la lecture (accent sur chaque mesure,
+d'après Highlight 1 et 2) ; il ne s'entend jamais dans les exports. La petite flèche à côté du bouton
+d'enregistrement (**Recording options**) règle :
 
 - **Count-in** : en mode Record, la lecture démarre après 1 à 4 mesures de clics ;
 - **MIDI quantize** : les notes jouées au clavier MIDI pendant la lecture vont sur la ligne la plus proche,
@@ -475,20 +545,6 @@ et **Record** enregistre depuis le micro ou l'entrée ligne choisie.
 | Pencil | Dessiner la forme d'onde à la souris (zoomer pour être précis) |
 
 Tout s'annule avec Ctrl+Z.
-
-## Navigateur de samples
-
-**Affichage > Navigateur de samples** (*Sample browser*) ouvre un navigateur de fichiers pour trouver un son sans le charger :
-
-- **Up** remonte d'un dossier, un clic sur un `[dossier]` y entre, **Song folder** va dans le dossier du
-  morceau ; le champ **Filter...** ne garde que les noms qui contiennent le texte tapé ;
-- un clic sur un `.wav`, `.flac`, `.mp3` ou `.ogg` le joue (**Play on click**), les **flèches haut / bas**
-  passent au son précédent / suivant et le jouent ; **Play** / **Stop** pour réécouter ;
-- la forme d'onde, la durée et la fréquence du son s'affichent en bas ;
-- **Add to samples** l'ajoute aux samples du morceau, **New instrument** crée un instrument sample qui le
-  joue, et **To pad** le pose sur le pad choisi quand l'instrument courant est un kit de batterie.
-
-Le dernier dossier visité est gardé dans les réglages. Un son déjà dans le morceau n'est pas ajouté deux fois.
 
 ## Synthèse façon SID
 
@@ -650,7 +706,9 @@ La macro volume avec un point de release donne un vrai « release » (fondu apr�
 - `src/theory.*`, `src/ui_generators.cpp` : gammes, accords et générateurs
 - `src/payload.*`, `src/player.cpp`, `src/keygen_fx.*` : lecteur keygen autonome et sa scène
 - `src/video.*`, `src/ui_video.cpp`, `third_party/stb_image_write.h` : export vidéo (rendu hors écran, AVI MJPEG ou ffmpeg)
-- `src/ui_samplebrowser.cpp` : navigateur de samples
+- `src/ui_browser.cpp` : panneau Navigateur
+- `src/ui_transport.cpp` : barre de transport et barre d'état
+- `src/ui_fonts.*`, `src/icons.*`, `src/ui_widgets.*` : polices, icônes (dessinées par le programme) et boutons à icône
 - `src/keygen_main.cpp`, `src/filebrowser.*` : l'appli DATRACKARXD Keygen
 - `src/theme.*` : thèmes de couleurs
 - `src/app.*` : application, menus, raccourcis, dialogue de fichiers
@@ -670,5 +728,7 @@ La macro volume avec un point de release donne un vrai « release » (fondu apr�
 [RtMidi](https://github.com/thestk/rtmidi), [libogg et libvorbis](https://xiph.org) (BSD),
 [ymfm](https://github.com/aaronsgiles/ymfm) (BSD-3-Clause, émulation OPL3) et
 [dr_flac / dr_mp3](https://github.com/mackron/dr_libs) (domaine public / MIT-0) et
-[stb_image_write](https://github.com/nothings/stb) (domaine public / MIT, images JPEG de l'export vidéo). Leurs licences sont
+[stb_image_write](https://github.com/nothings/stb) (domaine public / MIT, images JPEG de l'export vidéo).
+Les polices de l'interface, [Roboto et Cousine](https://fonts.google.com) (Apache 2.0), viennent du dossier
+`misc/fonts` de Dear ImGui. Leurs licences sont
 dans le dossier `licenses` des archives publiées.

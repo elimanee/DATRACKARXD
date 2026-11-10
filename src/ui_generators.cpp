@@ -7,6 +7,8 @@
 #include <random>
 
 #include "app.h"
+#include "ui_widgets.h"
+#include "icons.h"
 #include "i18n.h"
 #include "theme.h"
 #include "theory.h"
@@ -76,7 +78,7 @@ void App::writeGenerated(int ch, int row0, int row1, const std::vector<GenNote>&
 
 void App::generatorsWindow() {
   ImGui::SetNextWindowSize(ImVec2(S(560), S(430)), ImGuiCond_FirstUseEver);
-  if (!ImGui::Begin(TW("Generators").c_str(), &showGenerators_)) {
+  if (!ImGui::Begin(withIcon(ICON_SPARK, TW("Generators")).c_str(), &showGenerators_)) {
     ImGui::End();
     return;
   }

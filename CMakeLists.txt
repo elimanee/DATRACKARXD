@@ -1,5 +1,5 @@
 cmake_minimum_required(VERSION 3.16)
-project(DATRACKARXD VERSION 1.4.0 LANGUAGES CXX C)
+project(DATRACKARXD VERSION 1.5.0 LANGUAGES CXX C)
 
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
@@ -180,6 +180,17 @@ add_custom_command(
   DEPENDS ${CMAKE_SOURCE_DIR}/README.md ${CMAKE_SOURCE_DIR}/docs/manual_en.md ${CMAKE_SOURCE_DIR}/cmake/embed.cmake
   VERBATIM)
 
+# The interface fonts (Roboto and Cousine, Apache 2.0, from Dear ImGui).
+set(FONTS_CPP ${CMAKE_BINARY_DIR}/generated/fonts_data.cpp)
+set(FONT_FILES ${imgui_SOURCE_DIR}/misc/fonts/Roboto-Medium.ttf ${imgui_SOURCE_DIR}/misc/fonts/Cousine-Regular.ttf)
+add_custom_command(
+  OUTPUT ${FONTS_CPP}
+  COMMAND ${CMAKE_COMMAND} -DOUT=${FONTS_CPP}
+          "-DFILES=${imgui_SOURCE_DIR}/misc/fonts/Roboto-Medium.ttf;FONT_ROBOTO;${imgui_SOURCE_DIR}/misc/fonts/Cousine-Regular.ttf;FONT_COUSINE"
+          -P ${CMAKE_SOURCE_DIR}/cmake/embed.cmake
+  DEPENDS ${FONT_FILES} ${CMAKE_SOURCE_DIR}/cmake/embed.cmake
+  VERBATIM)
+
 # --- the tracker ---
 add_executable(datrackarxd
   src/main.cpp
@@ -195,7 +206,12 @@ add_executable(datrackarxd
   src/ui_generators.cpp
   src/video.cpp
   src/ui_video.cpp
-  src/ui_samplebrowser.cpp
+  src/ui_browser.cpp
+  src/ui_fonts.cpp
+  src/ui_widgets.cpp
+  src/ui_transport.cpp
+  src/icons.cpp
+  ${FONTS_CPP}
   src/ui_manual.cpp
   ${MANUAL_CPP}
   src/paths.cpp

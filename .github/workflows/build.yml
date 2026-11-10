@@ -174,6 +174,7 @@ jobs:
             if [ -f "$file" ]; then cp "$file" "$dir/licenses/${pair%%:*}.txt"; else echo "::warning::missing $file"; fi
           done
           sed -n '/This software is available under 2 licenses/,$p' third_party/stb_image_write.h > "$dir/licenses/stb.txt"
+          cp third_party/fonts-LICENSE.txt "$dir/licenses/fonts.txt"
           if [ "${{ runner.os }}" = "Windows" ]; then
             cp datrackarxd.exe datrackarxd-keygen.exe "$dir/"
             7z a "$dir.zip" "$dir" > /dev/null

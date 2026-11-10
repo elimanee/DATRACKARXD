@@ -6,9 +6,12 @@
 #include <cstdio>
 
 #include "app.h"
+#include "ui_widgets.h"
+#include "icons.h"
 #include "theory.h"
 #include "i18n.h"
 #include "theme.h"
+#include "ui_fonts.h"
 
 namespace {
 
@@ -710,7 +713,7 @@ void App::selectionToolsMenu() {
 }
 
 void App::findReplaceWindow() {
-  if (!ImGui::Begin(TW("Find & replace").c_str(), &showFindReplace_, ImGuiWindowFlags_AlwaysAutoResize)) {
+  if (!ImGui::Begin(withIcon(ICON_SEARCH, TW("Find & replace")).c_str(), &showFindReplace_, ImGuiWindowFlags_AlwaysAutoResize)) {
     ImGui::End();
     return;
   }
@@ -851,7 +854,7 @@ void App::selectChannelOrAll() {
 // ---------------------------------------------------------------------------
 
 void App::patternWindow() {
-  bool open = ImGui::Begin(TW("Pattern").c_str(), &showPattern_);
+  bool open = ImGui::Begin(withIcon(ICON_GRID, TW("Pattern")).c_str(), &showPattern_);
   patternDockId_ = ImGui::GetWindowDockID();
   if (!open) {
     patternFocused_ = false;
@@ -894,12 +897,14 @@ void App::patternWindow() {
   ImGuiIO& io = ImGui::GetIO();
   const Theme& TH = theme();
   ImDrawList* dl = ImGui::GetWindowDrawList();
+  ImGui::PushFont(uiFonts().mono);  // the grid needs even columns
   float cw = ImGui::CalcTextSize("0").x;
   float rh = ImGui::GetTextLineHeight() + 2.0f;
   ImVec2 origin = ImGui::GetCursorScreenPos();
   ImVec2 avail = ImGui::GetContentRegionAvail();
   if (avail.x < 50 || avail.y < rh * 3) {
     patternFocused_ = ImGui::IsWindowFocused(ImGuiFocusedFlags_ChildWindows);
+    ImGui::PopFont();
     ImGui::End();
     return;
   }
@@ -1079,6 +1084,7 @@ void App::patternWindow() {
   if (hovered && io.MouseWheel != 0 && !(playing && follow_)) moveRows(-(int)io.MouseWheel * 4);
   // Right-click: the selection tools.
   if (hovered && ImGui::IsMouseClicked(ImGuiMouseButton_Right)) ImGui::OpenPopup("patctx");
+  ImGui::PopFont();
   if (ImGui::BeginPopup("patctx")) {
     if (ImGui::MenuItem(T("Cut"), keyLabel(Action::Cut).c_str())) copySelection(true);
     if (ImGui::MenuItem(T("Copy"), keyLabel(Action::Copy).c_str())) copySelection(false);
@@ -1091,6 +1097,8 @@ void App::patternWindow() {
     selectionToolsMenu();
     ImGui::EndPopup();
   }
-
+  // Files dragged from the browser.
+  std::string dropped;
+  if (acceptFileDrop(dropped)) useFile(dropped, DropTarget::Song);
   ImGui::End();
 }

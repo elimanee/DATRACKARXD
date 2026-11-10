@@ -36,12 +36,15 @@ C++17 - ImGui + SDL2
   and **VGM** (the registers of the emulated chips, for VGM players and real hardware)
 - **Video export**: the keygen scene or a wall of oscilloscopes with the music, as **MP4** (with ffmpeg)
   or as an **AVI** written by DATRACKARXD itself, ready for YouTube
-- **Sample browser**: walk the folders, hear a sound before loading it, add it to the song, make an
-  instrument of it or drop it on a drum kit pad
+- **Modern interface**: **Studio** theme (or Graphite), Roboto font with Cousine for the grids, icons,
+  a **transport bar** (play, record, loop, position, time, BPM, master level) and a status bar
+- **Browser** on the left, FL Studio style: folders, songs, presets and sounds; hear a sound with a click,
+  **drag and drop** a file onto the instruments, the samples, a drum kit pad or the pattern
 - **Keygen player**: a standalone, compressed program that plays the song with a logo, animated background (stars,
   plasma, tunnel, rotozoom), 3D object, scrollers, VU meters and flashes in time with the music
 - **DATRACKARXD Keygen**: a separate app for building these players, with a live preview
-- Themes: Furnace, **Keygen** (neon, with a sine scroller, copper bars and a starfield), FastTracker, Amber CRT
+- Themes: **Studio**, **Graphite**, Furnace, **Keygen** (neon, with a sine scroller, copper bars and a starfield),
+  FastTracker, Amber CRT; modern font or the original pixel one
 - Keyboard-driven pattern editor (physical key layout, works with both AZERTY and QWERTY), selection, copy/paste, transpose
 - FL Studio-style piano roll, with a chord mode ("Voices") that spreads notes across several channels
 - **Arrangement view**: the song as a timeline (channels x orders) with a note preview, several **subsongs** per file
@@ -113,6 +116,70 @@ datrackarxd --export-demo demo.wav         # render the demo
 datrackarxd --save-demo demo.dtk           # write the demo to a file
 ```
 
+## Interface
+
+From top to bottom, the window has the menus, the **transport bar**, the panels and the **status bar**.
+
+**Transport bar**:
+
+| Button | Does |
+|---|---|
+| To start | Play the song from the start |
+| Play / pause | Play from the cursor's order, or stop |
+| Stop | Stop |
+| Play from the row | Play from the cursor row |
+| Record (red dot) | Record mode: notes typed or played go into the pattern; the small arrow opens the options (count-in, MIDI quantize, metronome volume) |
+| Loop | Loop the pattern |
+| Follow | The cursor follows the playback |
+| Metronome | Clicks on the beats |
+
+In the middle, the display shows the **order** and **row** (playing, or at the cursor), the **time** since
+playback started and the **tempo** (BPM, from Tick rate, Speed and Highlight 1 in the Song window), then
+the song's name and author. On the right: the oscilloscope and the **master level**, with the peak in
+dB (red when it clips).
+
+The **status bar** at the bottom shows the last message (file loaded, export...), and on the right the
+file (with "modified" when there are changes to save), the MIDI input and the audio output.
+
+**Layout**: the browser on the left over the orders and the Song window, the editors (pattern, piano
+roll, samples, arrangement) in the middle over the mixer and oscilloscopes, the instruments on the
+right. Panels move and stack with the mouse (drag a tab); **View > Reset layout** brings this one back.
+
+**Themes** (**View > Theme** or the settings): **Studio** (the default) and **Graphite** have the modern
+look (rounded corners, flat buttons, more space); Furnace, Keygen, FastTracker and Amber CRT keep the
+original one. The font is chosen separately in **Settings > Interface**.
+
+## Browser
+
+The **Browser** panel (on the left; **View > Browser** opens it again) shows the songs, instrument
+presets and sounds of several folders:
+
+- **Song folder**: the folder of the open song;
+- **Demo songs**: the songs that come with DATRACKARXD;
+- **places**: right-click a folder > **Add to places** (right-click the place to remove it);
+- **Home**: your home folder;
+- **Recent songs**: the last songs opened.
+
+Icons tell songs (`.dtk`, `.fur`, `.mod`, `.xm`, `.it`...), presets (`.dti`, `.fui`) and sounds (`.wav`,
+`.flac`, `.mp3`, `.ogg`) apart. The **Filter...** field keeps only the files whose name contains the
+typed text; the refresh button reads the folders again.
+
+- **A click on a sound** plays it (the speaker button turns playing on click off); the **up / down
+  arrows** go to the previous / next sound. Its waveform, length and rate show at the bottom, with
+  **Play / Stop**, **Samples** (add it to the samples), **Instrument** (make a sample instrument of it)
+  and **To pad** when the current instrument is a drum kit.
+- **Double-click**: a song opens (after asking if there are unsaved changes), a preset or a sound
+  becomes a new instrument.
+- **Drag and drop** a file from the browser:
+  - onto **Instruments**: a preset is added, a sound becomes a sample instrument;
+  - onto **Samples**: the sound is added to the samples;
+  - onto a drum kit **pad**: the sound goes on that pad;
+  - onto the **pattern**, piano roll or arrangement: a song opens, a sound or a preset becomes an
+    instrument.
+- **Right-click** a file: the same actions, and **Copy the path**.
+
+A sound already in the song is not added twice. Places are kept in the settings.
+
 ## Keyboard
 
 | Keys | Action |
@@ -155,8 +222,8 @@ These are the default keys: every shortcut except the notes and the cursor keys 
 - **Audio**: the output device (or the system's) and the buffer size, with the latency it gives. A
   small buffer answers the keyboard faster; if the sound crackles, raise it. An unplugged device is
   replaced by the system's one.
-- **Interface**: the language (English / Francais), the interface size (75 to 250 %, for big screens)
-  and the theme.
+- **Interface**: the language (English / Francais), the interface size (75 to 250 %, for big screens),
+  the theme and the font (**Modern**, Roboto, or **Pixel**, the original one).
 - **Keyboard**: click a shortcut, then press the new key (with `Ctrl`, `Shift` or `Alt` if you like);
   `Esc` cancels, `Backspace` removes the shortcut. Two actions on the same key are shown in orange. The
   menus always show the keys you chose.
@@ -363,8 +430,9 @@ long one and a short one).
 
 ## Metronome, count-in and quantization
 
-**Metronome** in the top bar clicks on the beats during playback (with an accent on each bar,
-based on Highlight 1 and 2); it is never heard in exports. **Rec. options** sets:
+The **metronome** button of the transport bar clicks on the beats during playback (with an accent on each bar,
+based on Highlight 1 and 2); it is never heard in exports. The small arrow next to the record button
+(**Recording options**) sets:
 
 - **Count-in**: in Record mode, playback starts after 1 to 4 bars of clicks;
 - **MIDI quantize**: notes played on the MIDI keyboard during playback go to the nearest row,
@@ -471,20 +539,6 @@ and **Record** records from the selected microphone or line input.
 | Pencil | Draw the waveform with the mouse (zoom in for precision) |
 
 Everything can be undone with Ctrl+Z.
-
-## Sample browser
-
-**View > Sample browser** opens a file browser to find a sound without loading it:
-
-- **Up** goes up one folder, a click on a `[folder]` enters it, **Song folder** goes to the song's
-  folder; the **Filter...** field keeps only the names that contain the typed text;
-- a click on a `.wav`, `.flac`, `.mp3` or `.ogg` plays it (**Play on click**), the **up / down arrows**
-  go to the previous / next sound and play it; **Play** / **Stop** to hear it again;
-- the waveform, length and rate of the sound are shown at the bottom;
-- **Add to samples** adds it to the song's samples, **New instrument** creates a sample instrument that
-  plays it, and **To pad** puts it on the chosen pad when the current instrument is a drum kit.
-
-The last folder visited is kept in the settings. A sound already in the song is not added twice.
 
 ## SID-style synthesis
 
@@ -646,7 +700,9 @@ A volume macro with a release point gives a real "release" (fade-out after the n
 - `src/theory.*`, `src/ui_generators.cpp`: scales, chords and generators
 - `src/payload.*`, `src/player.cpp`, `src/keygen_fx.*`: standalone keygen player and its scene
 - `src/video.*`, `src/ui_video.cpp`, `third_party/stb_image_write.h`: video export (off-screen rendering, MJPEG AVI or ffmpeg)
-- `src/ui_samplebrowser.cpp`: sample browser
+- `src/ui_browser.cpp`: the Browser panel
+- `src/ui_transport.cpp`: transport bar and status bar
+- `src/ui_fonts.*`, `src/icons.*`, `src/ui_widgets.*`: fonts, icons (drawn by the program) and icon buttons
 - `src/keygen_main.cpp`, `src/filebrowser.*`: the DATRACKARXD Keygen app
 - `src/theme.*`: color themes
 - `src/app.*`: application, menus, shortcuts, file dialog
@@ -666,5 +722,7 @@ Dear ImGui (MIT, https://github.com/ocornut/imgui), SDL2 (zlib, https://libsdl.o
 RtMidi (https://github.com/thestk/rtmidi), libogg and libvorbis (BSD, https://xiph.org),
 ymfm (BSD-3-Clause, OPL3 emulation, https://github.com/aaronsgiles/ymfm) and
 dr_flac / dr_mp3 (public domain / MIT-0, https://github.com/mackron/dr_libs) and
-stb_image_write (public domain / MIT, JPEG pictures of the video export, https://github.com/nothings/stb). Their licenses are
+stb_image_write (public domain / MIT, JPEG pictures of the video export, https://github.com/nothings/stb).
+The interface fonts, Roboto and Cousine (Apache 2.0, https://fonts.google.com), come from Dear ImGui's
+misc/fonts folder. Their licenses are
 in the `licenses` folder of the published archives.

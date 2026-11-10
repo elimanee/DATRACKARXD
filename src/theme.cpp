@@ -1,6 +1,7 @@
 #include "theme.h"
 
 #include <algorithm>
+#include <cstring>
 
 namespace {
 
@@ -12,6 +13,30 @@ float uiScale = 1.0f;
 }  // namespace
 
 const Theme THEMES[THEME_COUNT] = {
+    {
+        "Studio",
+        IM_COL32(22, 23, 28, 255), IM_COL32(29, 30, 37, 255), IM_COL32(38, 39, 50, 255), IM_COL32(124, 108, 255, 60),
+        IM_COL32(230, 80, 90, 55), IM_COL32(70, 200, 120, 50), IM_COL32(124, 108, 255, 70), IM_COL32(46, 48, 58, 255),
+        IM_COL32(232, 234, 242, 255), IM_COL32(150, 152, 168, 255), IM_COL32(110, 215, 160, 255), IM_COL32(120, 180, 255, 255),
+        IM_COL32(255, 170, 90, 255), IM_COL32(255, 212, 150, 255), IM_COL32(68, 70, 82, 255), IM_COL32(118, 120, 136, 255),
+        IM_COL32(220, 200, 120, 255), IM_COL32(160, 150, 255, 230),
+        IM_COL32(36, 38, 46, 255), IM_COL32(52, 55, 68, 255), IM_COL32(78, 34, 42, 255), IM_COL32(226, 228, 236, 255),
+        IM_COL32(18, 19, 23, 255), IM_COL32(110, 215, 160, 255), IM_COL32(110, 60, 66, 255), IM_COL32(160, 150, 255, 255),
+        rgb(30, 31, 37), rgb(40, 42, 51), rgb(23, 24, 29), rgb(30, 31, 37), rgb(124, 108, 255), rgb(40, 42, 51), rgb(226, 228, 236),
+        6.0f, true,
+    },
+    {
+        "Graphite",
+        IM_COL32(24, 24, 26, 255), IM_COL32(31, 31, 34, 255), IM_COL32(41, 40, 42, 255), IM_COL32(255, 140, 60, 55),
+        IM_COL32(230, 80, 90, 55), IM_COL32(90, 200, 120, 50), IM_COL32(255, 140, 60, 65), IM_COL32(50, 50, 54, 255),
+        IM_COL32(236, 236, 238, 255), IM_COL32(155, 155, 160, 255), IM_COL32(150, 215, 110, 255), IM_COL32(110, 190, 240, 255),
+        IM_COL32(255, 150, 70, 255), IM_COL32(255, 205, 140, 255), IM_COL32(72, 72, 78, 255), IM_COL32(122, 122, 130, 255),
+        IM_COL32(255, 190, 110, 255), IM_COL32(255, 160, 90, 230),
+        IM_COL32(40, 40, 44, 255), IM_COL32(58, 58, 64, 255), IM_COL32(80, 36, 36, 255), IM_COL32(232, 232, 236, 255),
+        IM_COL32(19, 19, 21, 255), IM_COL32(255, 170, 90, 255), IM_COL32(110, 64, 60, 255), IM_COL32(255, 200, 130, 255),
+        rgb(32, 32, 35), rgb(43, 43, 47), rgb(25, 25, 27), rgb(32, 32, 35), rgb(255, 140, 60), rgb(43, 43, 47), rgb(232, 232, 236),
+        6.0f, true,
+    },
     {
         "Furnace",
         IM_COL32(18, 18, 26, 255), IM_COL32(32, 32, 48, 255), IM_COL32(45, 45, 72, 255), IM_COL32(40, 70, 130, 120),
@@ -65,12 +90,122 @@ const Theme THEMES[THEME_COUNT] = {
 const Theme& theme() { return THEMES[current]; }
 int themeIndex() { return current; }
 
+int themeByName(const char* name) {
+  for (int i = 0; i < THEME_COUNT; i++)
+    if (std::strcmp(THEMES[i].name, name) == 0) return i;
+  return -1;
+}
+
+namespace {
+
+// The modern look: flat widgets, soft corners, more air, and colors made
+// from a few base tones (background, frame, accent, text).
+void modernStyle(const Theme& t, ImGuiStyle& style) {
+  style.WindowPadding = ImVec2(10, 8);
+  style.FramePadding = ImVec2(8, 4);
+  style.CellPadding = ImVec2(6, 3);
+  style.ItemSpacing = ImVec2(8, 6);
+  style.ItemInnerSpacing = ImVec2(6, 4);
+  style.IndentSpacing = 18;
+  style.ScrollbarSize = 12;
+  style.GrabMinSize = 10;
+  style.WindowBorderSize = 1;
+  style.ChildBorderSize = 1;
+  style.PopupBorderSize = 1;
+  style.FrameBorderSize = 0;
+  style.TabBorderSize = 0;
+  style.TabBarBorderSize = 1;
+  style.TabBarOverlineSize = 2;
+  style.WindowRounding = 8;
+  style.ChildRounding = 6;
+  style.FrameRounding = 5;
+  style.PopupRounding = 8;
+  style.ScrollbarRounding = 8;
+  style.GrabRounding = 4;
+  style.TabRounding = 6;
+  style.WindowTitleAlign = ImVec2(0.0f, 0.5f);
+  style.WindowMenuButtonPosition = ImGuiDir_None;
+  style.SeparatorTextBorderSize = 1;
+  style.DockingSeparatorSize = 2;
+
+  auto mix = [](ImVec4 a, ImVec4 b, float k) {
+    return ImVec4(a.x + (b.x - a.x) * k, a.y + (b.y - a.y) * k, a.z + (b.z - a.z) * k, a.w + (b.w - a.w) * k);
+  };
+  auto alpha = [](ImVec4 v, float a) { return ImVec4(v.x, v.y, v.z, a); };
+  const ImVec4 white(1, 1, 1, 1), black(0, 0, 0, 1);
+  ImVec4 bg = t.windowBg, fr = t.frame, ac = t.accent, tx = t.text;
+  ImVec4* c = style.Colors;
+  c[ImGuiCol_Text] = tx;
+  c[ImGuiCol_TextDisabled] = mix(tx, bg, 0.48f);
+  c[ImGuiCol_WindowBg] = bg;
+  c[ImGuiCol_ChildBg] = ImVec4(0, 0, 0, 0);
+  c[ImGuiCol_PopupBg] = alpha(mix(bg, white, 0.05f), 0.98f);
+  c[ImGuiCol_Border] = alpha(white, 0.08f);
+  c[ImGuiCol_BorderShadow] = ImVec4(0, 0, 0, 0);
+  c[ImGuiCol_FrameBg] = fr;
+  c[ImGuiCol_FrameBgHovered] = mix(fr, white, 0.07f);
+  c[ImGuiCol_FrameBgActive] = mix(fr, ac, 0.25f);
+  c[ImGuiCol_TitleBg] = t.tab;
+  c[ImGuiCol_TitleBgActive] = t.tab;
+  c[ImGuiCol_TitleBgCollapsed] = t.tab;
+  c[ImGuiCol_MenuBarBg] = t.tab;
+  c[ImGuiCol_ScrollbarBg] = ImVec4(0, 0, 0, 0);
+  c[ImGuiCol_ScrollbarGrab] = alpha(white, 0.12f);
+  c[ImGuiCol_ScrollbarGrabHovered] = alpha(white, 0.2f);
+  c[ImGuiCol_ScrollbarGrabActive] = alpha(ac, 0.8f);
+  c[ImGuiCol_CheckMark] = mix(ac, white, 0.2f);
+  c[ImGuiCol_SliderGrab] = ac;
+  c[ImGuiCol_SliderGrabActive] = mix(ac, white, 0.25f);
+  c[ImGuiCol_Button] = mix(fr, white, 0.05f);
+  c[ImGuiCol_ButtonHovered] = mix(fr, ac, 0.45f);
+  c[ImGuiCol_ButtonActive] = mix(fr, ac, 0.75f);
+  c[ImGuiCol_Header] = alpha(ac, 0.3f);
+  c[ImGuiCol_HeaderHovered] = alpha(ac, 0.45f);
+  c[ImGuiCol_HeaderActive] = alpha(ac, 0.65f);
+  c[ImGuiCol_Separator] = alpha(white, 0.08f);
+  c[ImGuiCol_SeparatorHovered] = alpha(ac, 0.6f);
+  c[ImGuiCol_SeparatorActive] = ac;
+  c[ImGuiCol_ResizeGrip] = alpha(white, 0.05f);
+  c[ImGuiCol_ResizeGripHovered] = alpha(ac, 0.5f);
+  c[ImGuiCol_ResizeGripActive] = ac;
+  c[ImGuiCol_Tab] = t.tab;
+  c[ImGuiCol_TabHovered] = mix(t.tabSelected, ac, 0.35f);
+  c[ImGuiCol_TabSelected] = mix(t.tabSelected, white, 0.12f);
+  c[ImGuiCol_TabSelectedOverline] = ac;
+  c[ImGuiCol_TabDimmed] = t.tab;
+  c[ImGuiCol_TabDimmedSelected] = mix(t.tabSelected, white, 0.03f);
+  c[ImGuiCol_TabDimmedSelectedOverline] = alpha(ac, 0.35f);
+  c[ImGuiCol_DockingPreview] = alpha(ac, 0.6f);
+  c[ImGuiCol_DockingEmptyBg] = mix(bg, black, 0.3f);
+  c[ImGuiCol_PlotLines] = ac;
+  c[ImGuiCol_PlotLinesHovered] = mix(ac, white, 0.3f);
+  c[ImGuiCol_PlotHistogram] = ac;
+  c[ImGuiCol_PlotHistogramHovered] = mix(ac, white, 0.3f);
+  c[ImGuiCol_TableHeaderBg] = mix(bg, white, 0.04f);
+  c[ImGuiCol_TableBorderStrong] = alpha(white, 0.1f);
+  c[ImGuiCol_TableBorderLight] = alpha(white, 0.05f);
+  c[ImGuiCol_TableRowBg] = ImVec4(0, 0, 0, 0);
+  c[ImGuiCol_TableRowBgAlt] = alpha(white, 0.025f);
+  c[ImGuiCol_TextLink] = mix(ac, white, 0.3f);
+  c[ImGuiCol_TextSelectedBg] = alpha(ac, 0.35f);
+  c[ImGuiCol_DragDropTarget] = mix(ac, white, 0.3f);
+  c[ImGuiCol_NavCursor] = ac;
+  c[ImGuiCol_ModalWindowDimBg] = ImVec4(0, 0, 0, 0.5f);
+}
+
+}  // namespace
+
 void setTheme(int index) {
   current = std::clamp(index, 0, THEME_COUNT - 1);
   const Theme& t = THEMES[current];
   ImGuiStyle& style = ImGui::GetStyle();
   style = ImGuiStyle();  // sizes from scratch, so the scale doesn't add up
   ImGui::StyleColorsDark();
+  if (t.modern) {
+    modernStyle(t, style);
+    if (uiScale != 1.0f) style.ScaleAllSizes(uiScale);
+    return;
+  }
   style.WindowRounding = t.rounding;
   style.FrameRounding = t.rounding * 0.75f;
   style.TabRounding = t.rounding;

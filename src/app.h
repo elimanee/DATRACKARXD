@@ -236,19 +236,33 @@ class App {
   float moduleHold_ = 1.0f;
   std::string exportReport_;  // what the last module export couldn't convert
   bool showExportReport_ = false;
-  // Sample browser.
+  // Browser panel: folders with songs, instrument presets and sounds, to
+  // hear and drag into the project.
   struct BrowserEntry {
     std::string name;
     bool dir;
   };
-  bool showBrowser_ = false, browserAutoplay_ = true, browserScrollTo_ = false;
-  std::string browseDir_, browserScanned_, browserSel_, browserError_;
-  std::vector<BrowserEntry> browserEntries_;
-  std::shared_ptr<Sample> browserSample_;
+  bool showBrowser_ = true, browserAutoplay_ = true, browserScrollTo_ = false;
+  std::string browserSel_, browserError_;  // the selected file (full path)
+  std::shared_ptr<Sample> browserSample_;  // decoded when it is a sound
   char browserFilter_[64] = {};
-  void sampleBrowserWindow();
-  void browserScan();
-  void browserSelect(const std::string& name, bool play);
+  std::vector<std::string> places_;  // folders pinned by the user
+  std::map<std::string, std::vector<BrowserEntry>> browserCache_;
+  std::vector<std::string> browserVisible_;  // sounds in display order, for the arrow keys
+  void browserWindow();
+  void browserFolder(const std::string& dir);
+  void browserFile(const std::string& path);
+  void browserSection(const char* icon, const char* label, const std::string& dir, bool open, bool place);
+  const std::vector<BrowserEntry>& browserList(const std::string& dir);
+  void browserSelect(const std::string& path, bool play);
+  void browserPreview();
+  // What a file from the browser does where it lands.
+  enum class DropTarget { Instruments, Samples, Song };
+  bool acceptFileDrop(std::string& path);  // a file dragged onto the current window
+  void useFile(const std::string& path, DropTarget target);
+  int addSampleFile(const std::string& path);  // -1 on failure (status set)
+  void newInstrumentFromSample(int sample);
+  void sampleToPad(int sample, int pad);
   // Video export: options, then the file, then frames a few at a time.
   VideoOptions videoOpt_;
   int videoRes_ = 1;
@@ -286,6 +300,11 @@ class App {
   std::vector<std::string> audioDevices_;
   float uiScale_ = 1.0f;
   bool fontDirty_ = true;
+  bool modernFont_ = true;  // Roboto + Cousine, or the classic pixel font
+  // Bumped when the default window layout changes, so it replaces the saved one once.
+  static constexpr int LAYOUT_VERSION = 2;
+  int layoutVersion_ = 0;
+  int focusDefaultTabs_ = 0;  // frames until the default tabs are brought forward
   int language_ = 0;         // 0 English, 1 French
   int autosaveMinutes_ = 2;  // 0 = off
   static constexpr size_t MAX_RECENT = 10;
@@ -307,6 +326,12 @@ class App {
   // app.cpp
   void setStatus(const std::string& s);
   void menuBar();
+  void transportBar();
+  void statusBar();
+  float playTime_ = 0;  // seconds since Play, for the transport display
+  bool wasPlaying_ = false;
+  float vuLevel_ = 0, vuPeak_ = 0;
+  double vuPeakTime_ = 0;
   void handleKeys();
   void globalShortcut(const KeyEvent& ev);
   bool runAction(Action a, bool inPattern);

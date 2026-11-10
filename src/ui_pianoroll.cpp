@@ -9,6 +9,8 @@
 #include <cstdio>
 
 #include "app.h"
+#include "ui_widgets.h"
+#include "icons.h"
 #include "theory.h"
 #include "i18n.h"
 #include "theme.h"
@@ -163,7 +165,7 @@ bool isBlack(int note) {
 void App::pianoRollWindow() {
   // First time ever (no saved layout for it): open as a tab next to Pattern.
   if (patternDockId_) ImGui::SetNextWindowDockID(patternDockId_, ImGuiCond_FirstUseEver);
-  if (!ImGui::Begin(TW("Piano roll").c_str(), &showPianoRoll_)) {
+  if (!ImGui::Begin(withIcon(ICON_KEYBOARD, TW("Piano roll")).c_str(), &showPianoRoll_)) {
     ImGui::End();
     return;
   }
@@ -889,5 +891,8 @@ void App::pianoRollWindow() {
 
   // Cursor feedback.
   if (inGrid && prDrag_ == PRDrag::None) ImGui::SetMouseCursor(hoverEdge ? ImGuiMouseCursor_ResizeEW : hoverNote >= 0 ? ImGuiMouseCursor_Hand : ImGuiMouseCursor_Arrow);
+  // Files dragged from the browser.
+  std::string dropped;
+  if (acceptFileDrop(dropped)) useFile(dropped, DropTarget::Song);
   ImGui::End();
 }
