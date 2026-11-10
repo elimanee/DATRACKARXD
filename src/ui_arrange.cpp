@@ -7,6 +7,8 @@
 #include <cstdio>
 
 #include "app.h"
+#include "ui_widgets.h"
+#include "icons.h"
 #include "i18n.h"
 #include "theme.h"
 
@@ -174,7 +176,7 @@ float App::laneDefault(const AutomationLane& lane) const {
 // ---------------------------------------------------------------------------
 
 void App::arrangementWindow() {
-  if (!ImGui::Begin(TW("Arrangement").c_str(), &showArrangement_)) {
+  if (!ImGui::Begin(withIcon(ICON_TIMELINE, TW("Arrangement")).c_str(), &showArrangement_)) {
     ImGui::End();
     return;
   }
@@ -491,6 +493,9 @@ void App::arrangementWindow() {
   ImGui::EndChild();
 
   automationEditor(orderW, leftW, playPos);
+  // Files dragged from the browser.
+  std::string dropped;
+  if (acceptFileDrop(dropped)) useFile(dropped, DropTarget::Song);
   ImGui::End();
 }
 

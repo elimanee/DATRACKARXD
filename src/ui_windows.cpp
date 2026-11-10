@@ -11,6 +11,9 @@
 #include <sstream>
 
 #include "app.h"
+#include "ui_fonts.h"
+#include "ui_widgets.h"
+#include "icons.h"
 #include "i18n.h"
 #include "player.h"
 #include "theme.h"
@@ -24,7 +27,7 @@ static const char* trChoices(const char* items) {
 }
 
 void App::ordersWindow() {
-  if (!ImGui::Begin(TW("Orders").c_str(), &showOrders_)) {
+  if (!ImGui::Begin(withIcon(ICON_LIST, TW("Orders")).c_str(), &showOrders_)) {
     ImGui::End();
     return;
   }
@@ -34,23 +37,24 @@ void App::ordersWindow() {
   bool changed = false;
 
   // Order list operations.
-  if (ImGui::Button("+") && numOrders < MAX_ORDERS) orderInsertNew(curOrder_ + 1);
-  if (ImGui::IsItemHovered()) ImGui::SetTooltip("%s", T("Add an order with new empty patterns"));
+  if (iconButton("ordadd", ICON_PLUS, nullptr, false, ImVec2(0, 0), T("Add an order with new empty patterns")) && numOrders < MAX_ORDERS)
+    orderInsertNew(curOrder_ + 1);
   ImGui::SameLine();
-  if (ImGui::Button(T("Dup")) && numOrders < MAX_ORDERS) orderDuplicate(curOrder_, curOrder_);
-  if (ImGui::IsItemHovered()) ImGui::SetTooltip("%s", T("Duplicate this order (same patterns)"));
+  if (iconButton("orddup", ICON_COPY, nullptr, false, ImVec2(0, 0), T("Duplicate this order (same patterns)")) && numOrders < MAX_ORDERS)
+    orderDuplicate(curOrder_, curOrder_);
   ImGui::SameLine();
-  if (ImGui::Button(T("Clone")) && numOrders < MAX_ORDERS) orderClone(curOrder_);
-  if (ImGui::IsItemHovered()) ImGui::SetTooltip("%s", T("Copy this order into new patterns"));
+  if (iconButton("ordclone", ICON_CLONE, nullptr, false, ImVec2(0, 0), T("Copy this order into new patterns")) && numOrders < MAX_ORDERS)
+    orderClone(curOrder_);
   ImGui::SameLine();
-  if (ImGui::Button(T("Del")) && numOrders > 1) orderDelete(curOrder_, curOrder_);
+  if (iconButton("orddel", ICON_TRASH, nullptr, false, ImVec2(0, 0), T("Delete this order")) && numOrders > 1)
+    orderDelete(curOrder_, curOrder_);
   ImGui::SameLine();
-  if (ImGui::ArrowButton("up", ImGuiDir_Up) && curOrder_ > 0) {
+  if (iconButton("ordup", ICON_UP, nullptr, false, ImVec2(0, 0), T("Move this order up")) && curOrder_ > 0) {
     orderSwap(curOrder_, curOrder_ - 1);
     curOrder_--;
   }
   ImGui::SameLine();
-  if (ImGui::ArrowButton("down", ImGuiDir_Down) && curOrder_ < (int)song_.orders.size() - 1) {
+  if (iconButton("orddown", ICON_DOWN, nullptr, false, ImVec2(0, 0), T("Move this order down")) && curOrder_ < (int)song_.orders.size() - 1) {
     orderSwap(curOrder_, curOrder_ + 1);
     curOrder_++;
   }
@@ -122,7 +126,7 @@ void App::ordersWindow() {
 }
 
 void App::songWindow() {
-  if (!ImGui::Begin(TW("Song").c_str(), &showSong_)) {
+  if (!ImGui::Begin(withIcon(ICON_SONG, TW("Song")).c_str(), &showSong_)) {
     ImGui::End();
     return;
   }
@@ -281,7 +285,7 @@ void App::songWindow() {
 
 // Master effects and the per-channel levels and sends.
 void App::mixerWindow() {
-  if (!ImGui::Begin(TW("Mixer").c_str(), &showMixer_)) {
+  if (!ImGui::Begin(withIcon(ICON_SLIDERS, TW("Mixer")).c_str(), &showMixer_)) {
     ImGui::End();
     return;
   }
@@ -424,7 +428,7 @@ void App::mixerWindow() {
 
 // The insert effects of one channel, in processing order.
 void App::channelFxWindow() {
-  if (!ImGui::Begin(TW("Channel FX").c_str(), &showChanFx_)) {
+  if (!ImGui::Begin(withIcon(ICON_FX, TW("Channel FX")).c_str(), &showChanFx_)) {
     ImGui::End();
     return;
   }
@@ -526,7 +530,7 @@ void App::channelFxWindow() {
 }
 
 void App::scopeWindow() {
-  if (!ImGui::Begin(TW("Oscilloscope").c_str(), &showScope_)) {
+  if (!ImGui::Begin(withIcon(ICON_SCOPE, TW("Oscilloscope")).c_str(), &showScope_)) {
     ImGui::End();
     return;
   }
@@ -567,7 +571,7 @@ void App::scopeWindow() {
 
 // Keygen-style intro screen (the same scene as the exported players).
 void App::scrollerWindow() {
-  if (!ImGui::Begin(TW("Keygen").c_str(), &showScroller_)) {
+  if (!ImGui::Begin(withIcon(ICON_STAR, TW("Keygen")).c_str(), &showScroller_)) {
     ImGui::End();
     return;
   }
@@ -584,13 +588,15 @@ void App::scrollerWindow() {
           "GREETINGS TO ALL TRACKER MUSICIANS, DEMOSCENERS AND FURNACE USERS   ***   ");
   keygen_.scroll = text;
   channelLevels(*engine_, song_.channelCount(), keygen_.levels);
+  ImGui::PushFont(uiFonts().pixel);  // the keygen look keeps its pixel font
   keygen_.draw(ImGui::GetWindowDrawList(), p0, size, (float)ImGui::GetTime(), ImGui::GetIO().DeltaTime, peak);
+  ImGui::PopFont();
   ImGui::Dummy(size);
   ImGui::End();
 }
 
 void App::effectsHelp() {
-  if (!ImGui::Begin(TW("Effects").c_str(), &showEffects_)) {
+  if (!ImGui::Begin(withIcon(ICON_FX, TW("Effects")).c_str(), &showEffects_)) {
     ImGui::End();
     return;
   }
@@ -643,7 +649,7 @@ void App::effectsHelp() {
 }
 
 void App::keysHelp() {
-  if (!ImGui::Begin(TW("Keyboard").c_str(), &showKeys_)) {
+  if (!ImGui::Begin(withIcon(ICON_KEYBOARD, TW("Keyboard")).c_str(), &showKeys_)) {
     ImGui::End();
     return;
   }
@@ -692,7 +698,7 @@ void App::keysHelp() {
 
 void App::aboutWindow() {
   ImGui::SetNextWindowSize(ImVec2(S(380), 0), ImGuiCond_Appearing);
-  if (ImGui::Begin(TW("About").c_str(), &showAbout_, ImGuiWindowFlags_NoDocking)) {
+  if (ImGui::Begin(withIcon(ICON_INFO, TW("About")).c_str(), &showAbout_, ImGuiWindowFlags_NoDocking)) {
     ImGui::Text(T("DATRACKARXD %s"), DATRACKARXD_VERSION);
     ImGui::TextWrapped("%s", T("A small tracker in the spirit of Furnace: chip waves (pulse, triangle, saw, noise, sine, "
                        "wavetable), 4-operator FM, SID-style filter, ring mod and sync, and samples, with Furnace-style "

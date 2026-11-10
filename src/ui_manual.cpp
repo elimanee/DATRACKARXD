@@ -10,6 +10,8 @@
 #include <vector>
 
 #include "app.h"
+#include "ui_widgets.h"
+#include "icons.h"
 #include "i18n.h"
 #include "theme.h"
 
@@ -254,7 +256,7 @@ void renderSection(const Section& sec) {
 
 void App::manualWindow() {
   ImGui::SetNextWindowSize(ImVec2(S(900), S(620)), ImGuiCond_FirstUseEver);
-  if (!ImGui::Begin(TW("Manual").c_str(), &showManual_)) {
+  if (!ImGui::Begin(withIcon(ICON_BOOK, TW("Manual")).c_str(), &showManual_)) {
     ImGui::End();
     return;
   }

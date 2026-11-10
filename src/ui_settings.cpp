@@ -11,6 +11,8 @@
 #include <sstream>
 
 #include "app.h"
+#include "ui_widgets.h"
+#include "icons.h"
 #include "audiofile.h"
 #include "i18n.h"
 #include "import.h"
@@ -191,7 +193,7 @@ void App::dropFile(const std::string& path) {
 
 void App::settingsWindow() {
   ImGui::SetNextWindowSize(ImVec2(S(620), S(520)), ImGuiCond_FirstUseEver);
-  if (!ImGui::Begin(TW("Settings").c_str(), &showSettings_)) {
+  if (!ImGui::Begin(withIcon(ICON_GEAR, TW("Settings")).c_str(), &showSettings_)) {
     ImGui::End();
     capturing_ = -1;
     return;
@@ -279,6 +281,12 @@ void App::settingsWindow() {
       for (int i = 0; i < THEME_COUNT; i++)
         if (ImGui::Selectable(THEMES[i].name, i == th)) setTheme(i);
       ImGui::EndCombo();
+    }
+    int font = modernFont_ ? 0 : 1;
+    ImGui::SetNextItemWidth(S(220));
+    if (ImGui::Combo(T("Font"), &font, TC("Modern (Roboto)\0Pixel (classic)\0"))) {
+      modernFont_ = font == 0;
+      fontDirty_ = true;
     }
     ImGui::EndTabItem();
   }

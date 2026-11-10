@@ -13,14 +13,16 @@ struct Theme {
   // ImGui widgets.
   ImVec4 windowBg, titleActive, tab, tabSelected, accent, frame, text;
   float rounding;
+  bool modern = false;  // roomier spacing, softer corners, flat buttons
 };
 
-constexpr int THEME_COUNT = 4;
+constexpr int THEME_COUNT = 6;
 extern const Theme THEMES[THEME_COUNT];
 
 const Theme& theme();
 int themeIndex();
 void setTheme(int index);  // also restyles ImGui
+int themeByName(const char* name);  // -1 if unknown
 // Interface scale: widget sizes follow it (the font is the caller's job).
 float themeScale();
 void setThemeScale(float scale);

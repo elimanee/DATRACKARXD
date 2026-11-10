@@ -7,6 +7,9 @@
 #include <sstream>
 
 #include "app.h"
+#include "ui_widgets.h"
+#include "icons.h"
+#include "audiofile.h"
 #include "i18n.h"
 #include "theme.h"
 #include "chips.h"
@@ -111,12 +114,12 @@ const char* trItem(void* items, int i) { return T(((const char* const*)items)[i]
 }  // namespace
 
 void App::instrumentsWindow() {
-  if (!ImGui::Begin(TW("Instruments").c_str(), &showInstruments_)) {
+  if (!ImGui::Begin(withIcon(ICON_PIANO, TW("Instruments")).c_str(), &showInstruments_)) {
     ImGui::End();
     return;
   }
   int n = (int)song_.instruments.size();
-  if (ImGui::Button(T("Add")) && n < MAX_INSTRUMENTS) {
+  if (iconButton("insadd", ICON_PLUS, T("Add")) && n < MAX_INSTRUMENTS) {
     Instrument ins;
     ins.name = "Instrument " + std::to_string(n);
     song_.instruments.push_back(ins);
@@ -125,7 +128,7 @@ void App::instrumentsWindow() {
     metaTouched_ = true;
   }
   ImGui::SameLine();
-  if (ImGui::Button(T("Duplicate")) && n < MAX_INSTRUMENTS && curIns_ < n) {
+  if (iconButton("insdup", ICON_COPY, T("Duplicate")) && n < MAX_INSTRUMENTS && curIns_ < n) {
     Instrument copy = song_.instruments[curIns_];
     copy.name += " copy";
     song_.instruments.push_back(copy);
@@ -134,7 +137,7 @@ void App::instrumentsWindow() {
     metaTouched_ = true;
   }
   ImGui::SameLine();
-  if (ImGui::Button(T("Delete")) && n > 1 && curIns_ < n) {
+  if (iconButton("insdel", ICON_TRASH, T("Delete")) && n > 1 && curIns_ < n) {
     pushFullUndo();  // instrument numbers in the patterns change too
     int del = curIns_;
     song_.instruments.erase(song_.instruments.begin() + del);
@@ -148,10 +151,10 @@ void App::instrumentsWindow() {
     curIns_ = std::min(del, (int)song_.instruments.size() - 1);
     dirty_ = true;
   }
-  if (ImGui::Button(T("Load..."))) openFileDialog(FileDialogMode::LoadInstrument);
+  if (iconButton("insload", ICON_OPEN, T("Load..."))) openFileDialog(FileDialogMode::LoadInstrument);
   if (ImGui::IsItemHovered()) ImGui::SetTooltip("%s", T("Add an instrument from a .dti preset, a Furnace .fui or a .wav"));
   ImGui::SameLine();
-  if (ImGui::Button(T("Save...")) && curIns_ < n) openFileDialog(FileDialogMode::SaveInstrument);
+  if (iconButton("inssave", ICON_SAVE, T("Save...")) && curIns_ < n) openFileDialog(FileDialogMode::SaveInstrument);
   if (ImGui::IsItemHovered()) ImGui::SetTooltip("%s", T("Save the selected instrument as a .dti preset"));
   ImGui::BeginChild("list");
   for (int i = 0; i < (int)song_.instruments.size(); i++) {
@@ -169,6 +172,9 @@ void App::instrumentsWindow() {
     }
   }
   ImGui::EndChild();
+  // Files dragged from the browser.
+  std::string dropped;
+  if (acceptFileDrop(dropped)) useFile(dropped, DropTarget::Instruments);
   ImGui::End();
 }
 
@@ -580,6 +586,18 @@ bool App::kitPads(Instrument& ins) {
         ImGui::PopStyleColor();
       }
       ImGui::PopStyleColor();
+      // A sound dragged from the browser lands on this pad.
+      if (ImGui::BeginDragDropTarget()) {
+        if (const ImGuiPayload* p = ImGui::AcceptDragDropPayload("DT_FILE")) {
+          std::string path((const char*)p->Data, (size_t)p->DataSize);
+          kitPad_ = note;
+          if (isAudioFile(path)) {
+            int s = addSampleFile(path);
+            if (s >= 0) sampleToPad(s, note);
+          }
+        }
+        ImGui::EndDragDropTarget();
+      }
       if (ImGui::IsItemClicked(ImGuiMouseButton_Right)) kitPad_ = note;
       if (ImGui::BeginPopupContextItem()) {
         ImGui::TextDisabled("%s %s", T("Pad"), noteName(note).c_str());
@@ -1122,7 +1140,7 @@ bool App::morphEditor(Instrument& ins) {
 }
 
 void App::instrumentEditor() {
-  if (!ImGui::Begin(TW("Instrument editor").c_str(), &showInsEditor_)) {
+  if (!ImGui::Begin(withIcon(ICON_SLIDERS, TW("Instrument editor")).c_str(), &showInsEditor_)) {
     ImGui::End();
     return;
   }
@@ -1522,19 +1540,19 @@ void App::sampleEditor(Sample& smp) {
 }
 
 void App::samplesWindow() {
-  if (!ImGui::Begin(TW("Samples").c_str(), &showSamples_)) {
+  if (!ImGui::Begin(withIcon(ICON_WAVE, TW("Samples")).c_str(), &showSamples_)) {
     ImGui::End();
     return;
   }
   bool changed = false;
-  if (ImGui::Button(T("Load sample..."))) {
+  if (iconButton("smpload", ICON_OPEN, T("Load sample..."))) {
     loadSampleIntoIns_ = -1;
     loadSampleIntoPad_ = -1;
     openFileDialog(FileDialogMode::LoadSample);
   }
   ImGui::SameLine();
   int n = (int)song_.samples.size();
-  if (ImGui::Button(T("Delete")) && curSample_ >= 0 && curSample_ < n) {
+  if (iconButton("smpdel", ICON_TRASH, T("Delete")) && curSample_ >= 0 && curSample_ < n) {
     pushFullUndo();
     int del = curSample_;
     song_.samples.erase(song_.samples.begin() + del);
@@ -1625,5 +1643,8 @@ void App::samplesWindow() {
     dirty_ = true;
     metaTouched_ = true;
   }
+  // Files dragged from the browser.
+  std::string dropped;
+  if (acceptFileDrop(dropped)) useFile(dropped, DropTarget::Samples);
   ImGui::End();
 }

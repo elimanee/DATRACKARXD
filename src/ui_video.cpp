@@ -6,6 +6,7 @@
 #include <cstdio>
 
 #include "app.h"
+#include "ui_fonts.h"
 #include "i18n.h"
 #include "theme.h"
 
@@ -81,8 +82,10 @@ void App::videoProgress() {
   if (!ImGui::BeginPopupModal(title.c_str(), nullptr, ImGuiWindowFlags_AlwaysAutoResize)) return;
   // As many frames as fit in about 30 ms, then let the window redraw.
   Uint64 start = SDL_GetTicks64();
+  ImGui::PushFont(uiFonts().pixel);  // the same picture as from the command line
   while (video_->step(1) && SDL_GetTicks64() - start < 30) {
   }
+  ImGui::PopFont();
   ImGui::TextUnformatted(videoPath_.c_str());
   char pct[32];
   std::snprintf(pct, sizeof(pct), "%d%%", (int)(video_->progress() * 100));
